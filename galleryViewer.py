@@ -3,8 +3,7 @@ CTC viewer for Napari
 Started on 6/7/22
 Peter Richieri
 '''
-from cProfile import label
-from tabnanny import check
+
 import tifffile
 import napari
 from napari.types import ImageData
@@ -15,18 +14,22 @@ import skimage.filters
 import gc # might garbage collect later
 import math
 
-
+#-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------#
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
 cell_colors = ['bop orange', 'bop purple' , 'green', 'blue', 'yellow','cyan', 'red', 'twilight']
 qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
+OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
 OFFSET = 100 # microns or pixels?
-CELL_START = 100
-CELL_LIMIT = 150
-DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
-CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF"]
-CHANNELS = [DAPI, OPAL570, OPAL690, OPAL480, OPAL620, OPAL780, OPAL520, AF]
+# CELL_START = 100
+CELL_LIMIT = 15
+PHENOTYPE = 'Tumor'
+DAPI = 0; OPAL480 = 1; OPAL520 = 2; OPAL570 = 3; OPAL620 = 4; OPAL690 = 5; OPAL780 = 6; AF=7
+# CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF"]
+CHANNELS_STR = ["DAPI", "OPAL520", "OPAL690", "AF"]
+# CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690, OPAL780, AF]
+CHANNELS = [DAPI, OPAL520,OPAL690, AF]
 ADJUSTED = CHANNELS
-viewer = napari.Viewer(title='CTC Gallery')
+VIEWER = None
 
 # Probably won't be used - both image and object data use same units in my example
 def map_coords(array_shape, cellx,celly):
@@ -62,28 +65,32 @@ def adjust_gamma(viewer, gamma):
         if validate_adjustment(ctclayer):
             ctclayer.gamma = gamma
 
+
 @magicgui(auto_call=True,
         gamma={"widget_type": "FloatSlider", "max":1.0},
         layout = 'horizontal')
 def adjust_gamma_widget(gamma: float = 0.5) -> ImageData:
-    adjust_gamma(viewer,gamma)
+    adjust_gamma(VIEWER,gamma)
 
 @magicgui(auto_call=True,
         white_in={"widget_type": "FloatSlider", "max":255, "label": "White-in"},
         layout = 'horizontal')
 def adjust_whitein(white_in: float = 255) -> ImageData:
-    for ctclayer in viewer.layers:
-        ctclayer.contrast_limits = (ctclayer.contrast_limits[0], white_in)
+    for ctclayer in VIEWER.layers:
+        if validate_adjustment(ctclayer):
+            ctclayer.contrast_limits = (ctclayer.contrast_limits[0], white_in)
 
 @magicgui(auto_call=True,
         black_in={"widget_type": "FloatSlider", "max":255, "label":"Black-in"},
         layout = 'horizontal')
 def adjust_blackin(black_in: float = 0) -> ImageData:
-    for ctclayer in viewer.layers:
-        ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
+    for ctclayer in VIEWER.layers:
+        if validate_adjustment(ctclayer):
+            print(ctclayer.contrast_limits)
+            ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
 
+# Called in a loop to create as many GUI elements as needed
 def dynamic_checkbox_creator(checkbox_name):
-    print(f"\n LOOK here I'm trying to create {checkbox_name} . {checkbox_name in CHANNELS_STR}")
     @magicgui(auto_call=True,
             check={"widget_type": "CheckBox", "text": checkbox_name},
             layout = 'horizontal')
@@ -94,18 +101,11 @@ def dynamic_checkbox_creator(checkbox_name):
             ADJUSTED.remove(globals()[checkbox_name])
     return myfunc
 
+# Execution loop - need to call it here to get the names into the namespace
 for checkbox_name in CHANNELS_STR:   
-    exec(f'{checkbox_name+"_box"} = dynamic_checkbox_creator(checkbox_name)')
-print(f'dir is {dir()}')
+    exec(f'{checkbox_name+"_box"} = dynamic_checkbox_creator(checkbox_name)') # If doing this is wrong I don't want to be right
+# print(f'dir is {dir()}')
 
-# @magicgui(auto_call=True,
-#         check={"widget_type": "CheckBox", "text": "DAPI"},
-#         layout = 'horizontal')
-# def check_test(check: bool = True):
-#     if check:
-#         ADJUSTED.append(globals()['DAPI'])
-#     else:
-#         ADJUSTED.remove(globals()['DAPI'])
 #------------------------- Image loading and processing functions ---------------------#
 
 #TODO consider combining numpy arrays before adding layers? So that we create ONE image, and have ONE layer
@@ -131,7 +131,6 @@ def add_layers(viewer,pyramid, cells, offset):
         for i in range(pyramid.shape[2]): # loop through channels
             if i in CHANNELS:
                 # name cell layer
-                print(f'########## i is {i}, type is {type(i)} . DAPI {DAPI}')
                 if i==DAPI: fluor='DAPI'
                 elif i==OPAL570: fluor='570'
                 elif i==OPAL690: fluor='690' 
@@ -143,7 +142,30 @@ def add_layers(viewer,pyramid, cells, offset):
                 cell_name = f'Cell {cell_id} {fluor}'
                 # print(f'Adding cell {cell_x},{cell_y} - layer {i}')
                 add_layer(viewer,pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i], cell_name, cell_colors[i])
+                # if len(cells) == 5 and i ==0 :
+                #     np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\np_array_for_dapi.txt", pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i])
+                #     # print(pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i][0])
     return True
+
+''' Reset globals and proceed to main '''
+def GUI_execute(userInfo):
+    global cell_colors; global qptiff; global OFFSET; global CELL_LIMIT; global CHANNELS_STR
+    global CHANNELS; global ADJUSTED; global DAPI; global OPAL480; global OPAL520; global OPAL570
+    global OPAL620; global OPAL690; global OPAL780; global AF; global OBJECT_DATA; global PHENOTYPE
+
+    cell_colors = userInfo.cell_colors
+    qptiff = userInfo.qptiff
+    OFFSET = userInfo.offset
+    PHENOTYPE = userInfo.phenotype
+    CELL_LIMIT = userInfo.cell_count
+    OBJECT_DATA = userInfo.objectData
+    CHANNELS_STR = userInfo.channels
+    CHANNELS = []
+    for pos,chn in enumerate(CHANNELS_STR):
+        exec(f'{chn} = {pos}')
+        exec(f'CHANNELS.append({chn})')
+    ADJUSTED = CHANNELS
+    main()
 
 def main():
     with tifffile.Timer(f'\nLoading pyramid from {qptiff}...\n'):
@@ -166,7 +188,6 @@ def main():
         # Added this because the high quality layer of my sample QPTIFF data seemed to be flipped
         # i.e. array looks like (channels, y, x)
         # to be seen if this actually works
-        #TODO
         pyramid = np.transpose(pyramid,(2,1,0))
         # print(f'FLIPPED SHAPE is {pyramid.shape}\n')
         firstLayer = pyramid[:,:,0]
@@ -175,9 +196,10 @@ def main():
     print(f'Single layer shape is {firstLayer.shape}\n')
 
     # Get object data from csv and parse.
-    halo_export = pd.read_csv(r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv")
-    halo_export = halo_export.loc[CELL_START:CELL_LIMIT, ["Object Id", "XMin","XMax","YMin", "YMax", "Tumor"]]
-    halo_export = halo_export[halo_export['Tumor']==1]
+    halo_export = pd.read_csv(OBJECT_DATA)
+    halo_export = halo_export.loc[:, ["Object Id", "XMin","XMax","YMin", "YMax", PHENOTYPE]]
+    halo_export = halo_export[halo_export[PHENOTYPE]==1]
+    halo_export = halo_export[:CELL_LIMIT] # pare down cell list to desired length
     tumor_cell_XYs = []
     for index,row in halo_export.iterrows():
         center_x = int((row['XMax']+row['XMin'])/2)
@@ -192,18 +214,20 @@ def main():
     sample_cell_dict['slidewidth'] = pyramid.shape[0]
     sample_cell_dict['slidelength'] = pyramid.shape[1]
     
+    viewer = napari.Viewer(title='CTC Gallery')
     add_layers(viewer,pyramid,tumor_cell_XYs, int(OFFSET/2))
-
-
+    # global VIEWER
+    # VIEWER = viewer
     viewer.grid.enabled = True
+    viewer.grid.shape = (CELL_LIMIT, len(CHANNELS))
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
     
-    print(f'\n {dir()}')
+    # print(f'\n {dir()}')
     # viewer.window.add_dock_widget(check_test, area = 'bottom')
-    for marker_function in (DAPI_box, OPAL570_box, OPAL690_box, OPAL480_box, OPAL620_box, OPAL780_box, OPAL520_box, AF_box):
-        viewer.window.add_dock_widget(marker_function, area='bottom')
+    for marker_function in CHANNELS_STR:
+        exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
     #adjust_gamma(viewer,0.5)
 
     napari.run()
@@ -212,5 +236,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
