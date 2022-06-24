@@ -24,11 +24,13 @@ OFFSET = 100 # microns or pixels?
 CELL_LIMIT = 15
 PHENOTYPE = 'Tumor'
 DAPI = 0; OPAL480 = 1; OPAL520 = 2; OPAL570 = 3; OPAL620 = 4; OPAL690 = 5; OPAL780 = 6; AF=7
-# CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF"]
-CHANNELS_STR = ["DAPI", "OPAL520", "OPAL690", "AF"]
-# CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690, OPAL780, AF]
-CHANNELS = [DAPI, OPAL520,OPAL690, AF]
+# DAPI = None; OPAL480 = None; OPAL520 = None; OPAL570 = None; OPAL620 = None; OPAL690 = None; OPAL780 = None; AF=None
+CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF"]
+# CHANNELS_STR = ["DAPI", "OPAL520", "OPAL690", "AF"]
+CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690, OPAL780, AF]
+# CHANNELS = [DAPI, OPAL520,OPAL690, AF]
 ADJUSTED = CHANNELS
+CHANNEL_ORDER = None # to save variable position data for channels (they can be in any order...)
 VIEWER = None
 
 # Probably won't be used - both image and object data use same units in my example
@@ -95,6 +97,7 @@ def dynamic_checkbox_creator(checkbox_name):
             check={"widget_type": "CheckBox", "text": checkbox_name},
             layout = 'horizontal')
     def myfunc(check: bool = True):
+        print(f'In check function. ADJUSTED is {ADJUSTED}, checkbox name is {checkbox_name}')
         if check:
             ADJUSTED.append(globals()[checkbox_name])
         else:
@@ -160,11 +163,17 @@ def GUI_execute(userInfo):
     CELL_LIMIT = userInfo.cell_count
     OBJECT_DATA = userInfo.objectData
     CHANNELS_STR = userInfo.channels
+    CHANNEL_ORDER = userInfo.channelOrder
     CHANNELS = []
-    for pos,chn in enumerate(CHANNELS_STR):
-        exec(f'{chn} = {pos}')
-        exec(f'CHANNELS.append({chn})')
+    for pos,chn in enumerate(CHANNEL_ORDER):
+        if chn in CHANNELS_STR:
+            exec(f'{chn} = {pos}')
+            exec(f'CHANNELS.append({chn})')
+    print(f'backend channels are : {CHANNELS}')
     ADJUSTED = CHANNELS
+    main()
+
+def GUI_execute_cheat(userInfo):
     main()
 
 def main():
@@ -216,8 +225,8 @@ def main():
     
     viewer = napari.Viewer(title='CTC Gallery')
     add_layers(viewer,pyramid,tumor_cell_XYs, int(OFFSET/2))
-    # global VIEWER
-    # VIEWER = viewer
+    global VIEWER
+    VIEWER = viewer
     viewer.grid.enabled = True
     viewer.grid.shape = (CELL_LIMIT, len(CHANNELS))
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')

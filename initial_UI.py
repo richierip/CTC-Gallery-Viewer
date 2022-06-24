@@ -12,7 +12,9 @@ from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDateTimeEdit,
 import sys
 import os
 import store_and_load
-from galleryViewer import GUI_execute
+from galleryViewer import GUI_execute, GUI_execute_cheat
+import ctypes
+
 
 FONT_SIZE = 12
 DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
@@ -20,8 +22,14 @@ CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "
 AVAILABLE_COLORS = ['bop orange', 'bop purple' , 'green', 'blue', 'yellow','cyan', 'red', 'twilight']
 
 class ViewerPresets(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, app, parent=None):
         super(ViewerPresets, self).__init__(parent)
+
+        self.app = app
+        # Arrange title bar buttons
+        self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowTitleHint,False)
 
         self.userInfo = store_and_load.loadObject('data/presets')
         self.checkUser()
@@ -33,7 +41,7 @@ class ViewerPresets(QDialog):
         cc_logo = QLabel()
         pixmap = QPixmap('data/mgh-mgb-cc-logo2 (Custom).png')
         cc_logo.setPixmap(pixmap)
-        titleLabel = QLabel(f"Cool App Name {chr(8482)}")
+        titleLabel = QLabel(f"Cool App Name {chr(8482)} TBD")
         titleLabel.setAlignment(Qt.AlignCenter)
 
         self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
@@ -110,9 +118,12 @@ class ViewerPresets(QDialog):
         store_and_load.storeObject(self.userInfo, 'data/presets')
         # print(f'QPTIFF: {self.userInfo.qptiff}')
         # print(f'OBJECTDATA : {self.userInfo.objectData}')
-        # self.createProgressBar()
-        # self.mainLayout.addWidget(self.progressBar, 3, 0, 1, 2)
-        GUI_execute(self.userInfo)
+        print(f'CHANNELS : {self.userInfo.channels}')
+        # self.app.run(max_loop_level=2) # This isn't a thing apparently
+        # self.app.processEvents()
+        self.createProgressBar()
+        self.mainLayout.addWidget(self.progressBar, 3, 0, 1, 2)
+        GUI_execute_cheat(self.userInfo)
         # exit(0)
 
     def saveQptiff(self):
@@ -121,6 +132,8 @@ class ViewerPresets(QDialog):
         self.userInfo.objectData = os.path.normpath(self.dataEntry.text().strip('"'))
     def savePhenotype(self):
         self.userInfo.phenotype = self.phenotypeToGrab.text()
+    def saveNumCells(self):
+        self.userInfo.cell_count = self.numCellsToRead.value()
 
     def saveChannel(self):
         for button in self.mycheckbuttons:
@@ -201,9 +214,10 @@ class ViewerPresets(QDialog):
         imageSize.setRange(50,150)
 
         # explanationLabel2.setFixedWidth(20)
-        numCellsToRead = QSpinBox(self.topRightGroupBox)
-        numCellsToRead.setValue(50)
-        numCellsToRead.setRange(0,10000)
+        self.numCellsToRead = QSpinBox(self.topRightGroupBox)
+        self.numCellsToRead.setValue(50)
+        self.numCellsToRead.setRange(0,10000)
+        self.numCellsToRead.editingFinished.connect(self.saveNumCells)
         # numCellsToRead.setFixedWidth(50)
 
 
@@ -212,31 +226,35 @@ class ViewerPresets(QDialog):
         layout.addWidget(explanationLabel1,1,0)
         layout.addWidget(imageSize,1,1)
         layout.addWidget(explanationLabel2,2,0)
-        layout.addWidget(numCellsToRead,2,1)
+        layout.addWidget(self.numCellsToRead,2,1)
         layout.addWidget(explanationLabel3,2,2)
 
         # layout.addWidget(findDataButton)
         layout.rowStretch(-100)
         self.topRightGroupBox.setLayout(layout)
 
-    # def advanceProgressBar(self):
-    #     curVal = self.progressBar.value()
-    #     self.progressBar.setValue(int(curVal + 1))
-    #     # QApplication.processEvents()
+    def advanceProgressBar(self):
+        curVal = self.progressBar.value()
+        self.progressBar.setValue(int(curVal + 1))
+        # QApplication.processEvents()
 
-    # def createProgressBar(self):
-    #     size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
-    #     eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
+    def createProgressBar(self):
+        size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
+        eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
 
-    #     self.progressBar = QProgressBar()
-    #     self.progressBar.setRange(0, eta)
-    #     self.progressBar.setValue(0)
-    #     timer = QTimer(self)
-    #     timer.timeout.connect(self.advanceProgressBar)
-    #     timer.start(100)
+        self.progressBar = QProgressBar()
+        self.progressBar.setRange(0, eta)
+        self.progressBar.setValue(0)
+        timer = QTimer(self)
+        timer.timeout.connect(self.advanceProgressBar)
+        timer.start(100)
 
 
 if __name__ == '__main__':
+    # This gets python to tell Windows it is merely hosting another app
+    #   Therefore, the icon I've attached to the app before is displayed in the taskbar, instead of the python default icon. 
+    myappid = 'MGH.CellGalleryViewer.v1.0' # arbitrary string
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     app = QApplication([])
     customStyle = ""
     for elem in ["QLabel","QComboBox","QLineEdit","QPushButton","QCheckBox", "QSpinBox", "QGroupBox"]:
@@ -248,6 +266,7 @@ if __name__ == '__main__':
             exec(f'customStyle += "{elem}{{font-size: {FONT_SIZE}pt;}}"')
     app.setStyleSheet(customStyle)
     # app.setStyle('Fusion')
-    gallery = ViewerPresets()
+    gallery = ViewerPresets(app)
     gallery.show()
+    app.processEvents()
     sys.exit(app.exec())
