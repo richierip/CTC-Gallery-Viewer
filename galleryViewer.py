@@ -145,9 +145,11 @@ def add_layers(viewer,pyramid, cells, offset):
                 cell_name = f'Cell {cell_id} {fluor}'
                 # print(f'Adding cell {cell_x},{cell_y} - layer {i}')
                 add_layer(viewer,pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i], cell_name, cell_colors[i])
-                # if len(cells) == 5 and i ==0 :
-                #     np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\np_array_for_dapi.txt", pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i])
-                #     # print(pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i][0])
+                
+                
+                mymax = np.max(pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i])
+                print(f'For cell number {cell_id}, channel {i}, the max value is {mymax}')
+                # print(pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i][0])
     return True
 
 ''' Reset globals and proceed to main '''
