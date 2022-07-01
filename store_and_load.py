@@ -8,7 +8,7 @@ This file holds the user controlled information and methods to store that info p
 import pickle
 
 # QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
-CELL_COLORS = ['bop orange', 'bop purple' , 'green', 'blue', 'yellow','cyan', 'red', 'twilight']
+CELL_COLORS = ['Greys', 'Purples' , 'Blues', 'Greens', 'Oranges','Reds', 'copper', 'twilight']
 # qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
 # OFFSET = 100 # pixels?
 # CELL_START = 100
@@ -20,7 +20,7 @@ CHANNEL_ORDER = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", 
 # ADJUSTED = CHANNELS
 
 class userPresets:
-    def __init__(self, channels = CHANNELS_STR, cell_colors = CELL_COLORS, qptiff = None, objectData = None, phenotype = None, offset = 100, cell_count = 10, channelOrder = CHANNEL_ORDER):
+    def __init__(self, channels = CHANNELS_STR, cell_colors = CELL_COLORS, qptiff = None, objectData = None, phenotype = None, offset = 100, cell_count = 25, channelOrder = CHANNEL_ORDER):
         self.qptiff = qptiff
         self.objectData = objectData
         self.offset = offset

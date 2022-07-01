@@ -19,7 +19,7 @@ import ctypes
 FONT_SIZE = 12
 DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
 CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
-AVAILABLE_COLORS = ['bop orange', 'bop purple' , 'green', 'blue', 'yellow','cyan', 'red', 'twilight']
+AVAILABLE_COLORS = ['Greys', 'Purples' , 'Blues', 'Greens', 'Oranges','Reds', 'copper', 'twilight']
 
 class ViewerPresets(QDialog):
     def __init__(self, app, parent=None):
@@ -34,7 +34,7 @@ class ViewerPresets(QDialog):
         self.userInfo = store_and_load.loadObject('data/presets')
         self.checkUser()
         self.myColors = []
-        # print(f'SPinning up ... preset colors are {self.userInfo.cell_colors}')
+        # print(f'SP\pinning up ... preset colors are {self.userInfo.cell_colors}')
         self.originalPalette = QApplication.palette()
         self.setWindowIcon(QIcon('data/mghiconwhite.png'))
 
@@ -123,7 +123,7 @@ class ViewerPresets(QDialog):
         # self.app.processEvents()
         self.createProgressBar()
         self.mainLayout.addWidget(self.progressBar, 3, 0, 1, 2)
-        GUI_execute_cheat(self.userInfo)
+        GUI_execute(self.userInfo)
         # exit(0)
 
     def saveQptiff(self):
@@ -134,6 +134,8 @@ class ViewerPresets(QDialog):
         self.userInfo.phenotype = self.phenotypeToGrab.text()
     def saveNumCells(self):
         self.userInfo.cell_count = self.numCellsToRead.value()
+    def saveOffset(self):
+        self.userInfo.offset = self.imageSize.value()
 
     def saveChannel(self):
         for button in self.mycheckbuttons:
@@ -149,8 +151,8 @@ class ViewerPresets(QDialog):
     def saveColors(self):
         for colorWidget in self.myColors:
             colorChannel = colorWidget.objectName()
-            # print(f'#### Anything? {colorChannel}')
-            colorPos = CHANNELS_STR.index(colorChannel)
+            # print(f'#### Anything? {colorChannel} and {store_and_load.CHANNEL_ORDER}')
+            colorPos = store_and_load.CHANNEL_ORDER.index(colorChannel)
             self.userInfo.cell_colors.pop(colorPos)
             self.userInfo.cell_colors.insert(colorPos, colorWidget.currentText())
             
@@ -209,13 +211,15 @@ class ViewerPresets(QDialog):
         explanationLabel1 = QLabel("Grab an image of size")
         explanationLabel2 = QLabel("for the first")
         explanationLabel3 = QLabel("cells")
-        imageSize = QSpinBox(self.topRightGroupBox)
-        imageSize.setValue(100)
-        imageSize.setRange(50,150)
+
+        self.imageSize = QSpinBox(self.topRightGroupBox)
+        self.imageSize.setRange(50,150)
+        self.imageSize.setValue(self.userInfo.offset) # Misbehaving?
+        self.imageSize.editingFinished.connect(self.saveOffset)
 
         # explanationLabel2.setFixedWidth(20)
         self.numCellsToRead = QSpinBox(self.topRightGroupBox)
-        self.numCellsToRead.setValue(50)
+        self.numCellsToRead.setValue(self.userInfo.cell_count)
         self.numCellsToRead.setRange(0,10000)
         self.numCellsToRead.editingFinished.connect(self.saveNumCells)
         # numCellsToRead.setFixedWidth(50)
@@ -224,7 +228,7 @@ class ViewerPresets(QDialog):
         layout = QGridLayout()
         layout.addWidget(self.phenotypeToGrab,0,0,1,1)
         layout.addWidget(explanationLabel1,1,0)
-        layout.addWidget(imageSize,1,1)
+        layout.addWidget(self.imageSize,1,1)
         layout.addWidget(explanationLabel2,2,0)
         layout.addWidget(self.numCellsToRead,2,1)
         layout.addWidget(explanationLabel3,2,2)
