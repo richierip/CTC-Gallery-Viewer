@@ -13,8 +13,11 @@ import pandas as pd
 import skimage.filters
 import gc # might garbage collect later
 import math
+import copy
 import vispy.color as vpc
 from matplotlib import cm
+from matplotlib import pyplot as plt
+norm = plt.Normalize()
 
 #-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------#
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
@@ -121,11 +124,18 @@ checkbox_setup()
 #   Counterpoint - how to apply filters to only some channels if they are in same image?
 #   Counterpoint to counterpoint - never get rid of numpy arrays and remake whole image as needed. 
 def add_layers(viewer,pyramid, cells, offset):
-    def add_layer(viewer, layer, name, rgb = False, colormap = 'Purples'):
+    def add_layer(viewer, layer, name, colormap = None, contr = None ):
         # Napari bug: setting gamma here doesn't update what is seen, 
         # even thought the slider gui shows the change
         #   Will have to do something else.
-        viewer.add_image(layer, name = name, rgb = rgb, colormap = colormap)
+        if colormap is not None: # Luminescence image
+            viewer.add_image(layer, name = name, colormap = colormap)
+        elif contr is not None: # RBG image
+            print(f'\n ~~~ Adding RGB Image ~~~ \n')
+            viewer.add_image(layer, name = name, contrast_limits = contr)
+        else:
+            print(f'\n ~~~ Adding RGB Image auto contrast limit ~~~ \n')
+            viewer.add_image(layer, name = name)
         return True
     # def add_layer_rgb(viewer, layer, name):
     #     viewer.add_image(layer, name = name, rgb=True)
@@ -135,7 +145,9 @@ def add_layers(viewer,pyramid, cells, offset):
         # You have to do it like this. Seriously. 
         global SC_DATA
         SC_DATA = data /divisor
+        # SC_DATA /= divisor
         loc = {}
+        # exec(f'rgb = cm.{colormap}(norm(SC_DATA))', globals(), loc)
         exec(f'rgb = cm.{colormap}(SC_DATA)', globals(), loc)
         return loc['rgb']
     
@@ -157,25 +169,36 @@ def add_layers(viewer,pyramid, cells, offset):
                 elif i==AF: continue #fluor='AF' 
                 cell_name = f'Cell {cell_id} {fluor}'
                 # print(f'Adding cell {cell_x},{cell_y} - layer {i}')
-                cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i]
+                cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
 
-                add_layer(viewer,cell_punchout_raw, cell_name, rgb = False, colormap= cell_colors[i])
+                add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
 
                 # normalize to 1.0
 
                 # print(f'My types are as follows: \n cell raw {cell_punchout_raw.dtype}\n min {type(cell_punchout_raw.min())}\n max {type(cell_punchout_raw.max())}')
+                # should be floats now
+                # Normalize to range of 0.0 , 1.0 BEFORE passing through color map
                 cell_punchout_raw = cell_punchout_raw - cell_punchout_raw.min()
                 cell_punchout_raw = cell_punchout_raw / cell_punchout_raw.max()
 
                 # custom_map = vpc.get_colormap('single_hue',hue=40, saturation_range=[0.1,0.8], value=0.5)
                 # cell_punchout = custom_map(cell_punchout_raw)*255
                 print(f'color chosen is |{cell_colors[i]}|')
-                cell_punchout = _convert_to_rgb(cell_punchout_raw*255, cell_colors[i], divisor=7) 
+
+                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor=1.0) 
 
                 # print(f'raw np shape is {cell_punchout_raw.shape}') # (100,100)
                 # print(f'colormapped np shape is {cell_punchout.shape}') # (100,100,4)
                 # composite = np.vstack([composite, cell_punchout]')
                 composite.append([cell_punchout])
+
+                if len(cells) == 5 and cell_colors[i] == 'Reds':
+                    print(f'Colormapped shape is {cell_punchout.shape}')
+                    print(f'Colormapped RAW shape is {cell_punchout_raw.shape}')
+                    print(f' our min and max in the raw file is {np.min(cell_punchout_raw)} and {np.max(cell_punchout_raw)}')
+                    np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\cell_punch.txt", cell_punchout[:,:,0])
+                    np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\normed.txt", cm.Reds(norm(cell_punchout_raw))[:,:,0])
+                    np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\cell_punch_raw.txt", cell_punchout_raw)
 
                 
                 # Confirmation that values are 0-255
@@ -185,13 +208,48 @@ def add_layers(viewer,pyramid, cells, offset):
         cell_name = f'Cell {cell_id} composite'
         composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
         print(f'shape before summing is {composite.shape}')
+        print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
         composite = np.sum(composite, axis=0) 
+        print(f'\n!!! Shape after summing is {composite.shape}')
+        print(f'same pixel added: {composite [45,45,:]}')
+        composite[:,:,3] /= 3.0
+        print(f'same pixel averaged by 3: {composite [45,45,:]}')
+
+
+        rgb_mins = [] ## Axis here?
+        rgb_maxes = []
+        for i in range(3):
+            temp = np.ndarray.flatten(composite[:,:,i])
+            print(f'Shape of intermediate is {temp.shape}')
+            rgb_mins.append(np.min(temp))
+            rgb_maxes.append(np.max(temp))
+        print(f'Using axis {1}, here are the mins: {rgb_mins}')
+        print(f'Here are the maxes: {rgb_maxes}')
+
+        # rgb_mins = np.amin(composite, axis=2) ## Axis here?
+        # rgb_maxes = np.amax(composite, axis = 2)
+        # print(f'\n \nUsing axis {2}, here are the mins: {rgb_mins}')
+        # print(f'\n Here are the maxes: {rgb_maxes}')
+        print(f'\n \n Beginning the min/max normalization loop.')
+        # for j in range(3):
+        #     print(f'My j is {j}. 0 should be black channel, one is blue, 2 is red ')
+
+        for i in range(3):
+            # THIS SCREWS IT UP. WHY?? SHould just map the values to 0, 255.0
+            print(f'My i is {i}. RGB maps to 012 min/max is {rgb_mins[i]}/{rgb_maxes[i]}')
+            composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
+            composite[:,:,i] = composite[:,:,i] /(float(rgb_maxes[i]) - float(rgb_mins[i]))
+            composite[:,:,i] = composite[:,:,i] * 255.0
+
+            # composite[:,:,i] -= np.min(composite[:,:,i])
+            # composite[:,:,i] *= 255.0/np.max(composite[:,:,i])
+        print(f'same pixel multiplied / normalized to 0,255 range: {composite [45,45,:]}')
         print(f'For cell number {cell_id} the datatype is {composite.dtype}, max value is {np.max(composite[:,:,0])} and the min is {np.min(composite[:,:,0])}')
         print(f'also the shape is {composite.shape}') # (100,100,4)
         
-        add_layer(viewer, composite, cell_name, rgb=True, colormap=None)
-        # if len(cells) == 5:
-        #     np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite)
+        add_layer(viewer, composite.astype('int'), cell_name, colormap=None)
+        if len(cells) == 5:
+            np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
 
     return True
 
