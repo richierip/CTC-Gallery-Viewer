@@ -10,14 +10,14 @@ from napari.types import ImageData
 from magicgui import magicgui
 import numpy as np
 import pandas as pd
-import skimage.filters
-import gc # might garbage collect later
-import math
-import copy
-import vispy.color as vpc
+# import skimage.filters
+# import gc # might garbage collect later
+# import math
+# import copy
+# import vispy.color as vpc
 from matplotlib import cm
 from matplotlib import pyplot as plt
-norm = plt.Normalize()
+# norm = plt.Normalize()
 
 #-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------#
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
@@ -189,7 +189,7 @@ def add_layers(viewer,pyramid, cells, offset):
                 # cell_punchout = custom_map(cell_punchout_raw)*255
                 print(f'color chosen is |{cell_colors[i]}|')
 
-                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor=3.0) 
+                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor= len(CHANNELS)-1) 
 
                 # print(f'raw np shape is {cell_punchout_raw.shape}') # (100,100)
                 # print(f'colormapped np shape is {cell_punchout.shape}') # (100,100,4)
@@ -348,6 +348,7 @@ def main():
     sample_cell_dict['slidelength'] = pyramid.shape[1]
     
     viewer = napari.Viewer(title='CTC Gallery')
+    print(f'$$$$$$ OFFSET is {OFFSET}')
     add_layers(viewer,pyramid,tumor_cell_XYs, int(OFFSET/2))
     global VIEWER
     VIEWER = viewer

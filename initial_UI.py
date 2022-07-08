@@ -35,7 +35,7 @@ class ViewerPresets(QDialog):
         self.checkUser()
 
         # For TESTING
-        print(f'Initial test print for colors: {self.userInfo.cell_colors}')
+        print(f'Initial test print for colors: {self.userInfo.UI_color_display}')
 
         self.myColors = []
         # print(f'SP\pinning up ... preset colors are {self.userInfo.cell_colors}')
@@ -45,7 +45,7 @@ class ViewerPresets(QDialog):
         cc_logo = QLabel()
         pixmap = QPixmap('data/mgh-mgb-cc-logo2 (Custom).png')
         cc_logo.setPixmap(pixmap)
-        titleLabel = QLabel(f"Cool App Name {chr(8482)} TBD")
+        titleLabel = QLabel(f"Jon Walsh Pre-Release v1.0")#{chr(8482)} TBD
         titleLabel.setAlignment(Qt.AlignCenter)
 
         self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
@@ -195,7 +195,7 @@ class ViewerPresets(QDialog):
         for pos,button in enumerate(self.mycheckbuttons):
             colorComboName = button.objectName() + "_colors"
             exec(f'{colorComboName} = QComboBox()')
-            exec(f'{colorComboName}.addItems(self.userInfo.UI_color_display)')
+            exec(f'{colorComboName}.addItems(store_and_load.CELL_COLORS)')
             exec(f'{colorComboName}.setCurrentText("{self.userInfo.UI_color_display[pos]}")')
             exec(f'{colorComboName}.setObjectName("{button.objectName()}")')
             if button.objectName() in self.userInfo.channels and button.objectName != 'AF':

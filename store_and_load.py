@@ -6,6 +6,7 @@ Class for data storage
 This file holds the user controlled information and methods to store that info persistently using the Pickle framework. '''
 
 import pickle
+import copy
 
 CELL_COLORS = ['Greys', 'Purples' , 'Blues', 'Greens', 'Oranges','Reds', 'copper', 'twilight']
 # qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
@@ -19,7 +20,7 @@ CHANNEL_ORDER = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", 
 # ADJUSTED = CHANNELS
 
 class userPresets:
-    def __init__(self, channels = CHANNELS_STR, cell_colors = [], qptiff = None, 
+    def __init__(self, channels = copy.copy(CHANNELS_STR), cell_colors = [], qptiff = None, 
                 objectData = None, phenotype = None, imageSize = 100, cell_count = 25, 
                 channelOrder = CHANNEL_ORDER, cell_ID_start = 0):
         self.qptiff = qptiff
@@ -27,7 +28,7 @@ class userPresets:
         self.imageSize = imageSize
         self.channels = channels
         self.cell_colors = cell_colors
-        self.UI_color_display = CELL_COLORS
+        self.UI_color_display = copy.copy(CELL_COLORS)
         self.cell_count = cell_count
         self.phenotype = phenotype
         self.channelOrder = channelOrder
