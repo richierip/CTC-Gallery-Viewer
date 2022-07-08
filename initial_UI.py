@@ -33,6 +33,10 @@ class ViewerPresets(QDialog):
 
         self.userInfo = store_and_load.loadObject('data/presets')
         self.checkUser()
+
+        # For TESTING
+        print(f'Initial test print for colors: {self.userInfo.cell_colors}')
+
         self.myColors = []
         # print(f'SP\pinning up ... preset colors are {self.userInfo.cell_colors}')
         self.originalPalette = QApplication.palette()
@@ -116,6 +120,9 @@ class ViewerPresets(QDialog):
 
     def loadGallery(self):
         store_and_load.storeObject(self.userInfo, 'data/presets')
+        # Correct color order
+        self.userInfo._correct_color_order()
+
         # print(f'QPTIFF: {self.userInfo.qptiff}')
         # print(f'OBJECTDATA : {self.userInfo.objectData}')
         print(f'CHANNELS : {self.userInfo.channels}')
@@ -134,8 +141,10 @@ class ViewerPresets(QDialog):
         self.userInfo.phenotype = self.phenotypeToGrab.text()
     def saveNumCells(self):
         self.userInfo.cell_count = self.numCellsToRead.value()
-    def saveOffset(self):
-        self.userInfo.offset = self.imageSize.value()
+    def saveImageSize(self):
+        self.userInfo.imageSize = self.imageSize.value()
+    def saveCellOffset(self):
+        self.userInfo.cell_ID_start = self.cellOffset.value()
 
     def saveChannel(self):
         for button in self.mycheckbuttons:
@@ -150,11 +159,21 @@ class ViewerPresets(QDialog):
 
     def saveColors(self):
         for colorWidget in self.myColors:
+            print(f'---------In loop----------')
+            print(f'My trigger was {colorWidget.objectName()}')
             colorChannel = colorWidget.objectName()
-            # print(f'#### Anything? {colorChannel} and {store_and_load.CHANNEL_ORDER}')
-            colorPos = store_and_load.CHANNEL_ORDER.index(colorChannel)
-            self.userInfo.cell_colors.pop(colorPos)
-            self.userInfo.cell_colors.insert(colorPos, colorWidget.currentText())
+            print(f'#### Channel order fsr: {store_and_load.CHANNELS_STR} \n 1. also userinfo.cell_colors before change: {self.userInfo.cell_colors}')
+            colorPos = store_and_load.CHANNELS_STR.index(colorChannel)
+            print(f'2. Position of {colorChannel} in CHANNEL_ORDER is {colorPos}')
+            self.userInfo.UI_color_display.pop(colorPos)
+            print(f'3. Our intermediate step is this: {self.userInfo.UI_color_display}')
+            self.userInfo.UI_color_display.insert(colorPos, colorWidget.currentText())
+            print(f'4. Now color should be in right spot. Here is the thing {self.userInfo.UI_color_display}')
+
+            # # Now do it for visual display:
+            # colorPos = CHANNELS_STR.index(colorChannel)
+            # self.userInfo.UI_color_display.pop(colorPos)
+            # self.userInfo.UI_color_display.insert(colorPos, colorWidget.currentText())
             
 
     def createTopLeftGroupBox(self):
@@ -176,10 +195,10 @@ class ViewerPresets(QDialog):
         for pos,button in enumerate(self.mycheckbuttons):
             colorComboName = button.objectName() + "_colors"
             exec(f'{colorComboName} = QComboBox()')
-            exec(f'{colorComboName}.addItems(AVAILABLE_COLORS)')
-            exec(f'{colorComboName}.setCurrentText("{AVAILABLE_COLORS[pos]}")')
+            exec(f'{colorComboName}.addItems(self.userInfo.UI_color_display)')
+            exec(f'{colorComboName}.setCurrentText("{self.userInfo.UI_color_display[pos]}")')
             exec(f'{colorComboName}.setObjectName("{button.objectName()}")')
-            if button.objectName() in self.userInfo.channels:
+            if button.objectName() in self.userInfo.channels and button.objectName != 'AF':
                 button.setChecked(True)
             else:
                 button.setChecked(False)
@@ -209,20 +228,25 @@ class ViewerPresets(QDialog):
         # phenotypeToGrab.set
      
         explanationLabel1 = QLabel("Grab an image of size")
-        explanationLabel2 = QLabel("for the first")
-        explanationLabel3 = QLabel("cells")
+        explanationLabel2 = QLabel("Exclude cells with a Cell ID < ")
+        explanationLabel3 = QLabel("Limit the display to the first ")
 
         self.imageSize = QSpinBox(self.topRightGroupBox)
         self.imageSize.setRange(50,150)
-        self.imageSize.setValue(self.userInfo.offset) # Misbehaving?
-        self.imageSize.editingFinished.connect(self.saveOffset)
+        self.imageSize.setValue(self.userInfo.imageSize) # Misbehaving?
+        self.imageSize.editingFinished.connect(self.saveImageSize)
 
         # explanationLabel2.setFixedWidth(20)
         self.numCellsToRead = QSpinBox(self.topRightGroupBox)
         self.numCellsToRead.setValue(self.userInfo.cell_count)
-        self.numCellsToRead.setRange(0,10000)
+        self.numCellsToRead.setRange(0,1000)
         self.numCellsToRead.editingFinished.connect(self.saveNumCells)
         # numCellsToRead.setFixedWidth(50)
+
+        self.cellOffset = QSpinBox(self.topRightGroupBox)
+        self.cellOffset.setValue(self.userInfo.cell_ID_start)
+        self.cellOffset.setRange(0,1000000)
+        self.cellOffset.editingFinished.connect(self.saveCellOffset)
 
 
         layout = QGridLayout()
@@ -230,8 +254,9 @@ class ViewerPresets(QDialog):
         layout.addWidget(explanationLabel1,1,0)
         layout.addWidget(self.imageSize,1,1)
         layout.addWidget(explanationLabel2,2,0)
-        layout.addWidget(self.numCellsToRead,2,1)
-        layout.addWidget(explanationLabel3,2,2)
+        layout.addWidget(self.cellOffset,2,1)
+        layout.addWidget(explanationLabel3,3,0)
+        layout.addWidget(self.numCellsToRead,3,1)
 
         # layout.addWidget(findDataButton)
         layout.rowStretch(-100)

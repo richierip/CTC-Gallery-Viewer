@@ -7,7 +7,6 @@ This file holds the user controlled information and methods to store that info p
 
 import pickle
 
-# QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
 CELL_COLORS = ['Greys', 'Purples' , 'Blues', 'Greens', 'Oranges','Reds', 'copper', 'twilight']
 # qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
 # OFFSET = 100 # pixels?
@@ -20,15 +19,37 @@ CHANNEL_ORDER = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", 
 # ADJUSTED = CHANNELS
 
 class userPresets:
-    def __init__(self, channels = CHANNELS_STR, cell_colors = CELL_COLORS, qptiff = None, objectData = None, phenotype = None, offset = 100, cell_count = 25, channelOrder = CHANNEL_ORDER):
+    def __init__(self, channels = CHANNELS_STR, cell_colors = [], qptiff = None, 
+                objectData = None, phenotype = None, imageSize = 100, cell_count = 25, 
+                channelOrder = CHANNEL_ORDER, cell_ID_start = 0):
         self.qptiff = qptiff
         self.objectData = objectData
-        self.offset = offset
+        self.imageSize = imageSize
         self.channels = channels
         self.cell_colors = cell_colors
+        self.UI_color_display = CELL_COLORS
         self.cell_count = cell_count
         self.phenotype = phenotype
         self.channelOrder = channelOrder
+        self.cell_ID_start = cell_ID_start
+
+        # for chnl in CHANNELS_STR:
+        #     # this inserts colors into backend ordered array in the right place off the bat. 
+        #     self.cell_colors.append(CELL_COLORS[globals()[chnl]])
+
+    def _correct_color_order(self):
+        self.cell_colors = []
+        print(f'\n \n GETTING TO THE BOTTOM OF THS SHIT')
+        print(f'CHANNELS_STR {CHANNELS_STR}')
+        print(f'CHANNEL_ORDER {CHANNEL_ORDER}')
+        print(f'self.cell_colors {self.cell_colors}')
+        print(f'self.UI_color_display {self.UI_color_display}')
+        for chnl in CHANNEL_ORDER:
+                print(f'current var is {chnl} and the global value is {globals()[chnl]}')
+                # this inserts colors into backend ordered array in the right place off the bat. 
+                pos = CHANNELS_STR.index(chnl)
+                self.cell_colors.append(self.UI_color_display[pos])
+        print(f'DONE CORRECTING. colors to be passed are {self.cell_colors}')
 
 def storeObject(obj, filename):
     try:

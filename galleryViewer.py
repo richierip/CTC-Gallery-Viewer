@@ -28,8 +28,8 @@ OFFSET = 200 # microns or pixels?
 # CELL_START = 100
 CELL_LIMIT = 15
 PHENOTYPE = 'Tumor'
+CELL_ID_START = 1
 DAPI = 0; OPAL480 = 1; OPAL520 = 2; OPAL570 = 3; OPAL620 = 4; OPAL690 = 5; OPAL780 = 6; AF=7; Composite = 8
-# DAPI = None; OPAL480 = None; OPAL520 = None; OPAL570 = None; OPAL620 = None; OPAL690 = None; OPAL780 = None; AF=None
 CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
 # CHANNELS_STR = ["DAPI", "OPAL520", "OPAL690", "AF"]
 CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690, OPAL780, AF, Composite] # Default. Not really that useful info since channel order was added.
@@ -106,13 +106,13 @@ def dynamic_checkbox_creator(checkbox_name):
             check={"widget_type": "CheckBox", "text": checkbox_name},
             layout = 'horizontal')
     def myfunc(check: bool = True):
-        print(f'in myfunc backend CHANNELS are {CHANNELS}, and {CHANNELS_STR}. Trying to remove {checkbox_name}, whose global value is {globals()[checkbox_name]}, from {ADJUSTED}')
+        # print(f'in myfunc backend CHANNELS are {CHANNELS}, and {CHANNELS_STR}. Trying to remove {checkbox_name}, whose global value is {globals()[checkbox_name]}, from {ADJUSTED}')
         if check:
             ADJUSTED.append(globals()[checkbox_name])
-            print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just added {checkbox_name}')
+            # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just added {checkbox_name}')
         else:
             ADJUSTED.remove(globals()[checkbox_name])
-            print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just removed {checkbox_name}')
+            # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just removed {checkbox_name}')
     return myfunc
 
 # print(f'dir is {dir()}')
@@ -197,12 +197,13 @@ def add_layers(viewer,pyramid, cells, offset):
                 composite.append([cell_punchout])
 
                 if len(cells) == 5 and cell_colors[i] == 'Reds':
-                    print(f'Colormapped shape is {cell_punchout.shape}')
-                    print(f'Colormapped RAW shape is {cell_punchout_raw.shape}')
-                    print(f' our min and max in the raw file is {np.min(cell_punchout_raw)} and {np.max(cell_punchout_raw)}')
-                    np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\cell_punch.txt", cell_punchout[:,:,0])
-                    np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\normed.txt", cm.Reds(norm(cell_punchout_raw))[:,:,0])
-                    np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\cell_punch_raw.txt", cell_punchout_raw)
+                    pass
+                    # print(f'Colormapped shape is {cell_punchout.shape}')
+                    # print(f'Colormapped RAW shape is {cell_punchout_raw.shape}')
+                    # print(f' our min and max in the raw file is {np.min(cell_punchout_raw)} and {np.max(cell_punchout_raw)}')
+                    # np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\cell_punch.txt", cell_punchout[:,:,0])
+                    # np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\normed.txt", cm.Reds(norm(cell_punchout_raw))[:,:,0])
+                    # np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\cell_punch_raw.txt", cell_punchout_raw)
 
                 
                 # Confirmation that values are 0-255
@@ -211,47 +212,46 @@ def add_layers(viewer,pyramid, cells, offset):
         # add composite
         cell_name = f'Cell {cell_id} Composite'
         composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
-        print(f'shape before summing is {composite.shape}')
-        print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
+        # print(f'shape before summing is {composite.shape}')
+        # print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
         composite = np.sum(composite, axis=0) 
-        print(f'\n!!! Shape after summing is {composite.shape}')
-        print(f'same pixel added: {composite [45,45,:]}')
+        # print(f'\n!!! Shape after summing is {composite.shape}')
+        # print(f'same pixel added: {composite [45,45,:]}')
         composite[:,:,3] /= 3.0
-        print(f'same pixel averaged by 3: {composite [45,45,:]}')
+        # print(f'same pixel averaged by 3: {composite [45,45,:]}')
 
 
         rgb_mins = [] ## Axis here?
         rgb_maxes = []
         for i in range(3):
             temp = np.ndarray.flatten(composite[:,:,i])
-            print(f'Shape of intermediate is {temp.shape}')
+            # print(f'Shape of intermediate is {temp.shape}')
             rgb_mins.append(np.min(temp))
             rgb_maxes.append(np.max(temp))
-        print(f'Using axis {1}, here are the mins: {rgb_mins}')
-        print(f'Here are the maxes: {rgb_maxes}')
+        # print(f'Using axis {1}, here are the mins: {rgb_mins}')
+        # print(f'Here are the maxes: {rgb_maxes}')
 
         # rgb_mins = np.amin(composite, axis=2) ## Axis here?
         # rgb_maxes = np.amax(composite, axis = 2)
         # print(f'\n \nUsing axis {2}, here are the mins: {rgb_mins}')
         # print(f'\n Here are the maxes: {rgb_maxes}')
-        print(f'\n \n Beginning the min/max normalization loop.')
         # for j in range(3):
         #     print(f'My j is {j}. 0 should be black channel, one is blue, 2 is red ')
-
+        # print(f'\n \n Beginning the min/max normalization loop.')
         for i in range(3):
             # Map values back to normal range of 0, 255.0 before passing as RGB. Napari does a shitty job of displaying without this.
-            print(f'My i is {i}. RGB maps to 012 min/max is {rgb_mins[i]}/{rgb_maxes[i]}')
+            # print(f'My i is {i}. RGB maps to 012 min/max is {rgb_mins[i]}/{rgb_maxes[i]}')
             composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
             composite[:,:,i] = composite[:,:,i] /(float(rgb_maxes[i]) - float(rgb_mins[i]))
             composite[:,:,i] = composite[:,:,i] * 255.0
 
             # composite[:,:,i] -= np.min(composite[:,:,i])
             # composite[:,:,i] *= 255.0/np.max(composite[:,:,i])
-        print(f'same pixel multiplied / normalized to 0,255 range: {composite [45,45,:]}')
-        print(f'For cell number {cell_id} the datatype is {composite.dtype}, max value is {np.max(composite[:,:,0])} and the min is {np.min(composite[:,:,0])}')
-        print(f'also the shape is {composite.shape}') # (100,100,4)
+        # print(f'same pixel multiplied / normalized to 0,255 range: {composite [45,45,:]}')
+        # print(f'For cell number {cell_id} the datatype is {composite.dtype}, max value is {np.max(composite[:,:,0])} and the min is {np.min(composite[:,:,0])}')
+        # print(f'also the shape is {composite.shape}') # (100,100,4)
         
-        add_layer(viewer, composite.astype('int'), cell_name, colormap=None)
+        add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
         if len(cells) == 5:
             np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
 
@@ -260,12 +260,13 @@ def add_layers(viewer,pyramid, cells, offset):
 ''' Reset globals and proceed to main '''
 def GUI_execute(userInfo):
     global cell_colors, qptiff, OFFSET, CELL_LIMIT, CHANNELS_STR, CHANNEL_ORDER
-    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, Composite
+    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, CELL_ID_START
 
     cell_colors = userInfo.cell_colors
     qptiff = userInfo.qptiff
-    OFFSET = userInfo.offset
+    OFFSET = userInfo.imageSize
     PHENOTYPE = userInfo.phenotype
+    CELL_ID_START = userInfo.cell_ID_start
     CELL_LIMIT = userInfo.cell_count
     OBJECT_DATA = userInfo.objectData
     CHANNELS_STR = userInfo.channels
@@ -276,7 +277,7 @@ def GUI_execute(userInfo):
     for pos,chn in enumerate(CHANNEL_ORDER):
         print(f'enumerating {chn} and {pos} for {CHANNELS_STR}')
         if chn in CHANNELS_STR:
-            print(f'IF triggered with {chn} and {pos}')
+            # print(f'IF triggered with {chn} and {pos}')
             exec(f"globals()['{chn}'] = {pos}")
             exec(f"globals()['CHANNELS'].append({chn})")
     ADJUSTED = CHANNELS
@@ -326,8 +327,12 @@ def main():
     # Get object data from csv and parse.
     halo_export = pd.read_csv(OBJECT_DATA)
     halo_export = halo_export.loc[:, ["Object Id", "XMin","XMax","YMin", "YMax", PHENOTYPE]]
+    
+    if CELL_ID_START < len(halo_export) and CELL_ID_START > 0:     
+        halo_export = halo_export[CELL_ID_START:] # Exclude cells prior to target ID
     halo_export = halo_export[halo_export[PHENOTYPE]==1]
-    halo_export = halo_export[:CELL_LIMIT] # pare down cell list to desired length
+    if CELL_LIMIT < len(halo_export) and CELL_LIMIT > 0:
+        halo_export = halo_export[:CELL_LIMIT] # pare down cell list (now containing only phenotype of interest) to desired length
     tumor_cell_XYs = []
     for index,row in halo_export.iterrows():
         center_x = int((row['XMax']+row['XMin'])/2)
@@ -347,7 +352,7 @@ def main():
     global VIEWER
     VIEWER = viewer
     viewer.grid.enabled = True
-    viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)+1) # +1 when plotting the shitty composite
+    viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)) # +1 when plotting the shitty composite
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
