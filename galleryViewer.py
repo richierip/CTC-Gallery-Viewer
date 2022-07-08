@@ -28,16 +28,17 @@ OFFSET = 200 # microns or pixels?
 # CELL_START = 100
 CELL_LIMIT = 15
 PHENOTYPE = 'Tumor'
-DAPI = 0; OPAL480 = 1; OPAL520 = 2; OPAL570 = 3; OPAL620 = 4; OPAL690 = 5; OPAL780 = 6; AF=7
+DAPI = 0; OPAL480 = 1; OPAL520 = 2; OPAL570 = 3; OPAL620 = 4; OPAL690 = 5; OPAL780 = 6; AF=7; Composite = 8
 # DAPI = None; OPAL480 = None; OPAL520 = None; OPAL570 = None; OPAL620 = None; OPAL690 = None; OPAL780 = None; AF=None
-CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF"]
+CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
 # CHANNELS_STR = ["DAPI", "OPAL520", "OPAL690", "AF"]
-CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690, OPAL780, AF] # Default. Not really that useful info since channel order was added.
+CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690, OPAL780, AF, Composite] # Default. Not really that useful info since channel order was added.
 # CHANNELS = [DAPI, OPAL520,OPAL690, AF]
 ADJUSTED = CHANNELS
 CHANNEL_ORDER = None # to save variable position data for channels (they can be in any order...)
 VIEWER = None
 SC_DATA = None # Using this to store data to coerce the exec function into doing what I want
+
 
 # Probably won't be used - both image and object data use same units in my example
 def map_coords(array_shape, cellx,celly):
@@ -64,6 +65,8 @@ def validate_adjustment(layer):
     elif layer_name == '780'and OPAL780 in ADJUSTED:
         return True
     elif layer_name == 'AF'and AF in ADJUSTED:
+        return True
+    elif layer_name == 'Composite' and Composite in ADJUSTED:
         return True
     else:
         return False
@@ -103,7 +106,7 @@ def dynamic_checkbox_creator(checkbox_name):
             check={"widget_type": "CheckBox", "text": checkbox_name},
             layout = 'horizontal')
     def myfunc(check: bool = True):
-        print(f'in myfunc backend CHANNELS are {CHANNELS}, and {CHANNELS_STR}')
+        print(f'in myfunc backend CHANNELS are {CHANNELS}, and {CHANNELS_STR}. Trying to remove {checkbox_name}, whose global value is {globals()[checkbox_name]}, from {ADJUSTED}')
         if check:
             ADJUSTED.append(globals()[checkbox_name])
             print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just added {checkbox_name}')
@@ -116,6 +119,7 @@ def dynamic_checkbox_creator(checkbox_name):
 def checkbox_setup():
     for checkbox_name in CHANNELS_STR:   
         exec(f"globals()[\'{checkbox_name+'_box'}\'] = globals()[\'dynamic_checkbox_creator\'](checkbox_name)") # If doing this is wrong I don't want to be right
+    
 checkbox_setup()
 #------------------------- Image loading and processing functions ---------------------#
 
@@ -185,7 +189,7 @@ def add_layers(viewer,pyramid, cells, offset):
                 # cell_punchout = custom_map(cell_punchout_raw)*255
                 print(f'color chosen is |{cell_colors[i]}|')
 
-                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor=1.0) 
+                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor=3.0) 
 
                 # print(f'raw np shape is {cell_punchout_raw.shape}') # (100,100)
                 # print(f'colormapped np shape is {cell_punchout.shape}') # (100,100,4)
@@ -205,7 +209,7 @@ def add_layers(viewer,pyramid, cells, offset):
                 # mymax = np.max(pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i])
                 # print(f'For cell number {cell_id}, channel {i}, the max value is {mymax}')
         # add composite
-        cell_name = f'Cell {cell_id} composite'
+        cell_name = f'Cell {cell_id} Composite'
         composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
         print(f'shape before summing is {composite.shape}')
         print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
@@ -235,7 +239,7 @@ def add_layers(viewer,pyramid, cells, offset):
         #     print(f'My j is {j}. 0 should be black channel, one is blue, 2 is red ')
 
         for i in range(3):
-            # THIS SCREWS IT UP. WHY?? SHould just map the values to 0, 255.0
+            # Map values back to normal range of 0, 255.0 before passing as RGB. Napari does a shitty job of displaying without this.
             print(f'My i is {i}. RGB maps to 012 min/max is {rgb_mins[i]}/{rgb_maxes[i]}')
             composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
             composite[:,:,i] = composite[:,:,i] /(float(rgb_maxes[i]) - float(rgb_mins[i]))
@@ -256,7 +260,7 @@ def add_layers(viewer,pyramid, cells, offset):
 ''' Reset globals and proceed to main '''
 def GUI_execute(userInfo):
     global cell_colors, qptiff, OFFSET, CELL_LIMIT, CHANNELS_STR, CHANNEL_ORDER
-    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE
+    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, Composite
 
     cell_colors = userInfo.cell_colors
     qptiff = userInfo.qptiff
@@ -265,10 +269,12 @@ def GUI_execute(userInfo):
     CELL_LIMIT = userInfo.cell_count
     OBJECT_DATA = userInfo.objectData
     CHANNELS_STR = userInfo.channels
+    CHANNELS_STR.append("Composite")
     CHANNEL_ORDER = userInfo.channelOrder
+    CHANNEL_ORDER.append("Composite")
     CHANNELS = []
     for pos,chn in enumerate(CHANNEL_ORDER):
-        print(f'enumerating')
+        print(f'enumerating {chn} and {pos} for {CHANNELS_STR}')
         if chn in CHANNELS_STR:
             print(f'IF triggered with {chn} and {pos}')
             exec(f"globals()['{chn}'] = {pos}")
@@ -346,9 +352,10 @@ def main():
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
     
-    # print(f'\n {dir()}')
+    # print(f'\n {dir()}') # prints out the namespace variables 
     # viewer.window.add_dock_widget(check_test, area = 'bottom')
     for marker_function in CHANNELS_STR:
+        # Only make visible the chosen markers
         exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
     #adjust_gamma(viewer,0.5)
 
