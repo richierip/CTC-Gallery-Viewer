@@ -1,7 +1,6 @@
 #############################################################################
 
-from collections import UserString
-from PyQt5.QtCore import QDateTime, Qt, QTimer
+from PyQt5.QtCore import QDateTime, Qt, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDateTimeEdit,
         QDial, QDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
@@ -11,15 +10,33 @@ from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDateTimeEdit,
 
 import sys
 import os
+import time
 import store_and_load
 from galleryViewer import GUI_execute, GUI_execute_cheat
 import ctypes
+import threading
 
 
 FONT_SIZE = 12
 DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
 CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
 AVAILABLE_COLORS = ['Greys', 'Purples' , 'Blues', 'Greens', 'Oranges','Reds', 'copper', 'twilight']
+
+class ExternalCounter(QThread):
+    """
+    Runs a counter thread.
+    """
+    countChanged = pyqtSignal(int)
+    def __init__(self, time_limit):
+        super(ExternalCounter, self).__init__()
+        self.time_limit = time_limit
+
+    def run(self):
+        count = 0
+        while count < self.time_limit:
+            count +=1
+            time.sleep(1)
+            self.countChanged.emit(count)
 
 class ViewerPresets(QDialog):
     def __init__(self, app, parent=None):
@@ -117,21 +134,6 @@ class ViewerPresets(QDialog):
             self.userInfo = store_and_load.userPresets()
         else:
             pass
-
-    def loadGallery(self):
-        store_and_load.storeObject(self.userInfo, 'data/presets')
-        # Correct color order
-        self.userInfo._correct_color_order()
-
-        # print(f'QPTIFF: {self.userInfo.qptiff}')
-        # print(f'OBJECTDATA : {self.userInfo.objectData}')
-        print(f'CHANNELS : {self.userInfo.channels}')
-        # self.app.run(max_loop_level=2) # This isn't a thing apparently
-        # self.app.processEvents()
-        self.createProgressBar()
-        self.mainLayout.addWidget(self.progressBar, 3, 0, 1, 2)
-        GUI_execute(self.userInfo)
-        # exit(0)
 
     def saveQptiff(self):
         self.userInfo.qptiff = os.path.normpath(self.qptiffEntry.text().strip('"'))
@@ -262,11 +264,6 @@ class ViewerPresets(QDialog):
         layout.rowStretch(-100)
         self.topRightGroupBox.setLayout(layout)
 
-    def advanceProgressBar(self):
-        curVal = self.progressBar.value()
-        self.progressBar.setValue(int(curVal + 1))
-        # QApplication.processEvents()
-
     def createProgressBar(self):
         size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
         eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
@@ -274,9 +271,43 @@ class ViewerPresets(QDialog):
         self.progressBar = QProgressBar()
         self.progressBar.setRange(0, eta)
         self.progressBar.setValue(0)
-        timer = QTimer(self)
-        timer.timeout.connect(self.advanceProgressBar)
-        timer.start(100)
+
+        # self.timer = ExternalCounter(time_limit=eta)
+        # self.timer.countChanged.connect(self.advanceProgressBar)
+        # self.timer.start()
+
+    def startProgressBar(self):
+        size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
+        eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
+        self.timer = ExternalCounter(time_limit = eta)
+        self.timer.countChanged.connect(self.advanceProgressBar)
+        self.timer.start()
+
+    def advanceProgressBar(self, value):
+        self.progressBar.setValue(value)
+        # self.progressBar.setValue(int(curVal + 1))
+        QApplication.processEvents()
+
+    def loadGallery(self):
+        store_and_load.storeObject(self.userInfo, 'data/presets')
+        # Correct color order
+        self.userInfo._correct_color_order()
+
+        # print(f'QPTIFF: {self.userInfo.qptiff}')
+        # print(f'OBJECTDATA : {self.userInfo.objectData}')
+        print(f'CHANNELS : {self.userInfo.channels}')
+        # self.app.run(max_loop_level=2) # This isn't a thing apparently
+        # self.app.processEvents()
+        self.createProgressBar()
+        # self.startProgressBar()
+        self.mainLayout.addWidget(self.progressBar, 3, 0, 1, 2)
+
+        t = threading.Thread(target = self.startProgressBar, name = "Testing thread capabilities")
+        t.daemon = True
+        t.start()
+        print(f'progress bar thread w/daemon should be started now...')
+        GUI_execute(self.userInfo)
+        # exit(0)
 
 
 if __name__ == '__main__':

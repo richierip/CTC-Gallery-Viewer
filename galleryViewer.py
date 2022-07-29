@@ -15,6 +15,7 @@ import pandas as pd
 # import math
 # import copy
 # import vispy.color as vpc
+import matplotlib
 from matplotlib import cm
 from matplotlib import pyplot as plt
 # norm = plt.Normalize()
@@ -70,6 +71,12 @@ def validate_adjustment(layer):
         return True
     else:
         return False
+
+# @magicgui(auto_call=True,
+#             datapoint={"label":"N/A"})
+# def show_intensity(datapoint: str):
+#     datapoint = str(VIEWER.Layers.Image.get_value() )
+#     show_intensity.show()
 
 def adjust_gamma(viewer, gamma):
     for ctclayer in viewer.layers:
@@ -128,19 +135,50 @@ checkbox_setup()
 #   Counterpoint - how to apply filters to only some channels if they are in same image?
 #   Counterpoint to counterpoint - never get rid of numpy arrays and remake whole image as needed. 
 def add_layers(viewer,pyramid, cells, offset):
-    def add_layer(viewer, layer, name, colormap = None, contr = None ):
+    def add_layer(viewer, layer, name, colormap = None, contr = [0,255] ):
+        viewer.add_image(layer, name = name)
         # Napari bug: setting gamma here doesn't update what is seen, 
         # even thought the slider gui shows the change
         #   Will have to do something else.
         if colormap is not None: # Luminescence image
-            viewer.add_image(layer, name = name, colormap = colormap)
+            shape_layer = viewer.add_image(layer, name = name, colormap = colormap, contrast_limits = contr)
         elif contr is not None: # RBG image
             print(f'\n ~~~ Adding RGB Image ~~~ \n')
-            viewer.add_image(layer, name = name, contrast_limits = contr)
+            shape_layer = viewer.add_image(layer, name = name, contrast_limits = contr)
         else:
             print(f'\n ~~~ Adding RGB Image auto contrast limit ~~~ \n')
-            viewer.add_image(layer, name = name)
-        return True
+            shape_layer = viewer.add_image(layer, name = name)
+
+        # def intensity_helper(shape_layer,event):
+            # data_coordinates = shape_layer.world_to_data(event.position)
+            # coords = np.round(data_coordinates).astype(int)
+            # val = None
+            # for img in VIEWER.layers:
+            #     data_coordinates = img.world_to_data(event.position)
+            #     val = img.get_value(data_coordinates)
+            #     if val is not None:
+            #         break
+            # coords = np.round(data_coordinates).astype(int)
+            # # val = shape_layer.get_value(data_coordinates)
+            # print(f'val is {val} and type is {type(val)}')
+            # if val is None:
+            #     print('none')
+            #     shape_layer.status = f'{coords}: N/A'
+            # else:
+            #     print('else')
+            #     shape_layer.status = f'{coords}: yes'
+
+        # @shape_layer.mouse_drag_callbacks.append
+        # def display_intensity(shape_layer, event):
+        #     intensity_helper(shape_layer, event)
+        #     yield
+        #     while event.type == 'mouse_move':
+        #         intensity_helper(shape_layer, event)
+        #         # the yield statement allows the mouse UI to keep working while
+        #         # this loop is executed repeatedly
+        #         yield
+
+        # return True
     # def add_layer_rgb(viewer, layer, name):
     #     viewer.add_image(layer, name = name, rgb=True)
     #     return True
@@ -177,13 +215,16 @@ def add_layers(viewer,pyramid, cells, offset):
 
                 add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
 
+
                 # normalize to 1.0
 
                 # print(f'My types are as follows: \n cell raw {cell_punchout_raw.dtype}\n min {type(cell_punchout_raw.min())}\n max {type(cell_punchout_raw.max())}')
                 # should be floats now
                 # Normalize to range of 0.0 , 1.0 BEFORE passing through color map
-                cell_punchout_raw = cell_punchout_raw - cell_punchout_raw.min()
-                cell_punchout_raw = cell_punchout_raw / cell_punchout_raw.max()
+
+                print(f' MIN / MAX output {np.min(cell_punchout_raw)} / {np.max(cell_punchout_raw)}')
+                cell_punchout_raw = cell_punchout_raw #- cell_punchout_raw.min()
+                cell_punchout_raw = cell_punchout_raw / 255.0 #cell_punchout_raw.max()
 
                 # custom_map = vpc.get_colormap('single_hue',hue=40, saturation_range=[0.1,0.8], value=0.5)
                 # cell_punchout = custom_map(cell_punchout_raw)*255
@@ -270,16 +311,17 @@ def GUI_execute(userInfo):
     CELL_LIMIT = userInfo.cell_count
     OBJECT_DATA = userInfo.objectData
     CHANNELS_STR = userInfo.channels
-    CHANNELS_STR.append("Composite")
+    if "Composite" not in CHANNELS_STR: CHANNELS_STR.append("Composite")
     CHANNEL_ORDER = userInfo.channelOrder
-    CHANNEL_ORDER.append("Composite")
+    if "Composite" not in CHANNEL_ORDER: CHANNEL_ORDER.append("Composite")
     CHANNELS = []
     for pos,chn in enumerate(CHANNEL_ORDER):
         print(f'enumerating {chn} and {pos} for {CHANNELS_STR}')
         if chn in CHANNELS_STR:
-            # print(f'IF triggered with {chn} and {pos}')
+            print(f'IF triggered with {chn} and {pos}')
             exec(f"globals()['{chn}'] = {pos}")
             exec(f"globals()['CHANNELS'].append({chn})")
+    print(f'GUI execute channels are {CHANNELS}')
     ADJUSTED = CHANNELS
 
     # for checkbox_name in CHANNELS_STR:   
@@ -357,6 +399,16 @@ def main():
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
+
+    # @VIEWER.bind_key('h')
+    # def hello_world(viewer):
+    #     # on key press
+    #     VIEWER.status = 'hello world!'
+
+    #     yield
+
+    #     # on key release
+    #     VIEWER.status = 'goodbye world :('
     
     # print(f'\n {dir()}') # prints out the namespace variables 
     # viewer.window.add_dock_widget(check_test, area = 'bottom')

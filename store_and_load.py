@@ -40,7 +40,7 @@ class userPresets:
 
     def _correct_color_order(self):
         self.cell_colors = []
-        print(f'\n \n GETTING TO THE BOTTOM OF THS SHIT')
+        # print(f'\n \n GETTING TO THE BOTTOM OF THS SHIT')
         print(f'CHANNELS_STR {CHANNELS_STR}')
         print(f'CHANNEL_ORDER {CHANNEL_ORDER}')
         print(f'self.cell_colors {self.cell_colors}')
