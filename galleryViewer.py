@@ -135,8 +135,8 @@ checkbox_setup()
 #   Counterpoint - how to apply filters to only some channels if they are in same image?
 #   Counterpoint to counterpoint - never get rid of numpy arrays and remake whole image as needed. 
 def add_layers(viewer,pyramid, cells, offset):
-    def add_layer(viewer, layer, name, colormap = None, contr = [0,255] ):
-        viewer.add_image(layer, name = name)
+    def add_layerTEST(viewer, layer, name, colormap = None, contr = [0,255] ):
+        # viewer.add_image(layer, name = name)
         # Napari bug: setting gamma here doesn't update what is seen, 
         # even thought the slider gui shows the change
         #   Will have to do something else.
@@ -149,36 +149,28 @@ def add_layers(viewer,pyramid, cells, offset):
             print(f'\n ~~~ Adding RGB Image auto contrast limit ~~~ \n')
             shape_layer = viewer.add_image(layer, name = name)
 
-        # def intensity_helper(shape_layer,event):
-            # data_coordinates = shape_layer.world_to_data(event.position)
-            # coords = np.round(data_coordinates).astype(int)
-            # val = None
-            # for img in VIEWER.layers:
-            #     data_coordinates = img.world_to_data(event.position)
-            #     val = img.get_value(data_coordinates)
-            #     if val is not None:
-            #         break
-            # coords = np.round(data_coordinates).astype(int)
-            # # val = shape_layer.get_value(data_coordinates)
+        @shape_layer.mouse_move_callbacks.append
+        def display_intensity(shape_layer, event):
+            data_coordinates = shape_layer.world_to_data(event.position)
+            coords = np.round(data_coordinates).astype(int)
+            val = None
+            for img in VIEWER.layers:
+                data_coordinates = img.world_to_data(event.position)
+                val = img.get_value(data_coordinates)
+                if val is not None:
+                    shape_layer = img
+                    break
+            coords = np.round(data_coordinates).astype(int)
+            # val = shape_layer.get_value(data_coordinates)
             # print(f'val is {val} and type is {type(val)}')
-            # if val is None:
-            #     print('none')
-            #     shape_layer.status = f'{coords}: N/A'
-            # else:
-            #     print('else')
-            #     shape_layer.status = f'{coords}: yes'
+            if val is None:
+                # print('none')
+                VIEWER.status = f'{shape_layer.name} intensity at {coords}: N/A'
+            else:
+                # print('else')
+                VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
 
-        # @shape_layer.mouse_drag_callbacks.append
-        # def display_intensity(shape_layer, event):
-        #     intensity_helper(shape_layer, event)
-        #     yield
-        #     while event.type == 'mouse_move':
-        #         intensity_helper(shape_layer, event)
-        #         # the yield statement allows the mouse UI to keep working while
-        #         # this loop is executed repeatedly
-        #         yield
-
-        # return True
+        return True
     # def add_layer_rgb(viewer, layer, name):
     #     viewer.add_image(layer, name = name, rgb=True)
     #     return True
@@ -213,7 +205,7 @@ def add_layers(viewer,pyramid, cells, offset):
                 # print(f'Adding cell {cell_x},{cell_y} - layer {i}')
                 cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
 
-                add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
+                add_layerTEST(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
 
 
                 # normalize to 1.0
@@ -292,7 +284,7 @@ def add_layers(viewer,pyramid, cells, offset):
         # print(f'For cell number {cell_id} the datatype is {composite.dtype}, max value is {np.max(composite[:,:,0])} and the min is {np.min(composite[:,:,0])}')
         # print(f'also the shape is {composite.shape}') # (100,100,4)
         
-        add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
+        add_layerTEST(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
         if len(cells) == 5:
             np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
 
