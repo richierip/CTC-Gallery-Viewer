@@ -90,14 +90,14 @@ class ViewerPresets(QDialog):
         dataEntryLabel.setAlignment(Qt.AlignCenter)
         dataEntryLabel.setMaximumWidth(600)
 
-        findDataButton = QPushButton("Load Gallery Images")
-        findDataButton.setDefault(False)
+        self.findDataButton = QPushButton("Load Gallery Images")
+        self.findDataButton.setDefault(False)
 
         self.createTopLeftGroupBox()
         self.createTopRightGroupBox()
         # self.createProgressBar()
 
-        findDataButton.pressed.connect(self.loadGallery)
+        self.findDataButton.pressed.connect(self.loadGallery)
         self.qptiffEntry.textEdited.connect(self.saveQptiff)
         self.dataEntry.textEdited.connect(self.saveObjectData)
 
@@ -110,7 +110,7 @@ class ViewerPresets(QDialog):
         topLayout.addWidget(self.qptiffEntry,1,1)
         topLayout.addWidget(dataEntryLabel,2,0,1,0)
         topLayout.addWidget(self.dataEntry,2,1)
-        # topLayout.addWidget(findDataButton,2,1)
+        # topLayout.addWidget(self.findDataButton,2,1)
 
         self.mainLayout = QGridLayout()
         self.mainLayout.addLayout(topLayout, 0, 0, 1, 2)
@@ -118,7 +118,7 @@ class ViewerPresets(QDialog):
         self.mainLayout.addWidget(self.topRightGroupBox, 1, 1)
         # mainLayout.addWidget(self.bottomLeftTabWidget, 2, 0)
         # mainLayout.addWidget(self.bottomRightGroupBox, 2, 1)
-        self.mainLayout.addWidget(findDataButton,2,0,1,0)
+        self.mainLayout.addWidget(self.findDataButton,2,0,1,0)
         
         self.mainLayout.setRowStretch(1, 1)
         self.mainLayout.setRowStretch(2, 1)
@@ -260,7 +260,7 @@ class ViewerPresets(QDialog):
         layout.addWidget(explanationLabel3,3,0)
         layout.addWidget(self.numCellsToRead,3,1)
 
-        # layout.addWidget(findDataButton)
+        # layout.addWidget(self.findDataButton)
         layout.rowStretch(-100)
         self.topRightGroupBox.setLayout(layout)
 
@@ -289,6 +289,7 @@ class ViewerPresets(QDialog):
         QApplication.processEvents()
 
     def loadGallery(self):
+        self.findDataButton.setEnabled(False) # disable load button after click
         store_and_load.storeObject(self.userInfo, 'data/presets')
         # Correct color order
         self.userInfo._correct_color_order()
