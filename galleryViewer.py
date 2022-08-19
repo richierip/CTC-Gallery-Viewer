@@ -21,8 +21,6 @@ from matplotlib import pyplot as plt
 # norm = plt.Normalize()
 import copy
 
-from zmq import CHANNEL
-
 #-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------#
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
 cell_colors = ['Greys', 'Purples' , 'Blues', 'Greens', 'Oranges','Reds', 'copper', 'twilight']
@@ -43,12 +41,6 @@ CHANNEL_ORDER = None # to save variable position data for channels (they can be 
 VIEWER = None
 SC_DATA = None # Using this to store data to coerce the exec function into doing what I want
 IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}
-# CHANNEL_ORDER[CHANNELS.index(chn_pos)]
-# Probably won't be used - both image and object data use same units in my example
-def map_coords(array_shape, cellx,celly):
-    array_x_length = array_shape[0]
-    array_y_length = array_shape[1]
-
 
 #------------------------- MagicGUI Widgets, Functions, and accessories ---------------------#
 
@@ -96,7 +88,7 @@ def adjust_composite(layer, gamma):
 
 
     composite = []
-    # get data from other CHECKED channels
+    # get data from other CHECKED channels, not including Composite (always 8)
     need_gamma_adjustment = copy.copy(ADJUSTED)
     need_gamma_adjustment.remove(8)
     fluors_only = copy.copy(CHANNELS)
@@ -107,6 +99,7 @@ def adjust_composite(layer, gamma):
         chn_str = CHANNEL_ORDER[chn_pos]
         chn_str = chn_str.lstrip('OPAL') # OPAL is not in the name of the data key
         # gamma adjust
+        # y = range*(x/range)^gamma
         if chn_pos in need_gamma_adjustment:
             print(f'Will gamma adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
@@ -135,6 +128,7 @@ def adjust_composite(layer, gamma):
         rgb_maxes.append(np.max(temp))
     
     for i in range(3):
+        # print(f'Current max is {rgb_maxes[i]} and type is {type(rgb_maxes[i])}\n')
         composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
         composite[:,:,i] = composite[:,:,i] /(float(rgb_maxes[i]) - float(rgb_mins[i]))
         composite[:,:,i] = composite[:,:,i] * 255.0
@@ -303,7 +297,8 @@ def add_layers(viewer,pyramid, cells, offset):
                 # cell_punchout = custom_map(cell_punchout_raw)*255
                 print(f'color chosen is |{cell_colors[i]}|')
 
-                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor= len(CHANNELS)-1) 
+                print(f'len of channels is {len(CHANNELS)}')
+                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor= 1) 
 
                 # STORING in global dicts
                 IMAGE_DATA_ORIGINAL[cell_name] = cell_punchout; IMAGE_DATA_ADJUSTED[cell_name] = cell_punchout
@@ -410,7 +405,6 @@ def GUI_execute_cheat(userInfo):
     main()
 
 def main():
-
     # print(f'dumping globals before checkbox\n {globals()}')
     #    # Execution loop - need to call it here to get the names into the namespace
     
@@ -457,13 +451,13 @@ def main():
         center_y = int((row['YMax']+row['YMin'])/2)
         tumor_cell_XYs.append([center_x, center_y, row["Object Id"]])
 
-    cell1 = [16690, 868]
-    cell2 = [4050, 1081]
+    # cell1 = [16690, 868]
+    # cell2 = [4050, 1081]
 
-    sample_cell_dict = {}
-    sample_cell_dict['cell_x'] = cell1[0] ; sample_cell_dict['cell_y'] = cell1[1]
-    sample_cell_dict['slidewidth'] = pyramid.shape[0]
-    sample_cell_dict['slidelength'] = pyramid.shape[1]
+    # sample_cell_dict = {}
+    # sample_cell_dict['cell_x'] = cell1[0] ; sample_cell_dict['cell_y'] = cell1[1]
+    # sample_cell_dict['slidewidth'] = pyramid.shape[0]
+    # sample_cell_dict['slidelength'] = pyramid.shape[1]
     
     viewer = napari.Viewer(title='CTC Gallery')
     print(f'$$$$$$ OFFSET is {OFFSET}')
@@ -471,11 +465,16 @@ def main():
     global VIEWER
     VIEWER = viewer
     viewer.grid.enabled = True
-    viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)) # +1 when plotting the shitty composite
+    viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)) # +1 when plotting the shitty composite'
+    #viewer.grid.stride #TODO use this to stack some layers (text, colored shape to indicate decision)
+    #  on top of each cell image
+
+    #TODO arrange these more neatly
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
 
+    #TODO make some keybindings - probably don't put them here though
     # @VIEWER.bind_key('h')
     # def hello_world(viewer):
     #     # on key press
@@ -494,8 +493,6 @@ def main():
     #adjust_gamma(viewer,0.5)
 
     napari.run()
-
-
 
 if __name__ == '__main__':
     main()

@@ -1,6 +1,16 @@
 # Custom #
 ###################
 dist/
+__pycache__/
+data/presets
+data/composite.txt
+*.spec
+sample_UI.py
+mp_test.py
+QPTIFF_test.py
+threading_test.py
+setup.py
+
 
 # Compiled source #
 ###################
