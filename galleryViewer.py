@@ -196,14 +196,14 @@ def adjust_composite_limits(layer, limit_type, limit_val):
         # gamma adjust
         # y = range*(x/range)^gamma
         if chn_pos in need_contrast_adjustment:
-            print(f'Will gamma adjust {chn_str}')
+            print(f'Will contrast adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
 
             if limit_type == 'white-in':
-                super_threshold_indices = chn_data > limit_val
-                chn_data[super_threshold_indices] = 255.0
+                super_threshold_indices = chn_data > limit_val / 255.0
+                chn_data[super_threshold_indices] = 1
             elif limit_type == 'black-in':
-                super_threshold_indices = chn_data < limit_val
+                super_threshold_indices = chn_data < limit_val / 255.0
                 chn_data[super_threshold_indices] = 0
             else:
                 raise Exception(f"Invalid parameter: {limit_type}. Contrast adjustment must be either 'white-in' or 'black-in'")
@@ -212,7 +212,9 @@ def adjust_composite_limits(layer, limit_type, limit_val):
             # print(f'Checking dimensions of chn_data: {np.asarray(chn_data).shape}')
             IMAGE_DATA_ADJUSTED[stripped_name+chn_str] = chn_data # store adjustments
         else:
+            print(f'Just fetching {chn_str} data...')
             chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
+        print(f'Converting back to rgb, using the {fluor_to_color[chn_str]} palette ...')
         chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)
         composite.append([chn_data])
 
@@ -447,9 +449,7 @@ def add_layers(viewer,pyramid, cells, offset):
                 #TODO should be pre-RGB mapping intensities so that white-in / black-in threshold
                 #   can be properly applied. Need to copy that code again somewhere I guess
 
-                cp_save = cell_punchout_raw - np.min(cell_punchout_raw)
-                cp_save = cp_save / (np.max(cell_punchout_raw) - np.min(cell_punchout_raw))
-                cp_save = cp_save * 255.0
+                cp_save = cell_punchout_raw 
                 IMAGE_DATA_ORIGINAL[cell_name] = cp_save; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
 
                 # # Gamma correct right here since there's a bug that doesn't allow passing the the viewer
