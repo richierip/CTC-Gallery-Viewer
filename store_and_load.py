@@ -8,7 +8,7 @@ This file holds the user controlled information and methods to store that info p
 import pickle
 import copy
 
-CELL_COLORS = ['Greys', 'Purples' , 'Blues', 'Greens', 'Oranges','Reds', 'copper', 'twilight']
+CELL_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'pink', 'cyan']
 # qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
 # OFFSET = 100 # pixels?
 # CELL_START = 100
