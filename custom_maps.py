@@ -1,12 +1,20 @@
 # Utility file to return custom colormaps
+# Each look-up table will be used to convert one intensity (luminescence) value 
+#   to the RGB value of the corresponding color.
 import numpy as np
 
-def create_red_cm():
+def create_red_lut():
+    # numpy will interpolate between these endpoint values to create 
+    # all 256 rows of the LUT
     colors = np.linspace(
         start=[0, 0, 0, 1],
         stop=[1, 0, 0, 1],
         num=256,
         endpoint=True)
+    return colors
+
+def create_red_cm():
+    colors = create_red_lut()
 
     red_colormap = {
         'colors': colors,
@@ -14,20 +22,16 @@ def create_red_cm():
         'interpolation': 'linear'}
     return red_colormap
 
-def create_red_lut():
-    colors = np.linspace(
-        start=[0, 0, 0, 1],
-        stop=[1, 0, 0, 1],
-        num=256,
-        endpoint=True)
-    return colors
-
-def create_green_cm():
+def create_green_lut():
     colors = np.linspace(
         start=[0, 0, 0, 1],
         stop=[0, 1, 0, 1],
         num=256,
         endpoint=True)
+    return colors
+
+def create_green_cm():
+    colors = create_green_lut()
 
     green_colormap = {
         'colors': colors,
@@ -35,21 +39,16 @@ def create_green_cm():
         'interpolation': 'linear'}
     return green_colormap
 
-def create_green_lut():
-    colors = np.linspace(
-        start=[0, 0, 0, 1],
-        stop=[0, 1, 0, 1],
-        num=256,
-        endpoint=True)
-
-    return colors
-
-def create_blue_cm():
+def create_blue_lut():
     colors = np.linspace(
         start=[0, 0, 0, 1],
         stop=[0, 0, 1, 1],
         num=256,
         endpoint=True)
+    return colors
+
+def create_blue_cm():
+    colors = create_blue_lut()
 
     blue_colormap = {
         'colors': colors,
@@ -57,21 +56,18 @@ def create_blue_cm():
         'interpolation': 'linear'}
     return blue_colormap
 
-def create_blue_lut():
-    colors = np.linspace(
-        start=[0, 0, 0, 1],
-        stop=[0, 0, 1, 1],
-        num=256,
-        endpoint=True)
-
-    return colors
-
-def create_Pink_cm():
+# matplotlib has a 'pink' already, and won't allow one to be registered with the same
+#   name. To keep it straight this one will be capitalized
+def create_Pink_lut():
     colors = np.linspace(
         start=[0, 0, 0, 1],
         stop=[1, 0, 1, 1],
         num=256,
         endpoint=True)
+    return colors
+
+def create_Pink_cm():
+    colors = create_Pink_lut()
 
     pink_colormap = {
         'colors': colors,
@@ -79,21 +75,16 @@ def create_Pink_cm():
         'interpolation': 'linear'}
     return pink_colormap
 
-def create_Pink_lut():
-    colors = np.linspace(
-        start=[0, 0, 0, 1],
-        stop=[1, 0, 1, 1],
-        num=256,
-        endpoint=True)
-
-    return colors
-
-def create_yellow_cm():
+def create_yellow_lut():
     colors = np.linspace(
         start=[0, 0, 0, 1],
         stop=[1, 1, 0, 1],
         num=256,
         endpoint=True)
+    return colors
+
+def create_yellow_cm():
+    colors = create_yellow_lut()
 
     yellow_colormap = {
         'colors': colors,
@@ -101,21 +92,16 @@ def create_yellow_cm():
         'interpolation': 'linear'}
     return yellow_colormap
 
-def create_yellow_lut():
-    colors = np.linspace(
-        start=[0, 0, 0, 1],
-        stop=[1, 1, 0, 1],
-        num=256,
-        endpoint=True)
-
-    return colors
-
-def create_cyan_cm():
+def create_cyan_lut():
     colors = np.linspace(
         start=[0, 0, 0, 1],
         stop=[0, 1, 1, 1],
         num=256,
         endpoint=True)
+    return colors
+    
+def create_cyan_cm():
+    colors = create_cyan_lut()
 
     cyan_colormap = {
         'colors': colors,
@@ -123,21 +109,16 @@ def create_cyan_cm():
         'interpolation': 'linear'}
     return cyan_colormap
 
-def create_cyan_lut():
-    colors = np.linspace(
-        start=[0, 0, 0, 1],
-        stop=[0, 1, 1, 1],
-        num=256,
-        endpoint=True)
-
-    return colors
-
-def create_orange_cm():
+def create_orange_lut():
     colors = np.linspace(
         start=[0, 0, 0, 1],
         stop=[1, 0.647, 0, 1],
         num=256,
         endpoint=True)
+    return colors
+
+def create_orange_cm():
+    colors = create_orange_lut()
 
     orange_colormap = {
         'colors': colors,
@@ -145,21 +126,16 @@ def create_orange_cm():
         'interpolation': 'linear'}
     return orange_colormap
 
-def create_orange_lut():
-    colors = np.linspace(
-        start=[0, 0, 0, 1],
-        stop=[1, 0.647, 0, 1],
-        num=256,
-        endpoint=True)
-
-    return colors
-
-def create_purple_cm():
+def create_purple_lut():
     colors = np.linspace(
         start=[0, 0, 0, 1],
         stop=[0.627, 0.125, 0.941, 1],
         num=256,
         endpoint=True)
+    return colors
+
+def create_purple_cm():
+    colors = create_purple_lut()
 
     purple_colormap = {
         'colors': colors,
@@ -167,33 +143,19 @@ def create_purple_cm():
         'interpolation': 'linear'}
     return purple_colormap
 
-def create_purple_lut():
-    colors = np.linspace(
-        start=[0, 0, 0, 1],
-        stop=[0.627, 0.125, 0.941, 1],
-        num=256,
-        endpoint=True)
-
-    return colors
-
-def create_gray_cm():
-    colors = np.linspace(
-        start=[0, 0, 0, 1],
-        stop=[1, 0.647, 1, 1],
-        num=256,
-        endpoint=True)
-
-    gray_colormap = {
-        'colors': colors,
-        'name': 'Gray',
-        'interpolation': 'linear'}
-    return gray_colormap
-
 def create_gray_lut():
     colors = np.linspace(
         start=[0, 0, 0, 1],
         stop=[1, 0.647, 1, 1],
         num=256,
         endpoint=True)
-
     return colors
+
+def create_gray_cm():
+    colors = create_gray_lut()
+
+    gray_colormap = {
+        'colors': colors,
+        'name': 'Gray',
+        'interpolation': 'linear'}
+    return gray_colormap
