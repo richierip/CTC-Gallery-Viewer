@@ -300,11 +300,12 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
                 ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
 
 # Called in a loop to create as many GUI elements as needed
-def dynamic_checkbox_creator(checkbox_name):
+def dynamic_checkbox_creator(checkbox_name, setChecked = True):
+
     @magicgui(auto_call=True,
-            check={"widget_type": "CheckBox", "text": checkbox_name},
+            check={"widget_type": "CheckBox", "text": checkbox_name, "value": setChecked},
             layout = 'horizontal')
-    def myfunc(check: bool = True):
+    def myfunc(check: bool = setChecked):
         # print(f'in myfunc backend CHANNELS are {CHANNELS}, and {CHANNELS_STR}. Trying to remove {checkbox_name}, whose global value is {globals()[checkbox_name]}, from {ADJUSTED}')
         if check:
             ADJUSTED.append(globals()[checkbox_name])
@@ -317,9 +318,19 @@ def dynamic_checkbox_creator(checkbox_name):
 # print(f'dir is {dir()}')
 def checkbox_setup():
     for checkbox_name in CHANNELS_STR:   
-        exec(f"globals()[\'{checkbox_name+'_box'}\'] = globals()[\'dynamic_checkbox_creator\'](checkbox_name)") # If doing this is wrong I don't want to be right
-    
+        #Turn off composite by default.
+        if checkbox_name == 'Composite':
+            exec(f"globals()[\'{checkbox_name+'_box'}\'] = globals()[\'dynamic_checkbox_creator\'](checkbox_name, setChecked=False)") # If doing this is wrong I don't want to be right
+        else:
+            exec(f"globals()[\'{checkbox_name+'_box'}\'] = globals()[\'dynamic_checkbox_creator\'](checkbox_name)")
 checkbox_setup()
+
+# This is called in GUI_execute, because the global 'ADJUSTED' variable will be changed at that time. 
+# We want to make sure that the backend bookkeeping is congruent with the front-end checkbox, which is 
+#   unchecked by now.  
+def fix_default_composite_adj():
+    global ADJUSTED
+    ADJUSTED = list(filter(lambda a: a != globals()["Composite"], ADJUSTED))
 #------------------------- Image loading and processing functions ---------------------#
 
 #TODO consider combining numpy arrays before adding layers? So that we create ONE image, and have ONE layer
@@ -548,6 +559,7 @@ def GUI_execute(userInfo):
             exec(f"globals()['CHANNELS'].append({chn})")
     print(f'GUI execute channels are {CHANNELS}')
     ADJUSTED = copy.copy(CHANNELS)
+    fix_default_composite_adj()
 
     # for checkbox_name in CHANNELS_STR:   
     #     print(f'checkbox name is {checkbox_name} and type is {type(checkbox_name)}')
@@ -644,6 +656,7 @@ def main():
     for marker_function in CHANNELS_STR:
         # Only make visible the chosen markers
         exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
+    
     #adjust_gamma(viewer,0.5)
 
     napari.run()
