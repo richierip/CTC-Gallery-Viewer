@@ -12,6 +12,7 @@ from napari.types import ImageData
 from magicgui import magicgui
 import numpy as np
 import pandas as pd
+import openpyxl
 # import skimage.filters
 # import gc # might garbage collect later
 # import math
@@ -342,6 +343,21 @@ def fix_default_composite_adj():
 def add_layers(viewer,pyramid, cells, offset):
     # Make the color bar that appears to the left of the composite image
     status_colors = {"unseen":"gray", "needs review":"bop orange", "confirmed":"green", "rejected":"red" }
+    hdata = pd.read_csv(OBJECT_DATA)
+
+    def retrieve_status(cell_id):
+        print(f'Getting status for {cell_id}')
+        try:
+            status = hdata.loc[hdata['Object Id'] == cell_id, "Validation"].values[0]
+            print(f'Got it. Status is .{status}.')
+        except:
+            # Colum doesn't exist, use default
+            status = "unseen"
+            print(f'exception. Could not grab status')
+        if type(status) is not str or status not in status_colors.keys():
+            status = "unseen"
+        return status
+
     def add_status_bar(viewer, name, status = 'unseen'):
         x = np.array([[0,255,0]])
         y = np.repeat(x,[OFFSET-8,4,4],axis=1)
@@ -392,7 +408,7 @@ def add_layers(viewer,pyramid, cells, offset):
                 status_layer.colormap = status_colors[next_status]
                 status_layer.name = name.split('_')[0] +'_'+next_status 
             else:
-                print('passing')
+                # print('passing')
                 pass
 
     def add_layer(viewer, layer, name, colormap = None, contr = [0,255] ):
@@ -611,11 +627,47 @@ def add_layers(viewer,pyramid, cells, offset):
         # print(f'also the shape is {composite.shape}') # (100,100,4)
         
         add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
-        add_status_bar(viewer, f'Cell {cell_id} status')
+        add_status_bar(viewer, f'Cell {cell_id} status', retrieve_status(cell_id))
         if len(cells) == 5:
             np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
 
     return True
+def sv_wrapper():
+    @VIEWER.bind_key('s')
+    def save_validation(VIEWER):
+        print(f'reading from {OBJECT_DATA}')
+        hdata = pd.read_csv(OBJECT_DATA)
+        try:
+            status = hdata[hdata["Object Id"]==0,"Validation"]
+        except:
+            hdata.insert(4,"Validation", "unseen", allow_duplicates=True)
+            hdata.loc[hdata[PHENOTYPE]==0,"Validation"] = ""
+
+        for layer in VIEWER.layers:
+            if 'status' in layer.name:
+                status = layer.name.split('_')[1]
+                cell_id = layer.name.split()[1]
+            else:
+                continue
+            
+            print(f"LName: {layer.name} , status {status}, cid {cell_id}")
+            try:
+                hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
+            except:
+                print("There's an issue... ")
+        try:
+            VIEWER.status = 'Saving ...'
+            hdata.to_csv(OBJECT_DATA, index=False)
+            VIEWER.status = 'Done saving!'
+            return None
+        except:
+            # Maybe it's an excel sheet?
+            VIEWER.status = 'There was a problem. Close your data file?'
+            return None
+            # hdata.loc[:,1:].to_excel(
+            # OBJECT_DATA,sheet_name='Exported from gallery viewer')
+        VIEWER.status = 'Done saving!'
+#------------------------- Remote Execution + Main ---------------------#
 
 ''' Reset globals and proceed to main '''
 def GUI_execute(userInfo):
@@ -647,7 +699,6 @@ def GUI_execute(userInfo):
     # for checkbox_name in CHANNELS_STR:   
     #     print(f'checkbox name is {checkbox_name} and type is {type(checkbox_name)}')
     #     exec(f"globals()[\'{checkbox_name+'_box'}\'].show()") # If doing this is wrong I don't want to be right
-
     main()
 
 def GUI_execute_cheat(userInfo):
@@ -741,7 +792,7 @@ def main():
         exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
     
     #adjust_gamma(viewer,0.5)
-
+    sv_wrapper()
     napari.run()
 
 if __name__ == '__main__':
