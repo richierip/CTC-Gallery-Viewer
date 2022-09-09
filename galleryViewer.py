@@ -638,7 +638,7 @@ def sv_wrapper():
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            status = hdata[hdata["Object Id"]==0,"Validation"]
+            status = hdata.loc[hdata["Object Id"]==0,"Validation"].values[0]
         except:
             hdata.insert(4,"Validation", "unseen", allow_duplicates=True)
             hdata.loc[hdata[PHENOTYPE]==0,"Validation"] = ""
@@ -797,6 +797,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-

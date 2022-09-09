@@ -16,6 +16,9 @@ CELL_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'pi
 DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
 CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF"]
 CHANNELS = [DAPI, OPAL570, OPAL690, OPAL480, OPAL620, OPAL780, OPAL520, AF]
+# Currently in the default Opal Motif order. Maybe could change in the future? So use this
+#   variably to determine the order of filters so the software knows which columns in the data
+#   to use. 
 CHANNEL_ORDER = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
 # ADJUSTED = CHANNELS
 
