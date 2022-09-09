@@ -4,6 +4,8 @@ Started on 6/7/22
 Peter Richieri
 '''
 
+from operator import indexOf
+from pydoc import doc
 import tifffile
 import napari
 from napari.types import ImageData
@@ -338,6 +340,61 @@ def fix_default_composite_adj():
 #   Counterpoint - how to apply filters to only some channels if they are in same image?
 #   Counterpoint to counterpoint - never get rid of numpy arrays and remake whole image as needed. 
 def add_layers(viewer,pyramid, cells, offset):
+    # Make the color bar that appears to the left of the composite image
+    status_colors = {"unseen":"gray", "needs review":"bop orange", "confirmed":"green", "rejected":"red" }
+    def add_status_bar(viewer, name, status = 'unseen'):
+        x = np.array([[0,255,0]])
+        y = np.repeat(x,[OFFSET-8,4,4],axis=1)
+        xy = np.repeat(y,OFFSET,axis=0)
+        status_layer = viewer.add_image(xy, name = f'{name}_{status}', colormap = status_colors[status])
+
+        def find_mouse(shape_layer, pos):
+            data_coordinates = shape_layer.world_to_data(pos)
+            coords = np.round(data_coordinates).astype(int)
+            val = None
+            for img in VIEWER.layers:
+                data_coordinates = img.world_to_data(pos)
+                val = img.get_value(data_coordinates)
+                if val is not None:
+                    shape_layer = img
+                    break
+            # val = shape_layer.get_value(data_coordinates)
+            # print(f'val is {val} and type is {type(val)}')
+            coords = np.round(data_coordinates).astype(int)
+            return shape_layer, coords, val
+
+        @status_layer.mouse_move_callbacks.append
+        def display_intensity(shape_layer, event):
+            
+            shape_layer,coords,val = find_mouse(shape_layer, event.position) 
+            if val is None:
+                # print('none')
+                VIEWER.status = f'{shape_layer.name} intensity at {coords}: N/A'
+            else:
+                # print('else')
+                VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
+
+        @status_layer.bind_key('a')
+        def toggle_status(shape_layer):
+            status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
+            for candidate in VIEWER.layers:
+                cellnum = candidate.name.split()[1]
+                if cellnum == status_layer.name.split()[1] and 'status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]:
+                    status_layer = candidate
+                    break
+                else:
+                    continue
+            name = status_layer.name
+            if 'status' in name:
+                cur_status = name.split('_')[1] 
+                cur_index = list(status_colors.keys()).index(cur_status)
+                next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
+                status_layer.colormap = status_colors[next_status]
+                status_layer.name = name.split('_')[0] +'_'+next_status 
+            else:
+                print('passing')
+                pass
+
     def add_layer(viewer, layer, name, colormap = None, contr = [0,255] ):
 
         #TODO Decide: here or later (After RGB color mapping?)
@@ -376,26 +433,51 @@ def add_layers(viewer,pyramid, cells, offset):
             print(f'\n ~~~ Adding RGB Image auto contrast limit ~~~ \n')
             shape_layer = viewer.add_image(layer, name = name, gamma = 0.5)
 
-        @shape_layer.mouse_move_callbacks.append
-        def display_intensity(shape_layer, event):
-            data_coordinates = shape_layer.world_to_data(event.position)
+        def find_mouse(shape_layer, pos):
+            data_coordinates = shape_layer.world_to_data(pos)
             coords = np.round(data_coordinates).astype(int)
             val = None
             for img in VIEWER.layers:
-                data_coordinates = img.world_to_data(event.position)
+                data_coordinates = img.world_to_data(pos)
                 val = img.get_value(data_coordinates)
                 if val is not None:
                     shape_layer = img
                     break
-            coords = np.round(data_coordinates).astype(int)
             # val = shape_layer.get_value(data_coordinates)
             # print(f'val is {val} and type is {type(val)}')
+            coords = np.round(data_coordinates).astype(int)
+            return shape_layer, coords, val
+
+        @shape_layer.mouse_move_callbacks.append
+        def display_intensity(shape_layer, event):
+            
+            shape_layer,coords,val = find_mouse(shape_layer, event.position) 
             if val is None:
                 # print('none')
                 VIEWER.status = f'{shape_layer.name} intensity at {coords}: N/A'
             else:
                 # print('else')
                 VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
+
+        @shape_layer.bind_key('a')
+        def toggle_status(shape_layer):
+            status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
+            for candidate in VIEWER.layers:
+                cellnum = candidate.name.split()[1]
+                if cellnum == status_layer.name.split()[1] and 'status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]:
+                    status_layer = candidate
+                    break
+                else:
+                    continue
+            name = status_layer.name
+            if 'status' in name:
+                cur_status = name.split('_')[1] 
+                cur_index = list(status_colors.keys()).index(cur_status)
+                next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
+                status_layer.colormap = status_colors[next_status]
+                status_layer.name = name.split('_')[0] +'_'+next_status 
+            else:
+                pass
 
         return True
     # def add_layer_rgb(viewer, layer, name):
@@ -529,6 +611,7 @@ def add_layers(viewer,pyramid, cells, offset):
         # print(f'also the shape is {composite.shape}') # (100,100,4)
         
         add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
+        add_status_bar(viewer, f'Cell {cell_id} status')
         if len(cells) == 5:
             np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
 
@@ -631,7 +714,7 @@ def main():
     global VIEWER
     VIEWER = viewer
     viewer.grid.enabled = True
-    viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)) # +1 when plotting the shitty composite'
+    viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)+1) # +1 when plotting the shitty composite'
     #viewer.grid.stride #TODO use this to stack some layers (text, colored shape to indicate decision)
     #  on top of each cell image
 
