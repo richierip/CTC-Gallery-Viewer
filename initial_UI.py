@@ -15,6 +15,7 @@ import store_and_load
 from galleryViewer import GUI_execute, GUI_execute_cheat
 import ctypes
 import threading
+import logging
 
 
 FONT_SIZE = 12
@@ -307,6 +308,14 @@ class ViewerPresets(QDialog):
         t.daemon = True
         t.start()
         print(f'progress bar thread w/daemon should be started now...')
+
+        # logpath = r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\crashlog.txt"
+        # logging.basicConfig(filename=logpath, encoding='utf-8', level=logging.DEBUG)
+        # try:
+        #     GUI_execute(self.userInfo)
+        # except Exception as e:
+        #     logging.exception("Napari crashed after trying to load QPTiff with GUI load button. Error: %s", e)
+
         GUI_execute(self.userInfo)
         # exit(0)
 
