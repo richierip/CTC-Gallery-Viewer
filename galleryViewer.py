@@ -3,7 +3,7 @@ CTC viewer for Napari
 Started on 6/7/22
 Peter Richieri
 '''
-
+# import imagecodecs
 from operator import indexOf
 from pydoc import doc
 import tifffile
@@ -632,6 +632,16 @@ def add_layers(viewer,pyramid, cells, offset):
             np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
 
     return True
+
+def add_custom_colors():
+    for colormap in cell_colors:
+        if colormap == 'gray': continue
+        elif colormap =='pink': colormap='Pink'
+        exec(f'my_map = custom_maps.create_{colormap}_lut()')
+        exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
+        exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
+    return None
+
 def sv_wrapper():
     @VIEWER.bind_key('s')
     def save_validation(VIEWER):
@@ -707,7 +717,7 @@ def GUI_execute_cheat(userInfo):
 def main():
     # print(f'dumping globals before checkbox\n {globals()}')
     #    # Execution loop - need to call it here to get the names into the namespace
-    
+    # add_custom_colors()
     # print(f'dumping globals AFTER\n {globals()}')
     with tifffile.Timer(f'\nLoading pyramid from {qptiff}...\n'):
         pyramid = tifffile.imread(qptiff)
