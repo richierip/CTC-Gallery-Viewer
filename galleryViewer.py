@@ -29,12 +29,15 @@ import copy
 #-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------#
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
 cell_colors = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'Pink', 'cyan']
+print('\n--------------- adding custom cmaps\n')
 
 for colormap in cell_colors:
+    print(f'cmap: {colormap}')
     if colormap == 'gray': continue
     exec(f'my_map = custom_maps.create_{colormap}_lut()')
     exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
     exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
+print(f'\n---------My colormaps are now {plt.colormaps()}--------\n')
 fluor_to_color = {}
 qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
 OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
@@ -345,6 +348,8 @@ def add_layers(viewer,pyramid, cells, offset):
     status_colors = {"unseen":"gray", "needs review":"bop orange", "confirmed":"green", "rejected":"red" }
     hdata = pd.read_csv(OBJECT_DATA)
 
+    print(f'\n---------Inside add_layers My colormaps are now {plt.colormaps()}--------\n')
+
     def retrieve_status(cell_id):
         print(f'Getting status for {cell_id}')
         try:
@@ -441,7 +446,8 @@ def add_layers(viewer,pyramid, cells, offset):
         # even thought the slider gui shows the change
         #   Will have to do something else.
         if colormap is not None: # Luminescence image
-            shape_layer = viewer.add_image(layer, name = name, colormap = colormap, contrast_limits = contr, gamma = 0.5)
+            shape_layer = viewer.add_image(layer, name = name, contrast_limits = contr, gamma = 0.5)
+            shape_layer.colormap = custom_maps.retrieve_lut(colormap)
         elif contr is not None: # RBG image
             print(f'\n ~~~ Adding RGB Image ~~~ \n')
             shape_layer = viewer.add_image(layer, name = name, contrast_limits = contr, gamma = 0.5)
@@ -535,7 +541,8 @@ def add_layers(viewer,pyramid, cells, offset):
                 #   altering the composite image later (white-in / black-in)
                 global fluor_to_color; fluor_to_color[fluor] = cell_colors[i]
                 cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
-
+                print(f'\n---------inside add_layer My colormaps are now {plt.colormaps()}--------\n')
+                print(f'\nTrying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}\n')
                 add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
 
 

@@ -2,6 +2,7 @@
 # Each look-up table will be used to convert one intensity (luminescence) value 
 #   to the RGB value of the corresponding color.
 import numpy as np
+import matplotlib
 
 def create_red_lut():
     # numpy will interpolate between these endpoint values to create 
@@ -159,3 +160,19 @@ def create_gray_cm():
         'name': 'Gray',
         'interpolation': 'linear'}
     return gray_colormap
+
+red = create_red_cm()
+cyan = create_cyan_cm()
+green = create_green_cm()
+gray = create_gray_cm()
+orange = create_orange_cm()
+purple = create_purple_cm()
+pink = create_Pink_cm()
+blue = create_blue_cm()
+yellow = create_yellow_cm()
+
+cm_dict = {'red':red,"cyan":cyan,"green":green,"gray":gray,"orange":orange,
+            "purple":purple,"pink":pink,"blue":blue,"yellow":yellow}
+
+def retrieve_lut(cmstr):
+    return cm_dict[cmstr]

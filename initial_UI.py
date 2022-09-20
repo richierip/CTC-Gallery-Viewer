@@ -16,10 +16,6 @@ from galleryViewer import GUI_execute, GUI_execute_cheat
 import ctypes
 import threading
 import logging
-<<<<<<< HEAD
-=======
-
->>>>>>> fixed
 
 FONT_SIZE = 12
 DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
