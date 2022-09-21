@@ -539,6 +539,7 @@ def add_layers(viewer,pyramid, cells, offset):
                 # print(f'Adding cell {cell_x},{cell_y} - layer {i}')
                 # Save record of what colormap is chosen for what fluor. Useful for 
                 #   altering the composite image later (white-in / black-in)
+                if cell_colors[i] == 'pink': cell_colors[i] = 'Pink'
                 global fluor_to_color; fluor_to_color[fluor] = cell_colors[i]
                 cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
                 print(f'\n---------inside add_layer My colormaps are now {plt.colormaps()}--------\n')

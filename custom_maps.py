@@ -172,7 +172,7 @@ blue = create_blue_cm()
 yellow = create_yellow_cm()
 
 cm_dict = {'red':red,"cyan":cyan,"green":green,"gray":gray,"orange":orange,
-            "purple":purple,"pink":pink,"blue":blue,"yellow":yellow}
+            "purple":purple,"pink":pink,"Pink":pink,"blue":blue,"yellow":yellow}
 
 def retrieve_lut(cmstr):
     return cm_dict[cmstr]

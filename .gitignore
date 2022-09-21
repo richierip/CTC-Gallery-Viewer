@@ -1,15 +1,18 @@
 # Custom #
 ###################
+build/
 dist/
+ctc-gallery-venv/
 __pycache__/
 data/presets
+data/SCDATA.txt
 data/composite.txt
-*.spec
 sample_UI.py
 mp_test.py
 QPTIFF_test.py
 threading_test.py
 setup.py
+test.spec
 
 
 # Compiled source #
