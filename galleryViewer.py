@@ -4,8 +4,9 @@ Started on 6/7/22
 Peter Richieri
 '''
 # import imagecodecs
-from operator import indexOf
-from pydoc import doc
+# from operator import indexOf
+# from pydoc import doc
+# from statistics import mode
 import tifffile
 import napari
 from napari.types import ImageData
@@ -26,7 +27,7 @@ import custom_maps
 # norm = plt.Normalize()
 import copy
 
-#-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------#
+######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
 cell_colors = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'Pink', 'cyan']
 print('\n--------------- adding custom cmaps\n')
@@ -58,7 +59,7 @@ SC_DATA = None # Using this to store data to coerce the exec function into doing
 TEMP = None
 IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}
 
-#------------------------- MagicGUI Widgets, Functions, and accessories ---------------------#
+######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
 
 def validate_adjustment(layer):
     layer_name = layer.name.split()[2] # grab last part of label
@@ -89,6 +90,7 @@ def validate_adjustment(layer):
 #     datapoint = str(VIEWER.Layers.Image.get_value() )
 #     show_intensity.show()
 
+## --- Composite functions 
 def adjust_composite_gamma(layer, gamma):
     def _convert_to_rgb(data, colormap, divisor):
         # You have to do it like this. Seriously. 
@@ -249,6 +251,7 @@ def adjust_composite_limits(layer, limit_type, limit_val):
     print(f'Final check of dimensions of composite before setting data: {np.asarray(composite).shape}')
     layer.data = composite.astype('int') # casting is crucial
 
+## --- Bottom bar functions and GUI elements 
 def adjust_gamma(viewer, gamma):
     for ctclayer in viewer.layers:
         # If the composite GUI box is checked, just change the composite and 
@@ -337,18 +340,48 @@ checkbox_setup()
 def fix_default_composite_adj():
     global ADJUSTED
     ADJUSTED = list(filter(lambda a: a != globals()["Composite"], ADJUSTED))
-#------------------------- Image loading and processing functions ---------------------#
+
+## --- Side bar functions and GUI elements 
+
+@magicgui(auto_call=True,
+        mode={"widget_type": "RadioButtons","orientation": "vertical",
+        "choices": [("Show all channels", 1), ("Composite Only", 2)]})#,layout = 'horizontal')
+def toggle_composite_viewstatus(mode: int = 1):
+    if mode == 1: # change to Show All
+        pass
+    elif mode ==2: # change to composite only
+        pass
+    else:
+        raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {mode}. Must be 1 or 2.")
+    return None
+
+@magicgui(auto_call=True,
+        Status_Bar_Visibility={"widget_type": "RadioButtons","orientation": "vertical",
+        "choices": [("Show", 1), ("Hide", 2)]})
+def toggle_statusbar_visibility(Status_Bar_Visibility: int=1):
+    if Status_Bar_Visibility==1:
+        pass
+    elif Status_Bar_Visibility==2:
+        pass
+    else:
+        raise Exception(f"Invalid parameter passed to toggle_statusbar_visibility: {Status_Bar_Visibility}. Must be 1 or 2.")
+    return None
+######------------------------- Image loading and processing functions ---------------------######
 
 #TODO consider combining numpy arrays before adding layers? So that we create ONE image, and have ONE layer
 #   for the ctc cells. Gallery mode might end up being a pain for downstream.
 #   Counterpoint - how to apply filters to only some channels if they are in same image?
 #   Counterpoint to counterpoint - never get rid of numpy arrays and remake whole image as needed. 
-def add_layers(viewer,pyramid, cells, offset):
+def add_layers(viewer,pyramid, cells, offset, show_all=True):
     # Make the color bar that appears to the left of the composite image
     status_colors = {"unseen":"gray", "needs review":"bop orange", "confirmed":"green", "rejected":"red" }
     hdata = pd.read_csv(OBJECT_DATA)
 
-    print(f'\n---------Inside add_layers My colormaps are now {plt.colormaps()}--------\n')
+    # Choice depends on whether we want to be in composite only mode or not
+    if show_all:
+        viewer.grid.stride = 1
+    else:
+        viewer.grid.stride = 2
 
     def retrieve_status(cell_id):
         print(f'Getting status for {cell_id}')
@@ -356,7 +389,7 @@ def add_layers(viewer,pyramid, cells, offset):
             status = hdata.loc[hdata['Object Id'] == cell_id, "Validation"].values[0]
             print(f'Got it. Status is .{status}.')
         except:
-            # Colum doesn't exist, use default
+            # Column doesn't exist, use default
             status = "unseen"
             print(f'exception. Could not grab status')
         if type(status) is not str or status not in status_colors.keys():
@@ -364,8 +397,12 @@ def add_layers(viewer,pyramid, cells, offset):
         return status
 
     def add_status_bar(viewer, name, status = 'unseen'):
-        x = np.array([[0,255,0]])
-        y = np.repeat(x,[OFFSET-8,4,4],axis=1)
+        if show_all:
+            x = np.array([[0,255,0]])
+            y = np.repeat(x,[OFFSET-8,4,4],axis=1)
+        else:
+            x = np.array([[255,0]])
+            y = np.repeat(x,[4,4],axis=1)
         xy = np.repeat(y,OFFSET,axis=0)
         status_layer = viewer.add_image(xy, name = f'{name}_{status}', colormap = status_colors[status])
 
@@ -527,6 +564,7 @@ def add_layers(viewer,pyramid, cells, offset):
         for i in range(pyramid.shape[2]): # loop through channels
             if i in CHANNELS:
                 # name cell layer
+                #TODO this should REALLY be a dictionary lookup...
                 if i==DAPI: fluor='DAPI'
                 elif i==OPAL570: fluor='570'
                 elif i==OPAL690: fluor='690' 
@@ -544,7 +582,9 @@ def add_layers(viewer,pyramid, cells, offset):
                 cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
                 print(f'\n---------inside add_layer My colormaps are now {plt.colormaps()}--------\n')
                 print(f'\nTrying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}\n')
-                add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
+
+                if show_all: # distinguish between normal mode and composite only mode
+                    add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
 
 
                 # normalize to 1.0
@@ -641,6 +681,8 @@ def add_layers(viewer,pyramid, cells, offset):
 
     return True
 
+######------------------------- Misc + Viewer keybindings ---------------------######
+
 def add_custom_colors():
     for colormap in cell_colors:
         if colormap == 'gray': continue
@@ -685,7 +727,7 @@ def sv_wrapper():
             # hdata.loc[:,1:].to_excel(
             # OBJECT_DATA,sheet_name='Exported from gallery viewer')
         VIEWER.status = 'Done saving!'
-#------------------------- Remote Execution + Main ---------------------#
+######------------------------- Remote Execution + Main ---------------------######
 
 ''' Reset globals and proceed to main '''
 def GUI_execute(userInfo):
@@ -786,11 +828,15 @@ def main():
     viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)+1) # +1 when plotting the shitty composite'
     #viewer.grid.stride #TODO use this to stack some layers (text, colored shape to indicate decision)
     #  on top of each cell image
+    # viewer.grid.stride = 2
 
     #TODO arrange these more neatly
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
+
+    viewer.window.add_dock_widget(toggle_composite_viewstatus,name = 'Test', area = 'right')
+    viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test2', area = 'right')
 
     #TODO make some keybindings - probably don't put them here though
     # @VIEWER.bind_key('h')
@@ -804,7 +850,7 @@ def main():
     #     VIEWER.status = 'goodbye world :('
     
     # print(f'\n {dir()}') # prints out the namespace variables 
-    # viewer.window.add_dock_widget(check_test, area = 'bottom')
+    
     for marker_function in CHANNELS_STR:
         # Only make visible the chosen markers
         exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")

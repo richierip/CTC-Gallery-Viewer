@@ -234,7 +234,7 @@ class ViewerPresets(QDialog):
         explanationLabel3 = QLabel("Limit the display to the first ")
 
         self.imageSize = QSpinBox(self.topRightGroupBox)
-        self.imageSize.setRange(50,150)
+        self.imageSize.setRange(50,200)
         self.imageSize.setValue(self.userInfo.imageSize) # Misbehaving?
         self.imageSize.editingFinished.connect(self.saveImageSize)
 
