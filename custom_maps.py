@@ -147,7 +147,7 @@ def create_purple_cm():
 def create_gray_lut():
     colors = np.linspace(
         start=[0, 0, 0, 1],
-        stop=[1, 0.647, 1, 1],
+        stop=[1, 1, 1, 1],
         num=256,
         endpoint=True)
     return colors

@@ -46,7 +46,7 @@ OFFSET = 200 # microns or pixels? Probably pixels
 # CELL_START = 100
 CELL_LIMIT = 15
 PHENOTYPE = 'Tumor'
-CELL_ID_START = 1
+CELL_ID_START = 550 # debug?
 DAPI = 0; OPAL480 = 1; OPAL520 = 2; OPAL570 = 3; OPAL620 = 4; OPAL690 = 5; OPAL780 = 6; AF=7; Composite = 8
 CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
 # CHANNELS_STR = ["DAPI", "OPAL520", "OPAL690", "AF"]
@@ -58,6 +58,7 @@ VIEWER = None
 SC_DATA = None # Using this to store data to coerce the exec function into doing what I want
 TEMP = None
 IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}
+RAW_PYRAMID=None
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
 
@@ -343,14 +344,16 @@ def fix_default_composite_adj():
 
 ## --- Side bar functions and GUI elements 
 
-@magicgui(auto_call=True,
+@magicgui(
         mode={"widget_type": "RadioButtons","orientation": "vertical",
         "choices": [("Show all channels", 1), ("Composite Only", 2)]})#,layout = 'horizontal')
 def toggle_composite_viewstatus(mode: int = 1):
     if mode == 1: # change to Show All
-        pass
+        VIEWER.layers.clear()
+        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(), int(OFFSET/2), show_all=True)
     elif mode ==2: # change to composite only
-        pass
+        VIEWER.layers.clear()
+        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(), int(OFFSET/2), show_all=False)
     else:
         raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {mode}. Must be 1 or 2.")
     return None
@@ -583,9 +586,10 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
                 print(f'\n---------inside add_layer My colormaps are now {plt.colormaps()}--------\n')
                 print(f'\nTrying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}\n')
 
-                if show_all: # distinguish between normal mode and composite only mode
+                if show_all: # distinguish between normal mode and composite only mode?
                     add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
-
+                # else: #Composite mode only
+                    # add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
 
                 # normalize to 1.0
 
@@ -727,6 +731,29 @@ def sv_wrapper():
             # hdata.loc[:,1:].to_excel(
             # OBJECT_DATA,sheet_name='Exported from gallery viewer')
         VIEWER.status = 'Done saving!'
+
+'''Get object data from csv and parse.''' 
+def extract_phenotype_xldata(cell_start=None, cell_limit=None, phenotype=None):
+    # get defaults from global space
+    if cell_start is None: cell_start = CELL_ID_START
+    if cell_limit is None: cell_limit=CELL_LIMIT
+    if phenotype is None: phenotype=PHENOTYPE
+
+    halo_export = pd.read_csv(OBJECT_DATA)
+    halo_export = halo_export.loc[:, ["Object Id", "XMin","XMax","YMin", "YMax", phenotype]]
+    
+    if cell_start < len(halo_export) and cell_start > 0:     
+        halo_export = halo_export[cell_start:] # Exclude cells prior to target ID
+    halo_export = halo_export[halo_export[phenotype]==1]
+    if cell_limit < len(halo_export) and cell_limit > 0:
+        halo_export = halo_export[:cell_limit] # pare down cell list (now containing only phenotype of interest) to desired length
+    tumor_cell_XYs = []
+    for index,row in halo_export.iterrows():
+        center_x = int((row['XMax']+row['XMin'])/2)
+        center_y = int((row['YMax']+row['YMin'])/2)
+        tumor_cell_XYs.append([center_x, center_y, row["Object Id"]])
+
+    return tumor_cell_XYs
 ######------------------------- Remote Execution + Main ---------------------######
 
 ''' Reset globals and proceed to main '''
@@ -796,21 +823,11 @@ def main():
         firstLayer = pyramid[:,:,0]
     print(f'Single layer shape is {firstLayer.shape}\n')
 
-    # Get object data from csv and parse.
-    halo_export = pd.read_csv(OBJECT_DATA)
-    halo_export = halo_export.loc[:, ["Object Id", "XMin","XMax","YMin", "YMax", PHENOTYPE]]
-    
-    if CELL_ID_START < len(halo_export) and CELL_ID_START > 0:     
-        halo_export = halo_export[CELL_ID_START:] # Exclude cells prior to target ID
-    halo_export = halo_export[halo_export[PHENOTYPE]==1]
-    if CELL_LIMIT < len(halo_export) and CELL_LIMIT > 0:
-        halo_export = halo_export[:CELL_LIMIT] # pare down cell list (now containing only phenotype of interest) to desired length
-    tumor_cell_XYs = []
-    for index,row in halo_export.iterrows():
-        center_x = int((row['XMax']+row['XMin'])/2)
-        center_y = int((row['YMax']+row['YMin'])/2)
-        tumor_cell_XYs.append([center_x, center_y, row["Object Id"]])
-
+    #TODO think of something better than this. It tanks RAM usage to store this thing
+    #       Literally  ~ 10GB difference
+    global RAW_PYRAMID
+    RAW_PYRAMID=pyramid
+    tumor_cell_XYs = extract_phenotype_xldata()
     # cell1 = [16690, 868]
     # cell2 = [4050, 1081]
 
