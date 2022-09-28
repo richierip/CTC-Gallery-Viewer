@@ -44,6 +44,7 @@ qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qpt
 OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
 OFFSET = 200 # microns or pixels? Probably pixels
 # CELL_START = 100
+CELL_OFFSET= 0
 CELL_LIMIT = 15
 PHENOTYPE = 'Tumor'
 CELL_ID_START = 550 # debug?
@@ -59,6 +60,7 @@ SC_DATA = None # Using this to store data to coerce the exec function into doing
 TEMP = None
 IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}
 RAW_PYRAMID=None
+COMPOSITE_MODE = False
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
 
@@ -348,24 +350,55 @@ def fix_default_composite_adj():
         mode={"widget_type": "RadioButtons","orientation": "vertical",
         "choices": [("Show all channels", 1), ("Composite Only", 2)]})#,layout = 'horizontal')
 def toggle_composite_viewstatus(mode: int = 1):
+    global COMPOSITE_MODE
     if mode == 1: # change to Show All
+        COMPOSITE_MODE = False
         VIEWER.layers.clear()
-        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(), int(OFFSET/2), show_all=True)
+        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(cell_offset=CELL_OFFSET), int(OFFSET/2), show_all=True)
     elif mode ==2: # change to composite only
-        VIEWER.layers.clear()
-        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(), int(OFFSET/2), show_all=False)
+        COMPOSITE_MODE = True
+        # VIEWER.layers.clear()
+        VIEWER.layers.select_all()
+        VIEWER.layers.remove_selected()
+        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(cell_offset=CELL_OFFSET), int(OFFSET/2), show_all=False)
     else:
         raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {mode}. Must be 1 or 2.")
+    return None
+
+@magicgui(
+        Amount={"widget_type": "SpinBox", "value":15,
+        "max":100,"min":5})
+def show_next_cell_group(Amount: int = 1):
+    # Take note of new starting point
+    global CELL_ID_START, CELL_LIMIT, CELL_OFFSET
+
+    print(f'\nDebug prints. Spinbox reads {Amount}, type {type(Amount)}')
+    CELL_OFFSET += CELL_LIMIT 
+    CELL_LIMIT = int(Amount)
+    # Load into same mode as the current
+    if COMPOSITE_MODE:
+        VIEWER.layers.clear()
+        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(cell_offset=CELL_OFFSET), int(OFFSET/2), show_all=False)
+    else:
+        VIEWER.layers.clear()
+        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(cell_offset=CELL_OFFSET), int(OFFSET/2), show_all=True)
     return None
 
 @magicgui(auto_call=True,
         Status_Bar_Visibility={"widget_type": "RadioButtons","orientation": "vertical",
         "choices": [("Show", 1), ("Hide", 2)]})
 def toggle_statusbar_visibility(Status_Bar_Visibility: int=1):
+    # Find status layers and toggle visibility
     if Status_Bar_Visibility==1:
-        pass
+        for layer in VIEWER.layers:
+            layername = layer.name
+            if 'status' in layername:
+                layer.visible = True
     elif Status_Bar_Visibility==2:
-        pass
+        for layer in VIEWER.layers:
+            layername = layer.name
+            if 'status' in layername:
+                layer.visible = False
     else:
         raise Exception(f"Invalid parameter passed to toggle_statusbar_visibility: {Status_Bar_Visibility}. Must be 1 or 2.")
     return None
@@ -440,7 +473,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
             status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
             for candidate in VIEWER.layers:
                 cellnum = candidate.name.split()[1]
-                if cellnum == status_layer.name.split()[1] and 'status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]:
+                if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
                     status_layer = candidate
                     break
                 else:
@@ -523,15 +556,18 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
 
         @shape_layer.bind_key('a')
         def toggle_status(shape_layer):
+            # Find details for the layer under the mouse
             status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
+            # Find this layers corresponding status layer
             for candidate in VIEWER.layers:
                 cellnum = candidate.name.split()[1]
-                if cellnum == status_layer.name.split()[1] and 'status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]:
+                if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
                     status_layer = candidate
                     break
                 else:
                     continue
             name = status_layer.name
+            # Rename the status layer and change the color
             if 'status' in name:
                 cur_status = name.split('_')[1] 
                 cur_index = list(status_colors.keys()).index(cur_status)
@@ -586,11 +622,9 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
                 print(f'\n---------inside add_layer My colormaps are now {plt.colormaps()}--------\n')
                 print(f'\nTrying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}\n')
 
-                if show_all: # distinguish between normal mode and composite only mode?
+                if show_all: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
                     add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
-                # else: #Composite mode only
-                    # add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
-
+                
                 # normalize to 1.0
 
                 # print(f'My types are as follows: \n cell raw {cell_punchout_raw.dtype}\n min {type(cell_punchout_raw.min())}\n max {type(cell_punchout_raw.max())}')
@@ -733,20 +767,32 @@ def sv_wrapper():
         VIEWER.status = 'Done saving!'
 
 '''Get object data from csv and parse.''' 
-def extract_phenotype_xldata(cell_start=None, cell_limit=None, phenotype=None):
+def extract_phenotype_xldata(cell_offset = 0, cell_id_start=None, cell_limit=None, phenotype=None):
     # get defaults from global space
-    if cell_start is None: cell_start = CELL_ID_START
-    if cell_limit is None: cell_limit=CELL_LIMIT
-    if phenotype is None: phenotype=PHENOTYPE
-
+    if cell_id_start is None: cell_id_start = CELL_ID_START # ID of first cell in the set (smallest) 
+    if cell_limit is None: cell_limit=CELL_LIMIT # Number of cells to be shown
+    if phenotype is None: phenotype=PHENOTYPE # Name of phenotype of interest
+    print(f'ORDERING PARAMS: id start:{cell_id_start}, limit{cell_limit},offset:{cell_offset}')
     halo_export = pd.read_csv(OBJECT_DATA)
     halo_export = halo_export.loc[:, ["Object Id", "XMin","XMax","YMin", "YMax", phenotype]]
     
-    if cell_start < len(halo_export) and cell_start > 0:     
-        halo_export = halo_export[cell_start:] # Exclude cells prior to target ID
+    if cell_id_start < len(halo_export) and cell_id_start > 0:
+        if cell_offset >=0:     
+            halo_export = halo_export[cell_id_start:] # Exclude cells prior to target ID
+        else:
+            # In this case we have a negative offset, meaning we want to check out cells with
+            #   a target ID of LESS than the start ID
+            halo_export = halo_export[:cell_id_start]
     halo_export = halo_export[halo_export[phenotype]==1]
     if cell_limit < len(halo_export) and cell_limit > 0:
-        halo_export = halo_export[:cell_limit] # pare down cell list (now containing only phenotype of interest) to desired length
+        if cell_offset >=0:
+            new_CID = int(halo_export.iloc[cell_offset+cell_limit]['Object Id'])
+            halo_export = halo_export[cell_offset:cell_offset+cell_limit] # pare down cell list (now containing only phenotype of interest) to desired length
+            print(f'\nThe new CID you requested is {new_CID}\n')
+        else:
+            halo_export = halo_export[-(cell_offset+cell_limit):-cell_offset]
+
+    
     tumor_cell_XYs = []
     for index,row in halo_export.iterrows():
         center_x = int((row['XMax']+row['XMin'])/2)
@@ -853,7 +899,8 @@ def main():
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
 
     viewer.window.add_dock_widget(toggle_composite_viewstatus,name = 'Test', area = 'right')
-    viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test2', area = 'right')
+    viewer.window.add_dock_widget(show_next_cell_group,name = 'Test2', area = 'right')
+    viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test3', area = 'right')
 
     #TODO make some keybindings - probably don't put them here though
     # @VIEWER.bind_key('h')
@@ -876,5 +923,8 @@ def main():
     sv_wrapper()
     napari.run()
 
+# I haven't run this from main in a while so it may not work anymore.
+#   Usually I run the GUI script which populates a userInfo class with data
+#   and then passes it to main()
 if __name__ == '__main__':
     main()
