@@ -376,12 +376,51 @@ def toggle_composite_viewstatus(mode: int = 1):
         Amount={"widget_type": "SpinBox", "value":15,
         "max":100,"min":5})
 def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
+
+    def _save_validation(VIEWER,numcells):
+        print(f'reading from {OBJECT_DATA}')
+        hdata = pd.read_csv(OBJECT_DATA)
+        try:
+            status = hdata.loc[hdata["Object Id"]==0,"Validation"].values[0]
+        except:
+            hdata.insert(4,"Validation", "unseen", allow_duplicates=True)
+            hdata.loc[hdata[PHENOTYPE]==0,"Validation"] = ""
+
+        for layer in VIEWER.layers:
+            if 'status' in layer.name:
+                status = layer.name.split('_')[1]
+                cell_id = layer.name.split()[1]
+            else:
+                continue
+            
+            print(f"LName: {layer.name} , status {status}, cid {cell_id}")
+            try:
+                hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
+            except:
+                print("There's an issue... ")
+        try:
+            VIEWER.status = 'Saving ...'
+            hdata.to_csv(OBJECT_DATA, index=False)
+            VIEWER.status = 'Saved to file! Next {numcells} cells loaded.'
+            return True
+        except:
+            # Maybe it's an excel sheet?
+            VIEWER.status = 'There was a problem saving, so the next set of cells was not loaded. Close your data file?'
+            return False
+            # hdata.loc[:,1:].to_excel(
+            # OBJECT_DATA,sheet_name='Exported from gallery viewer')
+        VIEWER.status = 'Done saving!'
     # Take note of new starting point
     global CELL_ID_START, CELL_LIMIT, CELL_OFFSET
 
     print(f'\nDebug prints. Spinbox reads {Amount}, type {type(Amount)}')
     CELL_OFFSET = CELL_LIMIT 
     CELL_LIMIT = int(Amount)
+
+    # Save data to file from current set
+    if (not COMPOSITE_MODE) and (not _save_validation(VIEWER, Amount)):
+        return None
+
     # Load into same mode as the current
     if COMPOSITE_MODE:
         xydata = extract_phenotype_xldata(change_startID=True,direction=Direction)
