@@ -354,34 +354,49 @@ def toggle_composite_viewstatus(mode: int = 1):
     if mode == 1: # change to Show All
         COMPOSITE_MODE = False
         VIEWER.layers.clear()
-        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(cell_offset=CELL_OFFSET), int(OFFSET/2), show_all=True)
+        # for layer in VIEWER.layers:
+        #     if 'Cell' in layer.name:
+        #         VIEWER.layers.remove(layer)
+        
+        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(), int(OFFSET/2), show_all=True)
     elif mode ==2: # change to composite only
         COMPOSITE_MODE = True
-        # VIEWER.layers.clear()
-        VIEWER.layers.select_all()
-        VIEWER.layers.remove_selected()
-        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(cell_offset=CELL_OFFSET), int(OFFSET/2), show_all=False)
+        VIEWER.layers.clear()
+        # for layer in VIEWER.layers:
+        #     if 'Cell' in layer.name:
+        #         VIEWER.layers.remove(layer)
+        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(), int(OFFSET/2), show_all=False)
     else:
         raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {mode}. Must be 1 or 2.")
     return None
 
 @magicgui(
+        Direction={"widget_type": "RadioButtons","orientation": "horizontal",
+        "choices": [("Next", 'fwd'), ("Previous", 'bkwd')]},
         Amount={"widget_type": "SpinBox", "value":15,
         "max":100,"min":5})
-def show_next_cell_group(Amount: int = 1):
+def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
     # Take note of new starting point
     global CELL_ID_START, CELL_LIMIT, CELL_OFFSET
 
     print(f'\nDebug prints. Spinbox reads {Amount}, type {type(Amount)}')
-    CELL_OFFSET += CELL_LIMIT 
+    CELL_OFFSET = CELL_LIMIT 
     CELL_LIMIT = int(Amount)
     # Load into same mode as the current
     if COMPOSITE_MODE:
-        VIEWER.layers.clear()
-        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(cell_offset=CELL_OFFSET), int(OFFSET/2), show_all=False)
+        xydata = extract_phenotype_xldata(change_startID=True,direction=Direction)
+        if xydata is False:
+            VIEWER.status="Can't load cells: out of bounds error."
+        else:
+            VIEWER.layers.clear()
+            add_layers(VIEWER,RAW_PYRAMID, xydata , int(OFFSET/2), show_all=False)
     else:
-        VIEWER.layers.clear()
-        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(cell_offset=CELL_OFFSET), int(OFFSET/2), show_all=True)
+        xydata = extract_phenotype_xldata(change_startID=True,direction=Direction)
+        if xydata is False:
+            VIEWER.status="Can't load cells: out of bounds error."
+        else:
+            VIEWER.layers.clear()
+            add_layers(VIEWER,RAW_PYRAMID, xydata , int(OFFSET/2), show_all=True)
     return None
 
 @magicgui(auto_call=True,
@@ -619,7 +634,6 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
                 if cell_colors[i] == 'pink': cell_colors[i] = 'Pink'
                 global fluor_to_color; fluor_to_color[fluor] = cell_colors[i]
                 cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
-                print(f'\n---------inside add_layer My colormaps are now {plt.colormaps()}--------\n')
                 print(f'\nTrying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}\n')
 
                 if show_all: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
@@ -767,34 +781,50 @@ def sv_wrapper():
         VIEWER.status = 'Done saving!'
 
 '''Get object data from csv and parse.''' 
-def extract_phenotype_xldata(cell_offset = 0, cell_id_start=None, cell_limit=None, phenotype=None):
+def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', cell_id_start=None, cell_limit=None, phenotype=None):
     # get defaults from global space
+    global CELL_ID_START
     if cell_id_start is None: cell_id_start = CELL_ID_START # ID of first cell in the set (smallest) 
     if cell_limit is None: cell_limit=CELL_LIMIT # Number of cells to be shown
     if phenotype is None: phenotype=PHENOTYPE # Name of phenotype of interest
-    print(f'ORDERING PARAMS: id start:{cell_id_start}, limit{cell_limit},offset:{cell_offset}')
+    # Also using CELL_OFFSET to know how big the current set size is
+    print(f'ORDERING PARAMS: id start: {cell_id_start}, limit: {cell_limit}, direction: {direction}, change?: {change_startID}')
     halo_export = pd.read_csv(OBJECT_DATA)
     halo_export = halo_export.loc[:, ["Object Id", "XMin","XMax","YMin", "YMax", phenotype]]
     
     if cell_id_start < len(halo_export) and cell_id_start > 0:
-        if cell_offset >=0:     
-            halo_export = halo_export[cell_id_start:] # Exclude cells prior to target ID
-        else:
+        if direction =='fwd':     
+            cell_set = halo_export[cell_id_start:] # Exclude cells prior to target ID
+            cell_set = cell_set[cell_set[phenotype]==1]
+            if CELL_OFFSET > len(cell_set.index):
+                return False
+            new_CID = int(cell_set.iloc[CELL_OFFSET]['Object Id'])
+        elif direction=='bkwd':
             # In this case we have a negative offset, meaning we want to check out cells with
             #   a target ID of LESS than the start ID
-            halo_export = halo_export[:cell_id_start]
-    halo_export = halo_export[halo_export[phenotype]==1]
-    if cell_limit < len(halo_export) and cell_limit > 0:
-        if cell_offset >=0:
-            new_CID = int(halo_export.iloc[cell_offset+cell_limit]['Object Id'])
-            halo_export = halo_export[cell_offset:cell_offset+cell_limit] # pare down cell list (now containing only phenotype of interest) to desired length
-            print(f'\nThe new CID you requested is {new_CID}\n')
+            # Use cell_limit here, NOT CELL_OFFSET because we want to use the new set size to determine the smallest ID  
+            cell_set = halo_export[:cell_id_start]
+            cell_set = cell_set[cell_set[phenotype]==1]
+            if cell_limit > len(cell_set.index):
+                return False
+            new_CID = int(cell_set.iloc[len(cell_set.index)-cell_limit]['Object Id'])
         else:
-            halo_export = halo_export[-(cell_offset+cell_limit):-cell_offset]
+            raise Exception(f"Invalid parameter 'direction' in extract_phenotype_xldata: {direction}. Expecting 'fwd' or 'bkwd'")
 
+    if change_startID:
+        CELL_ID_START = new_CID
+        print(f'\nThe new CID you requested is {new_CID}\n')
+
+        cell_set = halo_export[new_CID:]
+        cell_set = cell_set[cell_set[phenotype]==1] # pare down cell list (now containing only phenotype of interest) to desired length
+        if cell_limit < len(cell_set.index) and cell_limit > 0: 
+            cell_set = cell_set[:cell_limit]
+    else:
+        # Likely changing composite modes, so don't do any manipulations
+        cell_set = cell_set[:cell_limit]
     
     tumor_cell_XYs = []
-    for index,row in halo_export.iterrows():
+    for index,row in cell_set.iterrows():
         center_x = int((row['XMax']+row['XMin'])/2)
         center_y = int((row['YMax']+row['YMin'])/2)
         tumor_cell_XYs.append([center_x, center_y, row["Object Id"]])
