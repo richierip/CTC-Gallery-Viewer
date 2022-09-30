@@ -135,12 +135,13 @@ def adjust_composite_gamma(layer, gamma):
 
             #TODO determine whether gamma gets changed before or after color mapping
             # chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1) # can do this at the end?
-            chn_data = [ x**gamma for x in chn_data]
+            gamma_correct = np.vectorize(lambda x:x**gamma)
+            chn_data = gamma_correct(chn_data)
             # print(f'Checking dimensions of chn_data: {np.asarray(chn_data).shape}')
             IMAGE_DATA_ADJUSTED[stripped_name+chn_str] = chn_data # store adjustments
         else:
             chn_data = np.asarray(copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str]))
-        chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1/np.max(chn_data))
+        chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1)
         composite.append([chn_data])
 
 
@@ -150,7 +151,7 @@ def adjust_composite_gamma(layer, gamma):
     composite = np.sum(composite, axis=0) 
     composite=np.clip(composite,0,np.max(composite))
     print(f'Checking dimensions of composite after sum: {np.asarray(composite).shape}')
-    composite[:,:,3] = 3.0
+    composite[:,:,3] = 1.0
 
     rgb_mins = [] ## Axis here?
     rgb_maxes = []
@@ -163,7 +164,7 @@ def adjust_composite_gamma(layer, gamma):
     for i in range(3):
         # print(f'Current max is {rgb_maxes[i]} and type is {type(rgb_maxes[i])}\n')
         composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
-        composite[:,:,i] = composite[:,:,i] /(float(rgb_maxes[i]) - float(rgb_mins[i]))
+        composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
         composite[:,:,i] = composite[:,:,i] * 255.0
 
     print(f'Final check of dimensions of composite before setting data: {np.asarray(composite).shape}')
@@ -227,7 +228,7 @@ def adjust_composite_limits(layer, limit_type, limit_val):
             print(f'Just fetching {chn_str} data...')
             chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
         print(f'Converting back to rgb, using the {fluor_to_color[chn_str]} palette ...')
-        chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)
+        chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=3)
         composite.append([chn_data])
 
 
@@ -236,7 +237,7 @@ def adjust_composite_limits(layer, limit_type, limit_val):
     print(f'Checking dimensions of composite after extract: {np.asarray(composite).shape}')
     composite = np.sum(composite, axis=0) 
     print(f'Checking dimensions of composite after sum: {np.asarray(composite).shape}')
-    composite[:,:,3] /= 3.0
+    composite[:,:,3] = 1.0
 
     rgb_mins = [] ## Axis here?
     rgb_maxes = []
@@ -249,7 +250,7 @@ def adjust_composite_limits(layer, limit_type, limit_val):
     for i in range(3):
         # print(f'Current max is {rgb_maxes[i]} and type is {type(rgb_maxes[i])}\n')
         composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
-        composite[:,:,i] = composite[:,:,i] /(float(rgb_maxes[i]) - float(rgb_mins[i]))
+        composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
         composite[:,:,i] = composite[:,:,i] * 255.0
 
     print(f'Final check of dimensions of composite before setting data: {np.asarray(composite).shape}')
@@ -703,7 +704,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
 
                 # #TODO Gamma correct right here since there's a bug that doesn't allow passing to the viewer
                 # cell_punchout_raw = np.asarray([x**0.5 for x in cell_punchout_raw])
-                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor= 1)#/np.max(cell_punchout_raw)) 
+                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor= 3.0)#/np.max(cell_punchout_raw)) 
 
 
                 # print(f'raw np shape is {cell_punchout_raw.shape}') # (100,100)
