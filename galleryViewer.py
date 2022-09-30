@@ -701,9 +701,9 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
                 cp_save = cell_punchout_raw 
                 IMAGE_DATA_ORIGINAL[cell_name] = cp_save; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
 
-                # #TODO Gamma correct right here since there's a bug that doesn't allow passing the the viewer
+                # #TODO Gamma correct right here since there's a bug that doesn't allow passing to the viewer
                 # cell_punchout_raw = np.asarray([x**0.5 for x in cell_punchout_raw])
-                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor= 1/np.max(cell_punchout_raw)) 
+                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor= 1)#/np.max(cell_punchout_raw)) 
 
 
                 # print(f'raw np shape is {cell_punchout_raw.shape}') # (100,100)
@@ -727,8 +727,17 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
         # add composite
         cell_name = f'Cell {cell_id} Composite'
         composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
-        # print(f'shape before summing is {composite.shape}')
-        # print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
+        print(f'shape before summing is {composite.shape}')
+        print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
+        print('\n\n\n')
+        print(f'Whole composite component dumps...')
+        print('0')
+        print(composite[0,:,45,:])
+        print('1')
+        print(composite[1,:,45,:])
+        print('2')
+        print(composite[2,:,45,:])
+
         composite = np.sum(composite, axis=0)
         composite = np.clip(composite,0,np.max(composite)) # ensures 0-1 scaling 
         # print(f'\n!!! Shape after summing is {composite.shape}')
