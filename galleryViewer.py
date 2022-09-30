@@ -139,8 +139,8 @@ def adjust_composite_gamma(layer, gamma):
             # print(f'Checking dimensions of chn_data: {np.asarray(chn_data).shape}')
             IMAGE_DATA_ADJUSTED[stripped_name+chn_str] = chn_data # store adjustments
         else:
-            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
-        chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)
+            chn_data = np.asarray(copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str]))
+        chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1/np.max(chn_data))
         composite.append([chn_data])
 
 
@@ -148,8 +148,9 @@ def adjust_composite_gamma(layer, gamma):
     composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
     print(f'Checking dimensions of composite after extract: {np.asarray(composite).shape}')
     composite = np.sum(composite, axis=0) 
+    composite=np.clip(composite,0,np.max(composite))
     print(f'Checking dimensions of composite after sum: {np.asarray(composite).shape}')
-    composite[:,:,3] /= 3.0
+    composite[:,:,3] = 3.0
 
     rgb_mins = [] ## Axis here?
     rgb_maxes = []
@@ -574,7 +575,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
         #   Will have to do something else.
         if colormap is not None: # Luminescence image
             shape_layer = viewer.add_image(layer, name = name, contrast_limits = contr, gamma = 0.5)
-            shape_layer.colormap = custom_maps.retrieve_lut(colormap)
+            shape_layer.colormap = custom_maps.retrieve_cm(colormap)
         elif contr is not None: # RBG image
             print(f'\n ~~~ Adding RGB Image ~~~ \n')
             shape_layer = viewer.add_image(layer, name = name, contrast_limits = contr, gamma = 0.5)
@@ -700,9 +701,9 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
                 cp_save = cell_punchout_raw 
                 IMAGE_DATA_ORIGINAL[cell_name] = cp_save; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
 
-                # # Gamma correct right here since there's a bug that doesn't allow passing the the viewer
+                # #TODO Gamma correct right here since there's a bug that doesn't allow passing the the viewer
                 # cell_punchout_raw = np.asarray([x**0.5 for x in cell_punchout_raw])
-                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor= 1) 
+                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor= 1/np.max(cell_punchout_raw)) 
 
 
                 # print(f'raw np shape is {cell_punchout_raw.shape}') # (100,100)
@@ -728,10 +729,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
         composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
         # print(f'shape before summing is {composite.shape}')
         # print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
-        composite = np.sum(composite, axis=0) 
+        composite = np.sum(composite, axis=0)
+        composite = np.clip(composite,0,np.max(composite)) # ensures 0-1 scaling 
         # print(f'\n!!! Shape after summing is {composite.shape}')
         # print(f'same pixel added: {composite [45,45,:]}')
-        composite[:,:,3] /= 3.0
+        composite[:,:,3] = 1.0 # Restore Alpha value to 1.0 (possibly redundant)
         # print(f'same pixel averaged by 3: {composite [45,45,:]}')
 
 
@@ -742,8 +744,8 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
             # print(f'Shape of intermediate is {temp.shape}')
             rgb_mins.append(np.min(temp))
             rgb_maxes.append(np.max(temp))
-        # print(f'Using axis {1}, here are the mins: {rgb_mins}')
-        # print(f'Here are the maxes: {rgb_maxes}')
+        print(f'Using axis {1}, here are the mins: {rgb_mins}')
+        print(f'Here are the maxes: {rgb_maxes}')
 
         # rgb_mins = np.amin(composite, axis=2) ## Axis here?
         # rgb_maxes = np.amax(composite, axis = 2)
@@ -755,8 +757,13 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
         for i in range(3):
             # Map values back to normal range of 0, 255.0 before passing as RGB. Napari does a shitty job of displaying without this.
             # print(f'My i is {i}. RGB maps to 012 min/max is {rgb_mins[i]}/{rgb_maxes[i]}')
+            # continue
+            #TODO decide what to do here
+            ##### try to colormap a 255 and use that as a max ... It's 1 
+
             composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
-            composite[:,:,i] = composite[:,:,i] /(float(rgb_maxes[i]) - float(rgb_mins[i]))
+                                                    #rgb_maxes[i]
+            composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
             composite[:,:,i] = composite[:,:,i] * 255.0
 
             # composite[:,:,i] -= np.min(composite[:,:,i])
@@ -970,7 +977,8 @@ def main():
     viewer.window.add_dock_widget(toggle_composite_viewstatus,name = 'Test', area = 'right')
     viewer.window.add_dock_widget(show_next_cell_group,name = 'Test2', area = 'right')
     viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test3', area = 'right')
-
+    # viewer.window.window_menu
+    # viewer.add_image
     #TODO make some keybindings - probably don't put them here though
     # @VIEWER.bind_key('h')
     # def hello_world(viewer):

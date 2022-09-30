@@ -247,8 +247,8 @@ class ViewerPresets(QDialog):
         # numCellsToRead.setFixedWidth(50)
 
         self.cellOffset = QSpinBox(self.topRightGroupBox)
+        self.cellOffset.setRange(0,10000000)
         self.cellOffset.setValue(self.userInfo.cell_ID_start)
-        self.cellOffset.setRange(0,1000000)
         self.cellOffset.editingFinished.connect(self.saveCellOffset)
 
 
