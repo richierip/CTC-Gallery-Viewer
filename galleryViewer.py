@@ -58,9 +58,10 @@ CHANNEL_ORDER = None # to save variable position data for channels (they can be 
 VIEWER = None
 SC_DATA = None # Using this to store data to coerce the exec function into doing what I want
 TEMP = None
-IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}
+IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}; ADJUSTMENT_SETTINGS={}
 RAW_PYRAMID=None
 COMPOSITE_MODE = False
+
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
 
@@ -133,6 +134,12 @@ def adjust_composite_gamma(layer, gamma):
             print(f'Will gamma adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
 
+            low = ADJUSTMENT_SETTINGS[stripped_name+chn_str+' black-in'] / 255.0
+            high = ADJUSTMENT_SETTINGS[stripped_name+chn_str+' white-in'] / 255.0
+            chn_data = np.clip(chn_data,low,high)
+            color_range = high - low
+            if color_range != 0:
+                chn_data = (chn_data - low) / color_range
             #TODO determine whether gamma gets changed before or after color mapping
             # chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1) # can do this at the end?
             gamma_correct = np.vectorize(lambda x:x**gamma)
@@ -141,7 +148,7 @@ def adjust_composite_gamma(layer, gamma):
             IMAGE_DATA_ADJUSTED[stripped_name+chn_str] = chn_data # store adjustments
         else:
             chn_data = np.asarray(copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str]))
-        chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1)
+        chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=len(CHANNELS)-1) # subtract one bc it contains the composite
         composite.append([chn_data])
 
 
@@ -212,15 +219,14 @@ def adjust_composite_limits(layer, limit_type, limit_val):
             print(f'Will contrast adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
 
-            if limit_type == 'white-in':
-                super_threshold_indices = chn_data > limit_val / 255.0
-                chn_data[super_threshold_indices] = 1
-            elif limit_type == 'black-in':
-                super_threshold_indices = chn_data < limit_val / 255.0
-                chn_data[super_threshold_indices] = 0
-            else:
-                raise Exception(f"Invalid parameter: {limit_type}. Contrast adjustment must be either 'white-in' or 'black-in'")
-
+            low = ADJUSTMENT_SETTINGS[stripped_name+chn_str+' black-in'] / 255.0
+            high = ADJUSTMENT_SETTINGS[stripped_name+chn_str+' white-in'] / 255.0
+            chn_data = np.clip(chn_data,low,high)
+            color_range = high - low
+            if color_range != 0:
+                chn_data = (chn_data - low) / color_range
+            gamma_correct = np.vectorize(lambda x:x**ADJUSTMENT_SETTINGS[stripped_name+chn_str+' gamma'])
+            chn_data = gamma_correct(chn_data)
             # chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1) # can do this at the end?
             # print(f'Checking dimensions of chn_data: {np.asarray(chn_data).shape}')
             IMAGE_DATA_ADJUSTED[stripped_name+chn_str] = chn_data # store adjustments
@@ -228,7 +234,7 @@ def adjust_composite_limits(layer, limit_type, limit_val):
             print(f'Just fetching {chn_str} data...')
             chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
         print(f'Converting back to rgb, using the {fluor_to_color[chn_str]} palette ...')
-        chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=3)
+        chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=len(CHANNELS)-1) # subtract one bc it contains the composite
         composite.append([chn_data])
 
 
@@ -237,7 +243,7 @@ def adjust_composite_limits(layer, limit_type, limit_val):
     print(f'Checking dimensions of composite after extract: {np.asarray(composite).shape}')
     composite = np.sum(composite, axis=0) 
     print(f'Checking dimensions of composite after sum: {np.asarray(composite).shape}')
-    composite[:,:,3] = 1.0
+    composite[:,:,3] = 1.0 # restore alpha value.
 
     rgb_mins = [] ## Axis here?
     rgb_maxes = []
@@ -258,60 +264,63 @@ def adjust_composite_limits(layer, limit_type, limit_val):
 
 ## --- Bottom bar functions and GUI elements 
 def adjust_gamma(viewer, gamma):
+    def _update_dictionary(name, val):
+        global ADJUSTMENT_SETTINGS
+        ADJUSTMENT_SETTINGS[name+' gamma'] = val
+
     for ctclayer in viewer.layers:
-        # If the composite GUI box is checked, just change the composite and 
-        #   leave the luminescence channels alone
+        # no longer elif: want to do composite and all checked channels at the same time
+        if validate_adjustment(ctclayer):
+            ctclayer.gamma = gamma
+            _update_dictionary(ctclayer.name,gamma)
+            # print('Checking ', ctclayer.name)
         if Composite in ADJUSTED and validate_adjustment(ctclayer):
             if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1:
                 adjust_composite_gamma(ctclayer, gamma)
             continue
-        elif validate_adjustment(ctclayer):
-            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1: # name looks like 'Cell 100 DAPI'
-                print('About to enter adjust Composite func')
-                adjust_composite_gamma(ctclayer, gamma)
-            else:
-                ctclayer.gamma = gamma
-            # print('Checking ', ctclayer.name)
 
 @magicgui(auto_call=True,
         gamma={"widget_type": "FloatSlider", "max":1.0, "min":0.01},
         layout = 'horizontal')
-def adjust_gamma_widget(gamma: float = 0.5) -> ImageData:
+def adjust_gamma_widget(gamma: float = 1.0) -> ImageData:
     adjust_gamma(VIEWER,gamma)
 
 @magicgui(auto_call=True,
         white_in={"widget_type": "FloatSlider", "max":255, "label": "White-in"},
         layout = 'horizontal')
 def adjust_whitein(white_in: float = 255) -> ImageData:
+    def _update_dictionary(name, val):
+        global ADJUSTMENT_SETTINGS
+        ADJUSTMENT_SETTINGS[name+' white-in'] = val
+
     for ctclayer in VIEWER.layers:
+        # no longer elif: want to do composite and all checked channels at the same time
+        if validate_adjustment(ctclayer):
+            ctclayer.contrast_limits = (ctclayer.contrast_limits[0], white_in)
+            _update_dictionary(ctclayer.name, white_in)
+        
         if Composite in ADJUSTED and validate_adjustment(ctclayer):
             if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1:
                 adjust_composite_limits(ctclayer, 'white-in', white_in)
             continue
-        elif validate_adjustment(ctclayer):
-            # Unnecessary condition?
-            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1: # name looks like 'Cell 100 DAPI'
-                print('About to enter adjust Composite func')
-                adjust_composite_limits(ctclayer, 'white-in', white_in)
-            else:
-                ctclayer.contrast_limits = (ctclayer.contrast_limits[0], white_in)
 
 @magicgui(auto_call=True,
         black_in={"widget_type": "FloatSlider", "max":255, "label":"Black-in"},
         layout = 'horizontal')
 def adjust_blackin(black_in: float = 0) -> ImageData:
+    def _update_dictionary(name, val):
+        global ADJUSTMENT_SETTINGS
+        ADJUSTMENT_SETTINGS[name+' black-in'] = val
+
     for ctclayer in VIEWER.layers:
+        # no longer elif: want to do composite and all checked channels at the same time
+        if validate_adjustment(ctclayer):
+            ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
+            _update_dictionary(ctclayer.name,black_in)
         if Composite in ADJUSTED and validate_adjustment(ctclayer):
             if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1:
                 adjust_composite_limits(ctclayer, 'black-in', black_in)
             continue
-        elif validate_adjustment(ctclayer):
-            # Unnecessary condition?
-            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1: # name looks like 'Cell 100 DAPI'
-                print('About to enter adjust Composite func')
-                adjust_composite_limits(ctclayer, 'black-in', black_in)
-            else:
-                ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
 
 # Called in a loop to create as many GUI elements as needed
 def dynamic_checkbox_creator(checkbox_name, setChecked = True):
@@ -701,10 +710,13 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
 
                 cp_save = cell_punchout_raw 
                 IMAGE_DATA_ORIGINAL[cell_name] = cp_save; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
+                ADJUSTMENT_SETTINGS[cell_name+ ' black-in']=0
+                ADJUSTMENT_SETTINGS[cell_name+ ' white-in']=255
+                ADJUSTMENT_SETTINGS[cell_name+ ' gamma']=1.0
 
                 # #TODO Gamma correct right here since there's a bug that doesn't allow passing to the viewer
                 # cell_punchout_raw = np.asarray([x**0.5 for x in cell_punchout_raw])
-                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor= 3.0)#/np.max(cell_punchout_raw)) 
+                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor=len(CHANNELS)-1) # subtract one bc it contains the composite
 
 
                 # print(f'raw np shape is {cell_punchout_raw.shape}') # (100,100)
@@ -730,14 +742,6 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
         composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
         print(f'shape before summing is {composite.shape}')
         print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
-        print('\n\n\n')
-        print(f'Whole composite component dumps...')
-        print('0')
-        print(composite[0,:,45,:])
-        print('1')
-        print(composite[1,:,45,:])
-        print('2')
-        print(composite[2,:,45,:])
 
         composite = np.sum(composite, axis=0)
         composite = np.clip(composite,0,np.max(composite)) # ensures 0-1 scaling 
