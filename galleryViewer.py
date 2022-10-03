@@ -10,6 +10,7 @@ Peter Richieri
 import tifffile
 import napari
 from napari.types import ImageData
+from napari.qt.threading import thread_worker # Needed to add / remove a lot of layers without freezing
 from magicgui import magicgui
 import numpy as np
 import pandas as pd
@@ -115,7 +116,7 @@ def adjust_composite_gamma(layer, gamma):
 
     for chn in ADJUSTED:
         print(f'to be adjusted: {chn}')
-
+    print(f'\n DICT: {ADJUSTMENT_SETTINGS}')
 
     composite = []
     # get data from other CHECKED channels, not including Composite (always 8)
@@ -134,8 +135,8 @@ def adjust_composite_gamma(layer, gamma):
             print(f'Will gamma adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
 
-            low = ADJUSTMENT_SETTINGS[stripped_name+chn_str+' black-in'] / 255.0
-            high = ADJUSTMENT_SETTINGS[stripped_name+chn_str+' white-in'] / 255.0
+            low = ADJUSTMENT_SETTINGS[chn_str+' black-in'] / 255.0
+            high = ADJUSTMENT_SETTINGS[chn_str+' white-in'] / 255.0
             chn_data = np.clip(chn_data,low,high)
             color_range = high - low
             if color_range != 0:
@@ -171,6 +172,8 @@ def adjust_composite_gamma(layer, gamma):
     for i in range(3):
         # print(f'Current max is {rgb_maxes[i]} and type is {type(rgb_maxes[i])}\n')
         composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
+        # the 1.0 value on the next line represents the 'max' value in a given channel. Really not sure if it should stay 1 or not.
+        #TODO
         composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
         composite[:,:,i] = composite[:,:,i] * 255.0
 
@@ -201,7 +204,7 @@ def adjust_composite_limits(layer, limit_type, limit_val):
     for chn in ADJUSTED:
         print(f'to be adjusted: {chn}')
 
-
+    print(f'\n DICT: {ADJUSTMENT_SETTINGS}')
     composite = []
     # get data from other CHECKED channels, not including Composite (always 8)
     need_contrast_adjustment = copy.copy(ADJUSTED)
@@ -219,13 +222,13 @@ def adjust_composite_limits(layer, limit_type, limit_val):
             print(f'Will contrast adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
 
-            low = ADJUSTMENT_SETTINGS[stripped_name+chn_str+' black-in'] / 255.0
-            high = ADJUSTMENT_SETTINGS[stripped_name+chn_str+' white-in'] / 255.0
+            low = ADJUSTMENT_SETTINGS[chn_str+' black-in'] / 255.0
+            high = ADJUSTMENT_SETTINGS[chn_str+' white-in'] / 255.0
             chn_data = np.clip(chn_data,low,high)
             color_range = high - low
             if color_range != 0:
                 chn_data = (chn_data - low) / color_range
-            gamma_correct = np.vectorize(lambda x:x**ADJUSTMENT_SETTINGS[stripped_name+chn_str+' gamma'])
+            gamma_correct = np.vectorize(lambda x:x**ADJUSTMENT_SETTINGS[chn_str+' gamma'])
             chn_data = gamma_correct(chn_data)
             # chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1) # can do this at the end?
             # print(f'Checking dimensions of chn_data: {np.asarray(chn_data).shape}')
@@ -268,11 +271,15 @@ def adjust_gamma(viewer, gamma):
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' gamma'] = val
 
+    for fluor in ADJUSTED:
+        fluorname = CHANNEL_ORDER[fluor].lstrip('OPAL')
+        _update_dictionary(fluorname,gamma)
+
     for ctclayer in viewer.layers:
         # no longer elif: want to do composite and all checked channels at the same time
-        if validate_adjustment(ctclayer):
+        if validate_adjustment(ctclayer) and ctclayer.name.split()[2] != 'Composite':
             ctclayer.gamma = gamma
-            _update_dictionary(ctclayer.name,gamma)
+            # _update_dictionary(ctclayer.name,gamma)
             # print('Checking ', ctclayer.name)
         if Composite in ADJUSTED and validate_adjustment(ctclayer):
             if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1:
@@ -293,11 +300,15 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' white-in'] = val
 
+    for fluor in ADJUSTED:
+        fluorname = CHANNEL_ORDER[fluor].lstrip('OPAL')
+        _update_dictionary(fluorname,white_in)
+    
     for ctclayer in VIEWER.layers:
         # no longer elif: want to do composite and all checked channels at the same time
-        if validate_adjustment(ctclayer):
+        if validate_adjustment(ctclayer) and ctclayer.name.split()[2] != 'Composite':
             ctclayer.contrast_limits = (ctclayer.contrast_limits[0], white_in)
-            _update_dictionary(ctclayer.name, white_in)
+            # _update_dictionary(ctclayer.name, white_in)
         
         if Composite in ADJUSTED and validate_adjustment(ctclayer):
             if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1:
@@ -312,11 +323,15 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' black-in'] = val
 
+    for fluor in ADJUSTED:
+        fluorname = CHANNEL_ORDER[fluor].lstrip('OPAL')
+        _update_dictionary(fluorname,black_in)
+
     for ctclayer in VIEWER.layers:
         # no longer elif: want to do composite and all checked channels at the same time
-        if validate_adjustment(ctclayer):
+        if validate_adjustment(ctclayer) and ctclayer.name.split()[2] != 'Composite':
             ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
-            _update_dictionary(ctclayer.name,black_in)
+            # _update_dictionary(ctclayer.name,black_in)
         if Composite in ADJUSTED and validate_adjustment(ctclayer):
             if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1:
                 adjust_composite_limits(ctclayer, 'black-in', black_in)
@@ -332,9 +347,11 @@ def dynamic_checkbox_creator(checkbox_name, setChecked = True):
         # print(f'in myfunc backend CHANNELS are {CHANNELS}, and {CHANNELS_STR}. Trying to remove {checkbox_name}, whose global value is {globals()[checkbox_name]}, from {ADJUSTED}')
         if check:
             ADJUSTED.append(globals()[checkbox_name])
+            # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = True
             # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just added {checkbox_name}')
         else:
             ADJUSTED.remove(globals()[checkbox_name])
+            # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = False
             # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just removed {checkbox_name}')
     return myfunc
 
@@ -342,9 +359,11 @@ def dynamic_checkbox_creator(checkbox_name, setChecked = True):
 def checkbox_setup():
     for checkbox_name in CHANNELS_STR:   
         #Turn off composite by default.
-        if checkbox_name == 'Composite':
+        if False: #checkbox_name == 'Composite':
+            ADJUSTMENT_SETTINGS[checkbox_name+' box'] = False
             exec(f"globals()[\'{checkbox_name+'_box'}\'] = globals()[\'dynamic_checkbox_creator\'](checkbox_name, setChecked=False)") # If doing this is wrong I don't want to be right
         else:
+            # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = True
             exec(f"globals()[\'{checkbox_name+'_box'}\'] = globals()[\'dynamic_checkbox_creator\'](checkbox_name)")
 checkbox_setup()
 
@@ -357,6 +376,24 @@ def fix_default_composite_adj():
 
 ## --- Side bar functions and GUI elements 
 
+def threading_remove_layer(layer):
+    try:
+        VIEWER.layers.remove(layer)
+    except KeyError:
+        # Just in case something goes wrong here.
+        pass
+
+def threading_add_layer(layer):
+    try:
+        VIEWER.add_image(layer)
+    except KeyError:
+        # Just in case something goes wrong here.
+        pass
+
+# @thread_worker(connect={'returned': threading_remove_layer})
+def concurrent_clear(viewer):
+    viewer.layers.clear()
+
 @magicgui(
         mode={"widget_type": "RadioButtons","orientation": "vertical",
         "choices": [("Show all channels", 1), ("Composite Only", 2)]})#,layout = 'horizontal')
@@ -364,19 +401,18 @@ def toggle_composite_viewstatus(mode: int = 1):
     global COMPOSITE_MODE
     if mode == 1: # change to Show All
         COMPOSITE_MODE = False
-        VIEWER.layers.clear()
-        # for layer in VIEWER.layers:
-        #     if 'Cell' in layer.name:
-        #         VIEWER.layers.remove(layer)
-        
-        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(), int(OFFSET/2), show_all=True)
+        # VIEWER.layers.clear()
+        print(f'\nAttempting to clear')
+        concurrent_clear(VIEWER)
+        data = extract_phenotype_xldata()
+        add_layers(VIEWER,RAW_PYRAMID, data, int(OFFSET/2), show_all=True)
     elif mode ==2: # change to composite only
         COMPOSITE_MODE = True
-        VIEWER.layers.clear()
-        # for layer in VIEWER.layers:
-        #     if 'Cell' in layer.name:
-        #         VIEWER.layers.remove(layer)
-        add_layers(VIEWER,RAW_PYRAMID, extract_phenotype_xldata(), int(OFFSET/2), show_all=False)
+        # VIEWER.layers.clear()
+        print(f'\nAttempting to clear')
+        concurrent_clear(VIEWER)
+        data = extract_phenotype_xldata()
+        add_layers(VIEWER,RAW_PYRAMID, data, int(OFFSET/2), show_all=False)
     else:
         raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {mode}. Must be 1 or 2.")
     return None
@@ -710,9 +746,9 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
 
                 cp_save = cell_punchout_raw 
                 IMAGE_DATA_ORIGINAL[cell_name] = cp_save; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
-                ADJUSTMENT_SETTINGS[cell_name+ ' black-in']=0
-                ADJUSTMENT_SETTINGS[cell_name+ ' white-in']=255
-                ADJUSTMENT_SETTINGS[cell_name+ ' gamma']=1.0
+                ADJUSTMENT_SETTINGS[fluor+ ' black-in']=0
+                ADJUSTMENT_SETTINGS[fluor+ ' white-in']=255
+                ADJUSTMENT_SETTINGS[fluor+ ' gamma']=1.0
 
                 # #TODO Gamma correct right here since there's a bug that doesn't allow passing to the viewer
                 # cell_punchout_raw = np.asarray([x**0.5 for x in cell_punchout_raw])
@@ -917,7 +953,7 @@ def GUI_execute(userInfo):
             exec(f"globals()['CHANNELS'].append({chn})")
     print(f'GUI execute channels are {CHANNELS}')
     ADJUSTED = copy.copy(CHANNELS)
-    fix_default_composite_adj()
+    # fix_default_composite_adj()
 
     # for checkbox_name in CHANNELS_STR:   
     #     print(f'checkbox name is {checkbox_name} and type is {type(checkbox_name)}')
@@ -1005,7 +1041,6 @@ def main():
     #     VIEWER.status = 'goodbye world :('
     
     # print(f'\n {dir()}') # prints out the namespace variables 
-    
     for marker_function in CHANNELS_STR:
         # Only make visible the chosen markers
         exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
