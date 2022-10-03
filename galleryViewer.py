@@ -149,7 +149,7 @@ def adjust_composite_gamma(layer, gamma):
             IMAGE_DATA_ADJUSTED[stripped_name+chn_str] = chn_data # store adjustments
         else:
             chn_data = np.asarray(copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str]))
-        chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=len(CHANNELS)-1) # subtract one bc it contains the composite
+        chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
         composite.append([chn_data])
 
 
@@ -237,7 +237,7 @@ def adjust_composite_limits(layer, limit_type, limit_val):
             print(f'Just fetching {chn_str} data...')
             chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
         print(f'Converting back to rgb, using the {fluor_to_color[chn_str]} palette ...')
-        chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=len(CHANNELS)-1) # subtract one bc it contains the composite
+        chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
         composite.append([chn_data])
 
 
@@ -752,7 +752,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
 
                 # #TODO Gamma correct right here since there's a bug that doesn't allow passing to the viewer
                 # cell_punchout_raw = np.asarray([x**0.5 for x in cell_punchout_raw])
-                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor=len(CHANNELS)-1) # subtract one bc it contains the composite
+                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
 
 
                 # print(f'raw np shape is {cell_punchout_raw.shape}') # (100,100)
