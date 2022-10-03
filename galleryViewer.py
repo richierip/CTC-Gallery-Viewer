@@ -3,10 +3,7 @@ CTC viewer for Napari
 Started on 6/7/22
 Peter Richieri
 '''
-# import imagecodecs
-# from operator import indexOf
-# from pydoc import doc
-# from statistics import mode
+
 import tifffile
 import napari
 from napari.types import ImageData
@@ -18,7 +15,6 @@ import openpyxl
 # import skimage.filters
 # import gc # might garbage collect later
 # import math
-# import copy
 # import vispy.color as vpc
 import matplotlib
 from matplotlib import cm
@@ -27,6 +23,7 @@ from matplotlib import pyplot as plt
 import custom_maps
 # norm = plt.Normalize()
 import copy
+import time
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
@@ -40,22 +37,23 @@ for colormap in cell_colors:
     exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
     exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
 print(f'\n---------My colormaps are now {plt.colormaps()}--------\n')
+
+cell_colors = ['blue', 'purple' , 'green', 'green', 'orange','red', 'red', 'Pink', 'cyan'] # for local execution
 fluor_to_color = {}
 qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
 OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
-OFFSET = 200 # microns or pixels? Probably pixels
-# CELL_START = 100
-CELL_OFFSET= 0
-CELL_LIMIT = 15
+OFFSET = 90 # microns or pixels? Probably pixels
+CELL_OFFSET= 0 # Saves the current number of cells shown. Useful when pulling 'next 10 cells' 
+CELL_LIMIT = 15 # How many cells will be shown in next batch
 PHENOTYPE = 'Tumor'
 CELL_ID_START = 550 # debug?
-DAPI = 0; OPAL480 = 1; OPAL520 = 2; OPAL570 = 3; OPAL620 = 4; OPAL690 = 5; OPAL780 = 6; AF=7; Composite = 8
-CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
-# CHANNELS_STR = ["DAPI", "OPAL520", "OPAL690", "AF"]
-CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690, OPAL780, AF, Composite] # Default. Not really that useful info since channel order was added.
-# CHANNELS = [DAPI, OPAL520,OPAL690, AF]
+DAPI = 0; OPAL480 = 3; OPAL520 = 6; OPAL570 = 1; OPAL620 = 4; OPAL690 = 2; OPAL780 = 5; AF=7; Composite = 8
+# CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
+CHANNELS_STR = ["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
+# CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690,OPAL780,AF,Composite] # Default. Not really that useful info since channel order was added.
+CHANNELS = [DAPI, OPAL520,OPAL690, Composite] # for local execution / debugging
 ADJUSTED = copy.copy(CHANNELS)
-CHANNEL_ORDER = None # to save variable position data for channels (they can be in any order...)
+CHANNEL_ORDER = ['DAPI', 'OPAL570', 'OPAL690', 'OPAL480', 'OPAL620', 'OPAL780', 'OPAL520', 'AF', 'Composite'] # to save variable position data for channels (they can be in any order...)
 VIEWER = None
 SC_DATA = None # Using this to store data to coerce the exec function into doing what I want
 TEMP = None
@@ -390,9 +388,15 @@ def threading_add_layer(layer):
         # Just in case something goes wrong here.
         pass
 
-# @thread_worker(connect={'returned': threading_remove_layer})
+def one_by_one_layers(viewer):
+    for layer in list(viewer.layers):
+        # time.sleep(0.5) # wtf
+        yield layer
+# @thread_worker(connect={'yielded': threading_remove_layer})
 def concurrent_clear(viewer):
-    viewer.layers.clear()
+    layers = one_by_one_layers(viewer)
+    for layer in layers:
+        viewer.layers.remove(layer)
 
 @magicgui(
         mode={"widget_type": "RadioButtons","orientation": "vertical",
@@ -422,18 +426,24 @@ def toggle_composite_viewstatus(mode: int = 1):
         try:
             VIEWER.status = 'Saving ...'
             hdata.to_csv(OBJECT_DATA, index=False)
-            VIEWER.status = 'Composite mode enabled. Decisions loaded successfully.'
+            if mode == 1:
+                VIEWER.status = 'Channels mode enabled. Decisions loaded successfully.'
+            elif mode ==2:
+                VIEWER.status = 'Composite mode enabled. Decisions loaded successfully.'
             return True
         except:
-            # Maybe it's an excel sheet?
-            VIEWER.status = ' Composite mode enabled. There was a problem saving your decisions. Close your data file?'
+            #TODO Maybe it's an excel sheet?
+            if mode == 1:
+                VIEWER.status = 'Channels mode enabled. But, there was a problem saving your decisions. Close your data file?'
+            elif mode ==2:
+                VIEWER.status = 'Composite mode enabled. But, there was a problem saving your decisions. Close your data file?'
             return False
             # hdata.loc[:,1:].to_excel(
             # OBJECT_DATA,sheet_name='Exported from gallery viewer')
         VIEWER.status = 'Done saving!'
     
     # Save data to file from current set
-    _save_validation(VIEWER)
+    _save_validation(VIEWER, mode)
 
     global COMPOSITE_MODE
     if mode == 1: # change to Show All
@@ -574,7 +584,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
         if show_all:
             # Make a strip - will display at the left of each row of channels (one row per cell)
             x = np.array([[0,255,0]])
-            y = np.repeat(x,[OFFSET-8,4,4],axis=1)
+            y = np.repeat(x,[OFFSET-8,7,1],axis=1)
             xy = np.repeat(y,OFFSET,axis=0)
         else:
             # Create a small box - will display in the top left corner above each composite image
@@ -881,9 +891,9 @@ def add_custom_colors():
         exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
     return None
 
-def sv_wrapper():
-    @VIEWER.bind_key('Control-s')
-    def save_validation(VIEWER):
+def sv_wrapper(viewer):
+    @viewer.bind_key('s')
+    def save_validation(viewer):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
         try:
@@ -892,7 +902,7 @@ def sv_wrapper():
             hdata.insert(4,"Validation", "unseen", allow_duplicates=True)
             hdata.loc[hdata[PHENOTYPE]==0,"Validation"] = ""
 
-        for layer in VIEWER.layers:
+        for layer in viewer.layers:
             if 'status' in layer.name:
                 status = layer.name.split('_')[1]
                 cell_id = layer.name.split()[1]
@@ -905,17 +915,26 @@ def sv_wrapper():
             except:
                 print("There's an issue... ")
         try:
-            VIEWER.status = 'Saving ...'
+            viewer.status = 'Saving ...'
             hdata.to_csv(OBJECT_DATA, index=False)
-            VIEWER.status = 'Done saving!'
+            viewer.status = 'Done saving!'
             return None
         except:
             # Maybe it's an excel sheet?
-            VIEWER.status = 'There was a problem. Close your data file?'
+            viewer.status = 'There was a problem. Close your data file?'
             return None
             # hdata.loc[:,1:].to_excel(
             # OBJECT_DATA,sheet_name='Exported from gallery viewer')
-        VIEWER.status = 'Done saving!'
+        viewer.status = 'Done saving!'
+
+def tsv_wrapper(viewer):
+    @viewer.bind_key('h')
+    def toggle_statusbar_visibility(viewer):
+    # Find status layers and toggle visibility
+        for layer in VIEWER.layers:
+            if 'status' in layer.name:
+                layer.visible = not layer.visible
+       
 
 '''Get object data from csv and parse.''' 
 def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', cell_id_start=None, cell_limit=None, phenotype=None):
@@ -1041,13 +1060,6 @@ def main():
     global RAW_PYRAMID
     RAW_PYRAMID=pyramid
     tumor_cell_XYs = extract_phenotype_xldata()
-    # cell1 = [16690, 868]
-    # cell2 = [4050, 1081]
-
-    # sample_cell_dict = {}
-    # sample_cell_dict['cell_x'] = cell1[0] ; sample_cell_dict['cell_y'] = cell1[1]
-    # sample_cell_dict['slidewidth'] = pyramid.shape[0]
-    # sample_cell_dict['slidelength'] = pyramid.shape[1]
     
     viewer = napari.Viewer(title='CTC Gallery')
     print(f'$$$$$$ OFFSET is {OFFSET}')
@@ -1055,10 +1067,7 @@ def main():
     global VIEWER
     VIEWER = viewer
     viewer.grid.enabled = True
-    viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)+1) # +1 when plotting the shitty composite'
-    #viewer.grid.stride #TODO use this to stack some layers (text, colored shape to indicate decision)
-    #  on top of each cell image
-    # viewer.grid.stride = 2
+    viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)+1) # +1 because of the status layer.
 
     #TODO arrange these more neatly
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
@@ -1068,26 +1077,15 @@ def main():
     viewer.window.add_dock_widget(toggle_composite_viewstatus,name = 'Test', area = 'right')
     viewer.window.add_dock_widget(show_next_cell_group,name = 'Test2', area = 'right')
     viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test3', area = 'right')
-    # viewer.window.window_menu
-    # viewer.add_image
-    #TODO make some keybindings - probably don't put them here though
-    # @VIEWER.bind_key('h')
-    # def hello_world(viewer):
-    #     # on key press
-    #     VIEWER.status = 'hello world!'
-
-    #     yield
-
-    #     # on key release
-    #     VIEWER.status = 'goodbye world :('
     
     # print(f'\n {dir()}') # prints out the namespace variables 
     for marker_function in CHANNELS_STR:
         # Only make visible the chosen markers
         exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
     
-    #adjust_gamma(viewer,0.5)
-    sv_wrapper()
+    #adjust_gamma(viewer,0.5) # Doesn't work.
+    sv_wrapper(viewer)
+    tsv_wrapper(viewer)
     napari.run()
 
 # I haven't run this from main in a while so it may not work anymore.

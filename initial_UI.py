@@ -23,21 +23,21 @@ DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL5
 CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
 AVAILABLE_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'pink', 'cyan']
 
-class ExternalCounter(QThread):
-    """
-    Runs a counter thread.
-    """
-    countChanged = pyqtSignal(int)
-    def __init__(self, time_limit):
-        super(ExternalCounter, self).__init__()
-        self.time_limit = time_limit
+# class ExternalCounter(QThread):
+#     """
+#     Runs a counter thread.
+#     """
+#     countChanged = pyqtSignal(int)
+#     def __init__(self, time_limit):
+#         super(ExternalCounter, self).__init__()
+#         self.time_limit = time_limit
 
-    def run(self):
-        count = 0
-        while count < self.time_limit:
-            count +=1
-            time.sleep(1)
-            self.countChanged.emit(count)
+#     def run(self):
+#         count = 0
+#         while count < self.time_limit:
+#             count +=1
+#             time.sleep(1)
+#             self.countChanged.emit(count)
 
 class ViewerPresets(QDialog):
     def __init__(self, app, parent=None):
@@ -265,29 +265,29 @@ class ViewerPresets(QDialog):
         layout.rowStretch(-100)
         self.topRightGroupBox.setLayout(layout)
 
-    def createProgressBar(self):
-        size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
-        eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
+    # def createProgressBar(self):
+    #     size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
+    #     eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
 
-        self.progressBar = QProgressBar()
-        self.progressBar.setRange(0, eta)
-        self.progressBar.setValue(0)
+    #     self.progressBar = QProgressBar()
+    #     self.progressBar.setRange(0, eta)
+    #     self.progressBar.setValue(0)
 
-        # self.timer = ExternalCounter(time_limit=eta)
-        # self.timer.countChanged.connect(self.advanceProgressBar)
-        # self.timer.start()
+    #     # self.timer = ExternalCounter(time_limit=eta)
+    #     # self.timer.countChanged.connect(self.advanceProgressBar)
+    #     # self.timer.start()
 
-    def startProgressBar(self):
-        size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
-        eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
-        self.timer = ExternalCounter(time_limit = eta)
-        self.timer.countChanged.connect(self.advanceProgressBar)
-        self.timer.start()
+    # def startProgressBar(self):
+    #     size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
+    #     eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
+    #     self.timer = ExternalCounter(time_limit = eta)
+    #     self.timer.countChanged.connect(self.advanceProgressBar)
+    #     self.timer.start()
 
-    def advanceProgressBar(self, value):
-        self.progressBar.setValue(value)
-        # self.progressBar.setValue(int(curVal + 1))
-        QApplication.processEvents()
+    # def advanceProgressBar(self, value):
+    #     self.progressBar.setValue(value)
+    #     # self.progressBar.setValue(int(curVal + 1))
+    #     QApplication.processEvents()
 
     def loadGallery(self):
         self.findDataButton.setEnabled(False) # disable load button after click
@@ -300,14 +300,15 @@ class ViewerPresets(QDialog):
         print(f'CHANNELS : {self.userInfo.channels}')
         # self.app.run(max_loop_level=2) # This isn't a thing apparently
         # self.app.processEvents()
-        self.createProgressBar()
-        # self.startProgressBar()
-        self.mainLayout.addWidget(self.progressBar, 3, 0, 1, 2)
 
-        t = threading.Thread(target = self.startProgressBar, name = "Testing thread capabilities")
-        t.daemon = True
-        t.start()
-        print(f'progress bar thread w/daemon should be started now...')
+        # self.createProgressBar()
+        # self.startProgressBar()
+        # self.mainLayout.addWidget(self.progressBar, 3, 0, 1, 2)
+
+        # t = threading.Thread(target = self.startProgressBar, name = "Testing thread capabilities")
+        # t.daemon = True
+        # t.start()
+        # print(f'progress bar thread w/daemon should be started now...')
 
         #TODO make this relative with the os package
         logpath = r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer"
@@ -340,5 +341,5 @@ if __name__ == '__main__':
     # app.setStyle('Fusion')
     gallery = ViewerPresets(app)
     gallery.show()
-    app.processEvents()
+    # app.processEvents()
     sys.exit(app.exec())

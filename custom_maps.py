@@ -174,5 +174,5 @@ yellow = create_yellow_cm()
 cm_dict = {'red':red,"cyan":cyan,"green":green,"gray":gray,"orange":orange,
             "purple":purple,"pink":pink,"Pink":pink,"blue":blue,"yellow":yellow}
 
-def retrieve_cm(cmstr):
-    return cm_dict[cmstr]
+def retrieve_cm(cm_name):
+    return cm_dict[cm_name]
