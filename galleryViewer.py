@@ -398,6 +398,43 @@ def concurrent_clear(viewer):
         mode={"widget_type": "RadioButtons","orientation": "vertical",
         "choices": [("Show all channels", 1), ("Composite Only", 2)]})#,layout = 'horizontal')
 def toggle_composite_viewstatus(mode: int = 1):
+    def _save_validation(VIEWER, mode):
+        print(f'reading from {OBJECT_DATA}')
+        hdata = pd.read_csv(OBJECT_DATA)
+        try:
+            status = hdata.loc[hdata["Object Id"]==0,"Validation"].values[0]
+        except:
+            hdata.insert(4,"Validation", "unseen", allow_duplicates=True)
+            hdata.loc[hdata[PHENOTYPE]==0,"Validation"] = ""
+
+        for layer in VIEWER.layers:
+            if 'status' in layer.name:
+                status = layer.name.split('_')[1]
+                cell_id = layer.name.split()[1]
+            else:
+                continue
+            
+            print(f"LName: {layer.name} , status {status}, cid {cell_id}")
+            try:
+                hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
+            except:
+                print("There's an issue... ")
+        try:
+            VIEWER.status = 'Saving ...'
+            hdata.to_csv(OBJECT_DATA, index=False)
+            VIEWER.status = 'Composite mode enabled. Decisions loaded successfully.'
+            return True
+        except:
+            # Maybe it's an excel sheet?
+            VIEWER.status = ' Composite mode enabled. There was a problem saving your decisions. Close your data file?'
+            return False
+            # hdata.loc[:,1:].to_excel(
+            # OBJECT_DATA,sheet_name='Exported from gallery viewer')
+        VIEWER.status = 'Done saving!'
+    
+    # Save data to file from current set
+    _save_validation(VIEWER)
+
     global COMPOSITE_MODE
     if mode == 1: # change to Show All
         COMPOSITE_MODE = False
@@ -465,7 +502,7 @@ def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
     CELL_LIMIT = int(Amount)
 
     # Save data to file from current set
-    if (not COMPOSITE_MODE) and (not _save_validation(VIEWER, Amount)):
+    if not _save_validation(VIEWER, Amount):
         return None
 
     # Load into same mode as the current
@@ -484,7 +521,7 @@ def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
             VIEWER.layers.clear()
             add_layers(VIEWER,RAW_PYRAMID, xydata , int(OFFSET/2), show_all=True)
     return None
-
+    
 @magicgui(auto_call=True,
         Status_Bar_Visibility={"widget_type": "RadioButtons","orientation": "vertical",
         "choices": [("Show", 1), ("Hide", 2)]})
@@ -535,12 +572,16 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
 
     def add_status_bar(viewer, name, status = 'unseen'):
         if show_all:
+            # Make a strip - will display at the left of each row of channels (one row per cell)
             x = np.array([[0,255,0]])
             y = np.repeat(x,[OFFSET-8,4,4],axis=1)
+            xy = np.repeat(y,OFFSET,axis=0)
         else:
+            # Create a small box - will display in the top left corner above each composite image
             x = np.array([[255,0]])
-            y = np.repeat(x,[4,4],axis=1)
-        xy = np.repeat(y,OFFSET,axis=0)
+            y = np.repeat(x,[10,2],axis=1)
+            z = np.repeat([np.repeat([0],12)],2,axis=0)
+            xy = np.append(np.repeat(y,10,axis=0),z, axis=0)
         status_layer = viewer.add_image(xy, name = f'{name}_{status}', colormap = status_colors[status])
 
         def find_mouse(shape_layer, pos):
