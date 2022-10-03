@@ -610,7 +610,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
                 # print('else')
                 VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
 
-        @status_layer.bind_key('a')
+        @status_layer.bind_key('Space')
         def toggle_status(shape_layer):
             status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
             for candidate in VIEWER.layers:
@@ -696,7 +696,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
                 # print('else')
                 VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
 
-        @shape_layer.bind_key('a')
+        @shape_layer.bind_key('Space')
         def toggle_status(shape_layer):
             # Find details for the layer under the mouse
             status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
@@ -882,7 +882,7 @@ def add_custom_colors():
     return None
 
 def sv_wrapper():
-    @VIEWER.bind_key('s')
+    @VIEWER.bind_key('Control-s')
     def save_validation(VIEWER):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
