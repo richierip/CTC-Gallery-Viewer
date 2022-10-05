@@ -87,8 +87,6 @@ def validate_adjustment(layer):
         return True
     elif layer_name == 'AF'and AF in ADJUSTED:
         return True
-    elif layer_name == 'Composite' and Composite in ADJUSTED:
-        return True
     else:
         return False
 
@@ -99,7 +97,7 @@ def validate_adjustment(layer):
 #     show_intensity.show()
 
 ## --- Composite functions 
-def adjust_composite_gamma(layer, gamma):
+def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
     def _convert_to_rgb(data, colormap, divisor):
         # You have to do it like this. Seriously. 
         global SC_DATA, TEMP
@@ -124,7 +122,7 @@ def adjust_composite_gamma(layer, gamma):
     composite = []
     # get data from other CHECKED channels, not including Composite (always 8)
     need_gamma_adjustment = copy.copy(ADJUSTED)
-    need_gamma_adjustment.remove(8) # nervous about hard-coding this...
+    if Composite in ADJUSTED: need_gamma_adjustment.remove(8) # nervous about hard-coding this...
     fluors_only = copy.copy(CHANNELS)
     fluors_only.remove(8)
     print(f'\n dumping ADJUSTED needed: {ADJUSTED}\n and CHANNELS: {CHANNELS}\n and CHANNELS_STR {CHANNELS_STR}\n and CHANNEL_ORDER {CHANNEL_ORDER}\n and something?? {CHANNELS}')
@@ -133,7 +131,16 @@ def adjust_composite_gamma(layer, gamma):
         chn_str = CHANNEL_ORDER[chn_pos]
         chn_str = chn_str.lstrip('OPAL') # OPAL is not in the name of the data key
         # gamma adjust
-        # y = range*(x/range)^gamma
+        
+        # In this certain case, don't show anything for this channel
+        if COMPOSITE_MODE and Composite not in ADJUSTED and chn_pos not in need_gamma_adjustment:
+            print(f'Conditions satisfied!\n')
+            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
+            chn_data.fill(0)
+            chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)
+            composite.append([chn_data])
+            continue
+
         if chn_pos in need_gamma_adjustment:
             print(f'Will gamma adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
@@ -146,7 +153,10 @@ def adjust_composite_gamma(layer, gamma):
                 chn_data = (chn_data - low) / color_range
             #TODO determine whether gamma gets changed before or after color mapping
             # chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1) # can do this at the end?
-            gamma_correct = np.vectorize(lambda x:x**gamma)
+            if keepSettingsTheSame:
+                gamma_correct = np.vectorize(lambda x:x**ADJUSTMENT_SETTINGS[chn_str+' gamma'])
+            else:
+                gamma_correct = np.vectorize(lambda x:x**gamma)
             chn_data = gamma_correct(chn_data)
             # print(f'Checking dimensions of chn_data: {np.asarray(chn_data).shape}')
             IMAGE_DATA_ADJUSTED[stripped_name+chn_str] = chn_data # store adjustments
@@ -211,16 +221,24 @@ def adjust_composite_limits(layer, limit_type, limit_val):
     composite = []
     # get data from other CHECKED channels, not including Composite (always 8)
     need_contrast_adjustment = copy.copy(ADJUSTED)
-    need_contrast_adjustment.remove(8) # nervous about hard-coding this...
+    if Composite in ADJUSTED: need_contrast_adjustment.remove(Composite) # nervous about hard-coding this...
     fluors_only = copy.copy(CHANNELS)
-    fluors_only.remove(8)
+    fluors_only.remove(Composite)
     print(f'\n dumping ADJUSTED needed: {ADJUSTED}\n and CHANNELS: {CHANNELS}\n and CHANNELS_STR {CHANNELS_STR}\n and CHANNEL_ORDER {CHANNEL_ORDER}\n and something?? {CHANNELS}')
     print(f'\n dumping contrast adjustment needed: {need_contrast_adjustment}')
     for chn_pos in fluors_only:
         chn_str = CHANNEL_ORDER[chn_pos]
         chn_str = chn_str.lstrip('OPAL') # OPAL is not in the name of the data key
         # gamma adjust
-        # y = range*(x/range)^gamma
+
+        # In this certain case, don't show anything for this channel
+        if COMPOSITE_MODE and Composite not in ADJUSTED and chn_pos not in need_contrast_adjustment:
+            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
+            chn_data.fill(0)
+            chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)
+            composite.append([chn_data])
+            continue
+
         if chn_pos in need_contrast_adjustment:
             print(f'Will contrast adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
@@ -280,12 +298,12 @@ def adjust_gamma(viewer, gamma):
 
     for ctclayer in viewer.layers:
         # no longer elif: want to do composite and all checked channels at the same time
-        if validate_adjustment(ctclayer) and ctclayer.name.split()[2] != 'Composite':
+        if validate_adjustment(ctclayer):
             ctclayer.gamma = gamma
             # _update_dictionary(ctclayer.name,gamma)
             # print('Checking ', ctclayer.name)
-        if Composite in ADJUSTED and validate_adjustment(ctclayer):
-            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1:
+        if COMPOSITE_MODE:
+            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
                 adjust_composite_gamma(ctclayer, gamma)
             continue
 
@@ -309,12 +327,12 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
     
     for ctclayer in VIEWER.layers:
         # no longer elif: want to do composite and all checked channels at the same time
-        if validate_adjustment(ctclayer) and ctclayer.name.split()[2] != 'Composite':
+        if validate_adjustment(ctclayer):
             ctclayer.contrast_limits = (ctclayer.contrast_limits[0], white_in)
             # _update_dictionary(ctclayer.name, white_in)
         
-        if Composite in ADJUSTED and validate_adjustment(ctclayer):
-            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1:
+        if COMPOSITE_MODE:
+            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
                 adjust_composite_limits(ctclayer, 'white-in', white_in)
             continue
 
@@ -332,11 +350,11 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
 
     for ctclayer in VIEWER.layers:
         # no longer elif: want to do composite and all checked channels at the same time
-        if validate_adjustment(ctclayer) and ctclayer.name.split()[2] != 'Composite':
+        if validate_adjustment(ctclayer):
             ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
             # _update_dictionary(ctclayer.name,black_in)
-        if Composite in ADJUSTED and validate_adjustment(ctclayer):
-            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>1:
+        if COMPOSITE_MODE:
+            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
                 adjust_composite_limits(ctclayer, 'black-in', black_in)
             continue
 
@@ -349,14 +367,28 @@ def dynamic_checkbox_creator(checkbox_name, setChecked = True):
             layout = 'horizontal')
     def myfunc(check: bool = setChecked):
         # print(f'in myfunc backend CHANNELS are {CHANNELS}, and {CHANNELS_STR}. Trying to remove {checkbox_name}, whose global value is {globals()[checkbox_name]}, from {ADJUSTED}')
-        if check:
-            ADJUSTED.append(globals()[checkbox_name])
-            # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = True
-            # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just added {checkbox_name}')
-        else:
-            ADJUSTED.remove(globals()[checkbox_name])
-            # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = False
-            # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just removed {checkbox_name}')
+        
+        if not COMPOSITE_MODE:
+            if check:
+                ADJUSTED.append(globals()[checkbox_name])
+                # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = True
+                # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just added {checkbox_name}')
+            else:
+                ADJUSTED.remove(globals()[checkbox_name])
+                # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = False
+                # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just removed {checkbox_name}')
+        else: # In composite mode 
+            if check:
+                ADJUSTED.append(globals()[checkbox_name])
+            else:
+                ADJUSTED.remove(globals()[checkbox_name])
+            # now remake composite images with the channels listed in ADJUSTED
+            #   But only if the "Composite" check is active, otherwise show all channels in the image
+            # if Composite not in ADJUSTED:
+            for layer in VIEWER.layers:
+                if layer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
+                    adjust_composite_gamma(layer, gamma=0.5, keepSettingsTheSame = True)
+            
     return myfunc
 
 # print(f'dir is {dir()}')
