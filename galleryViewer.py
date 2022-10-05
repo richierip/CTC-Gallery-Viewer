@@ -4,11 +4,14 @@ Started on 6/7/22
 Peter Richieri
 '''
 
+from pickle import TRUE
 import tifffile
 import napari
 from napari.types import ImageData
 from napari.qt.threading import thread_worker # Needed to add / remove a lot of layers without freezing
-from magicgui import magicgui
+from magicgui import magicgui, magic_factory
+from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton
+from PyQt5.QtCore import Qt
 import numpy as np
 import pandas as pd
 import openpyxl
@@ -38,7 +41,7 @@ for colormap in cell_colors:
     exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
 print(f'\n---------My colormaps are now {plt.colormaps()}--------\n')
 
-cell_colors = ['blue', 'purple' , 'green', 'green', 'orange','red', 'red', 'Pink', 'cyan'] # for local execution
+cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink', 'cyan'] # for local execution
 fluor_to_color = {}
 qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
 OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
@@ -57,12 +60,14 @@ CHANNEL_ORDER = ['DAPI', 'OPAL570', 'OPAL690', 'OPAL480', 'OPAL620', 'OPAL780', 
 VIEWER = None
 SC_DATA = None # Using this to store data to coerce the exec function into doing what I want
 TEMP = None
-IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}; ADJUSTMENT_SETTINGS={}
+IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}; ADJUSTMENT_SETTINGS={}; SAVED_NOTES={}
 RAW_PYRAMID=None
+NOTES_WIDGET = None
 COMPOSITE_MODE = False
 
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
+#TODO merge some of the GUI elements into the same container to prevent strange spacing issues
 
 def validate_adjustment(layer):
     layer_name = layer.name.split()[2] # grab last part of label
@@ -336,6 +341,7 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
             continue
 
 # Called in a loop to create as many GUI elements as needed
+#TODO use magicfactory decorator to do this. It probably is better practice, and surely looks nicer
 def dynamic_checkbox_creator(checkbox_name, setChecked = True):
 
     @magicgui(auto_call=True,
@@ -406,10 +412,15 @@ def toggle_composite_viewstatus(mode: int = 1):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            status = hdata.loc[hdata["Object Id"]==0,"Validation"].values[0]
-        except:
-            hdata.insert(4,"Validation", "unseen", allow_duplicates=True)
+            hdata.loc[2,"Validation"]
+        except KeyError:
+            hdata.insert(4,"Validation", "unseen")
             hdata.loc[hdata[PHENOTYPE]==0,"Validation"] = ""
+        try:
+            hdata.loc[2,"Notes"]
+        except KeyError:
+            hdata.insert(5,"Notes","-")
+            hdata.fillna("")
 
         for layer in VIEWER.layers:
             if 'status' in layer.name:
@@ -421,6 +432,7 @@ def toggle_composite_viewstatus(mode: int = 1):
             print(f"LName: {layer.name} , status {status}, cid {cell_id}")
             try:
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
+                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[cell_id]
             except:
                 print("There's an issue... ")
         try:
@@ -468,17 +480,22 @@ def toggle_composite_viewstatus(mode: int = 1):
         Direction={"widget_type": "RadioButtons","orientation": "horizontal",
         "choices": [("Next", 'fwd'), ("Previous", 'bkwd')]},
         Amount={"widget_type": "SpinBox", "value":15,
-        "max":100,"min":5})
+        "max":1000,"min":5})
 def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
 
     def _save_validation(VIEWER,numcells):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            status = hdata.loc[hdata["Object Id"]==0,"Validation"].values[0]
-        except:
-            hdata.insert(4,"Validation", "unseen", allow_duplicates=True)
+            hdata.loc[2,"Validation"]
+        except KeyError:
+            hdata.insert(4,"Validation", "unseen")
             hdata.loc[hdata[PHENOTYPE]==0,"Validation"] = ""
+        try:
+            hdata.loc[2,"Notes"]
+        except KeyError:
+            hdata.insert(5,"Notes","-")
+            hdata.fillna("")
 
         for layer in VIEWER.layers:
             if 'status' in layer.name:
@@ -490,6 +507,7 @@ def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
             print(f"LName: {layer.name} , status {status}, cid {cell_id}")
             try:
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
+                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[cell_id]
             except:
                 print("There's an issue... ")
         try:
@@ -508,13 +526,15 @@ def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
     global CELL_ID_START, CELL_LIMIT, CELL_OFFSET
 
     print(f'\nDebug prints. Spinbox reads {Amount}, type {type(Amount)}')
-    CELL_OFFSET = CELL_LIMIT 
-    CELL_LIMIT = int(Amount)
 
     # Save data to file from current set
     if not _save_validation(VIEWER, Amount):
+        print(f'Could not save...')
         return None
 
+    CELL_OFFSET = CELL_LIMIT 
+    CELL_LIMIT = int(Amount)
+    VIEWER.grid.shape = (CELL_LIMIT, len(CHANNELS)+1)
     # Load into same mode as the current
     if COMPOSITE_MODE:
         xydata = extract_phenotype_xldata(change_startID=True,direction=Direction)
@@ -522,14 +542,14 @@ def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
             VIEWER.status="Can't load cells: out of bounds error."
         else:
             VIEWER.layers.clear()
-            add_layers(VIEWER,RAW_PYRAMID, xydata , int(OFFSET/2), show_all=False)
+            add_layers(VIEWER,RAW_PYRAMID, xydata, int(OFFSET/2), show_all=False)
     else:
         xydata = extract_phenotype_xldata(change_startID=True,direction=Direction)
         if xydata is False:
             VIEWER.status="Can't load cells: out of bounds error."
         else:
             VIEWER.layers.clear()
-            add_layers(VIEWER,RAW_PYRAMID, xydata , int(OFFSET/2), show_all=True)
+            add_layers(VIEWER,RAW_PYRAMID, xydata, int(OFFSET/2), show_all=True)
     return None
     
 @magicgui(auto_call=True,
@@ -549,6 +569,15 @@ def toggle_statusbar_visibility(Status_Bar_Visibility: int=1):
                 layer.visible = False
     else:
         raise Exception(f"Invalid parameter passed to toggle_statusbar_visibility: {Status_Bar_Visibility}. Must be 1 or 2.")
+    return None
+
+def sort_by_intensity():
+    pass
+
+def set_notes_label(display_note_widget, ID):
+    note = str(SAVED_NOTES[ID])
+    if note == '-' or note == '': note = 'None'
+    display_note_widget.setText(note)
     return None
 ######------------------------- Image loading and processing functions ---------------------######
 
@@ -613,6 +642,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
         def display_intensity(shape_layer, event):
             
             shape_layer,coords,val = find_mouse(shape_layer, event.position) 
+            set_notes_label(NOTES_WIDGET, shape_layer.name.split()[1])
             if val is None:
                 # print('none')
                 VIEWER.status = f'{shape_layer.name} intensity at {coords}: N/A'
@@ -699,6 +729,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
         def display_intensity(shape_layer, event):
             
             shape_layer,coords,val = find_mouse(shape_layer, event.position) 
+            set_notes_label(NOTES_WIDGET, shape_layer.name.split()[1])
             if val is None:
                 # print('none')
                 VIEWER.status = f'{shape_layer.name} intensity at {coords}: N/A'
@@ -895,12 +926,19 @@ def sv_wrapper(viewer):
     @viewer.bind_key('s')
     def save_validation(viewer):
         print(f'reading from {OBJECT_DATA}')
+        viewer.status = 'Saving ...'
         hdata = pd.read_csv(OBJECT_DATA)
+
         try:
-            status = hdata.loc[hdata["Object Id"]==0,"Validation"].values[0]
-        except:
-            hdata.insert(4,"Validation", "unseen", allow_duplicates=True)
+            hdata.loc[2,"Validation"]
+        except KeyError:
+            hdata.insert(4,"Validation", "unseen")
             hdata.loc[hdata[PHENOTYPE]==0,"Validation"] = ""
+        try:
+            hdata.loc[2,"Notes"]
+        except KeyError:
+            hdata.insert(5,"Notes","-")
+            hdata.fillna("")
 
         for layer in viewer.layers:
             if 'status' in layer.name:
@@ -912,10 +950,10 @@ def sv_wrapper(viewer):
             print(f"LName: {layer.name} , status {status}, cid {cell_id}")
             try:
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
+                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[cell_id]
             except:
                 print("There's an issue... ")
         try:
-            viewer.status = 'Saving ...'
             hdata.to_csv(OBJECT_DATA, index=False)
             viewer.status = 'Done saving!'
             return None
@@ -935,6 +973,12 @@ def tsv_wrapper(viewer):
             if 'status' in layer.name:
                 layer.visible = not layer.visible
        
+def fetch_notes(cell_set):
+    '''Grab notes for each cell in the list and save to global dict'''
+    for index,row in cell_set.iterrows():
+        ID = str(row['Object Id'])
+        SAVED_NOTES[ID] = row['Notes']
+    print(f'dumping dict {SAVED_NOTES}')
 
 '''Get object data from csv and parse.''' 
 def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', cell_id_start=None, cell_limit=None, phenotype=None):
@@ -946,7 +990,24 @@ def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', cell_id_
     # Also using CELL_OFFSET to know how big the current set size is
     print(f'ORDERING PARAMS: id start: {cell_id_start}, limit: {cell_limit}, direction: {direction}, change?: {change_startID}')
     halo_export = pd.read_csv(OBJECT_DATA)
-    halo_export = halo_export.loc[:, ["Object Id", "XMin","XMax","YMin", "YMax", phenotype]]
+
+    # Add columns w/defaults if they aren't there to avoid runtime issues
+    try:
+        halo_export.loc[2,"Validation"]
+    except KeyError:
+        halo_export.insert(4,"Validation", "unseen")
+        halo_export.loc[halo_export[PHENOTYPE]==0,"Validation"] = ""
+    try:
+        halo_export.loc[2,"Notes"]
+    except KeyError:
+        halo_export.insert(5,"Notes","-")
+        halo_export.fillna("")
+    try:
+        halo_export.to_csv(OBJECT_DATA, index=False)
+    except:
+        pass
+    # Get relevant columns
+    halo_export = halo_export.loc[:, ["Object Id","Validation","Notes", "XMin","XMax","YMin", "YMax", phenotype]]
     
     if cell_id_start < len(halo_export) and cell_id_start > 0:
         if direction =='fwd':     
@@ -979,6 +1040,7 @@ def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', cell_id_
         # Likely changing composite modes, so don't do any manipulations
         cell_set = cell_set[:cell_limit]
     
+    fetch_notes(cell_set)
     tumor_cell_XYs = []
     for index,row in cell_set.iterrows():
         center_x = int((row['XMax']+row['XMin'])/2)
@@ -986,6 +1048,24 @@ def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', cell_id_
         tumor_cell_XYs.append([center_x, center_y, row["Object Id"]])
 
     return tumor_cell_XYs
+
+def replace_note(cell_widget, note_widget):
+    global SAVED_NOTES
+    cellID = cell_widget.text(); note = note_widget.text()
+    try: 
+        cellID = int(cellID)
+    except ValueError:
+        VIEWER.status = 'Error recording note: non-numeric CellId given'
+        return None 
+    try:
+        SAVED_NOTES[str(cellID)] # to trigger exception
+        SAVED_NOTES[str(cellID)] = note
+        cell_widget.clear(); note_widget.clear()
+        VIEWER.status = "Note recorded! Press 's' to save to file."
+    except KeyError as e:
+        print(f'\n{e}\n')
+        VIEWER.status = 'Error recording note: CellId not found in list'
+
 ######------------------------- Remote Execution + Main ---------------------######
 
 ''' Reset globals and proceed to main '''
@@ -1024,10 +1104,7 @@ def GUI_execute_cheat(userInfo):
     main()
 
 def main():
-    # print(f'dumping globals before checkbox\n {globals()}')
-    #    # Execution loop - need to call it here to get the names into the namespace
-    # add_custom_colors()
-    # print(f'dumping globals AFTER\n {globals()}')
+    #TODO do this in a function because this is ugly
     with tifffile.Timer(f'\nLoading pyramid from {qptiff}...\n'):
         pyramid = tifffile.imread(qptiff)
         # can pick select pages
@@ -1047,7 +1124,6 @@ def main():
     if channel_index == 0:
         # Added this because the high quality layer of my sample QPTIFF data seemed to be flipped
         # i.e. array looks like (channels, y, x)
-        # to be seen if this actually works
         pyramid = np.transpose(pyramid,(2,1,0))
         # print(f'FLIPPED SHAPE is {pyramid.shape}\n')
         firstLayer = pyramid[:,:,0]
@@ -1070,6 +1146,20 @@ def main():
     viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)+1) # +1 because of the status layer.
 
     #TODO arrange these more neatly
+    #TODO these dock widgets cause VERY strange behavior when trying to clear all layers / load more
+    global NOTES_WIDGET
+    NOTES_WIDGET = QLabel('Placeholder note'); NOTES_WIDGET.setAlignment(Qt.AlignCenter)
+    note_text_entry = QLineEdit()
+    note_cell_entry = QLineEdit()
+    note_button = QPushButton("Replace note for cell")
+    note_text_entry.setPlaceholderText('Enter new note')
+    note_text_entry.setFixedWidth(200)
+    note_cell_entry.setPlaceholderText("CellId")
+    note_cell_entry.setFixedWidth(50)
+    # Pass pointer to widgets to function on button press
+    note_button.pressed.connect(lambda: replace_note(note_cell_entry, note_text_entry))
+
+    viewer.window.add_dock_widget([NOTES_WIDGET,note_text_entry, note_cell_entry, note_button], name = 'Take notes', area = 'right')
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
@@ -1077,19 +1167,15 @@ def main():
     viewer.window.add_dock_widget(toggle_composite_viewstatus,name = 'Test', area = 'right')
     viewer.window.add_dock_widget(show_next_cell_group,name = 'Test2', area = 'right')
     viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test3', area = 'right')
-    
     # print(f'\n {dir()}') # prints out the namespace variables 
     for marker_function in CHANNELS_STR:
         # Only make visible the chosen markers
         exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
     
-    #adjust_gamma(viewer,0.5) # Doesn't work.
     sv_wrapper(viewer)
     tsv_wrapper(viewer)
     napari.run()
 
-# I haven't run this from main in a while so it may not work anymore.
-#   Usually I run the GUI script which populates a userInfo class with data
-#   and then passes it to main()
+# Main should work now using the defaults specified at the top of this script in the global variable space
 if __name__ == '__main__':
     main()
