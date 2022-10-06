@@ -133,7 +133,7 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
         # gamma adjust
         
         # In this certain case, don't show anything for this channel
-        if COMPOSITE_MODE and Composite not in ADJUSTED and chn_pos not in need_gamma_adjustment:
+        if Composite not in ADJUSTED and chn_pos not in need_gamma_adjustment:
             print(f'Conditions satisfied!\n')
             chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
             chn_data.fill(0)
@@ -232,7 +232,7 @@ def adjust_composite_limits(layer, limit_type, limit_val):
         # gamma adjust
 
         # In this certain case, don't show anything for this channel
-        if COMPOSITE_MODE and Composite not in ADJUSTED and chn_pos not in need_contrast_adjustment:
+        if Composite not in ADJUSTED and chn_pos not in need_contrast_adjustment:
             chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
             chn_data.fill(0)
             chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)
@@ -302,10 +302,8 @@ def adjust_gamma(viewer, gamma):
             ctclayer.gamma = gamma
             # _update_dictionary(ctclayer.name,gamma)
             # print('Checking ', ctclayer.name)
-        if COMPOSITE_MODE:
-            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
-                adjust_composite_gamma(ctclayer, gamma)
-            continue
+        elif ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
+            adjust_composite_gamma(ctclayer, gamma)
 
 @magicgui(auto_call=True,
         gamma={"widget_type": "FloatSlider", "max":1.0, "min":0.01},
@@ -331,10 +329,8 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
             ctclayer.contrast_limits = (ctclayer.contrast_limits[0], white_in)
             # _update_dictionary(ctclayer.name, white_in)
         
-        if COMPOSITE_MODE:
-            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
-                adjust_composite_limits(ctclayer, 'white-in', white_in)
-            continue
+        elif ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
+            adjust_composite_limits(ctclayer, 'white-in', white_in)
 
 @magicgui(auto_call=True,
         black_in={"widget_type": "FloatSlider", "max":255, "label":"Black-in"},
@@ -353,10 +349,8 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         if validate_adjustment(ctclayer):
             ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
             # _update_dictionary(ctclayer.name,black_in)
-        if COMPOSITE_MODE:
-            if ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
-                adjust_composite_limits(ctclayer, 'black-in', black_in)
-            continue
+        elif ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
+            adjust_composite_limits(ctclayer, 'black-in', black_in)
 
 # Called in a loop to create as many GUI elements as needed
 #TODO use magicfactory decorator to do this. It probably is better practice, and surely looks nicer
@@ -385,9 +379,9 @@ def dynamic_checkbox_creator(checkbox_name, setChecked = True):
             # now remake composite images with the channels listed in ADJUSTED
             #   But only if the "Composite" check is active, otherwise show all channels in the image
             # if Composite not in ADJUSTED:
-            for layer in VIEWER.layers:
-                if layer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
-                    adjust_composite_gamma(layer, gamma=0.5, keepSettingsTheSame = True)
+        for layer in VIEWER.layers:
+            if layer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
+                adjust_composite_gamma(layer, gamma=0.5, keepSettingsTheSame = True)
             
     return myfunc
 
@@ -436,11 +430,11 @@ def concurrent_clear(viewer):
     for layer in layers:
         viewer.layers.remove(layer)
 
-@magicgui(
-        mode={"widget_type": "RadioButtons","orientation": "vertical",
+@magicgui(call_button='Change Mode',
+        Mode={"widget_type": "RadioButtons","orientation": "vertical",
         "choices": [("Show all channels", 1), ("Composite Only", 2)]})#,layout = 'horizontal')
-def toggle_composite_viewstatus(mode: int = 1):
-    def _save_validation(VIEWER, mode):
+def toggle_composite_viewstatus(Mode: int = 1):
+    def _save_validation(VIEWER, Mode):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
         try:
@@ -470,34 +464,34 @@ def toggle_composite_viewstatus(mode: int = 1):
         try:
             VIEWER.status = 'Saving ...'
             hdata.to_csv(OBJECT_DATA, index=False)
-            if mode == 1:
-                VIEWER.status = 'Channels mode enabled. Decisions loaded successfully.'
-            elif mode ==2:
-                VIEWER.status = 'Composite mode enabled. Decisions loaded successfully.'
+            if Mode == 1:
+                VIEWER.status = 'Channels Mode enabled. Decisions loaded successfully.'
+            elif Mode ==2:
+                VIEWER.status = 'Composite Mode enabled. Decisions loaded successfully.'
             return True
         except:
             #TODO Maybe it's an excel sheet?
-            if mode == 1:
-                VIEWER.status = 'Channels mode enabled. But, there was a problem saving your decisions. Close your data file?'
-            elif mode ==2:
-                VIEWER.status = 'Composite mode enabled. But, there was a problem saving your decisions. Close your data file?'
+            if Mode == 1:
+                VIEWER.status = 'Channels Mode enabled. But, there was a problem saving your decisions. Close your data file?'
+            elif Mode ==2:
+                VIEWER.status = 'Composite Mode enabled. But, there was a problem saving your decisions. Close your data file?'
             return False
             # hdata.loc[:,1:].to_excel(
             # OBJECT_DATA,sheet_name='Exported from gallery viewer')
         VIEWER.status = 'Done saving!'
     
     # Save data to file from current set
-    _save_validation(VIEWER, mode)
+    _save_validation(VIEWER, Mode)
 
     global COMPOSITE_MODE
-    if mode == 1: # change to Show All
+    if Mode == 1: # change to Show All
         COMPOSITE_MODE = False
         # VIEWER.layers.clear()
         print(f'\nAttempting to clear')
         concurrent_clear(VIEWER)
         data = extract_phenotype_xldata()
         add_layers(VIEWER,RAW_PYRAMID, data, int(OFFSET/2), show_all=True)
-    elif mode ==2: # change to composite only
+    elif Mode ==2: # change to composite only
         COMPOSITE_MODE = True
         # VIEWER.layers.clear()
         print(f'\nAttempting to clear')
@@ -505,10 +499,10 @@ def toggle_composite_viewstatus(mode: int = 1):
         data = extract_phenotype_xldata()
         add_layers(VIEWER,RAW_PYRAMID, data, int(OFFSET/2), show_all=False)
     else:
-        raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {mode}. Must be 1 or 2.")
+        raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {Mode}. Must be 1 or 2.")
     return None
 
-@magicgui(
+@magicgui(call_button='Load Cells',
         Direction={"widget_type": "RadioButtons","orientation": "horizontal",
         "choices": [("Next", 'fwd'), ("Previous", 'bkwd')]},
         Amount={"widget_type": "SpinBox", "value":15,
@@ -1200,10 +1194,13 @@ def main():
     viewer.window.add_dock_widget(show_next_cell_group,name = 'Test2', area = 'right')
     viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test3', area = 'right')
     # print(f'\n {dir()}') # prints out the namespace variables 
+
+    all_boxes = []
     for marker_function in CHANNELS_STR:
         # Only make visible the chosen markers
-        exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
-    
+        all_boxes.append(globals()[f'{marker_function}_box'])
+        # exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
+    viewer.window.add_dock_widget(all_boxes,area='bottom')
     sv_wrapper(viewer)
     tsv_wrapper(viewer)
     napari.run()
