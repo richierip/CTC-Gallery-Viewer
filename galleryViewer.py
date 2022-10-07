@@ -38,7 +38,7 @@ for colormap in cell_colors:
     exec(f'my_map = custom_maps.create_{colormap}_lut()')
     exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
     exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
-print(f'\n---------My colormaps are now {plt.colormaps()}--------\n')
+# print(f'\n---------My colormaps are now {plt.colormaps()}--------\n')
 
 cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink', 'cyan'] # for local execution
 fluor_to_color = {}
@@ -59,7 +59,8 @@ CHANNEL_ORDER = ['DAPI', 'OPAL570', 'OPAL690', 'OPAL480', 'OPAL620', 'OPAL780', 
 VIEWER = None
 SC_DATA = None # Using this to store data to coerce the exec function into doing what I want
 TEMP = None
-IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}; ADJUSTMENT_SETTINGS={}; SAVED_NOTES={}
+IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}; ADJUSTMENT_SETTINGS={}; 
+SAVED_NOTES={} ; STATUS_LIST={}; XY_STORE = [1,2,3]
 RAW_PYRAMID=None
 NOTES_WIDGET = None
 COMPOSITE_MODE = False
@@ -106,17 +107,17 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
         exec(f'rgb = TEMP(SC_DATA)', globals(), loc)
         return loc['rgb']
 
-    print(f'Checking keys of outer dict: {IMAGE_DATA_ORIGINAL.keys()}')
-    print(f'My name is {layer.name}')
+    # print(f'Checking keys of outer dict: {IMAGE_DATA_ORIGINAL.keys()}')
+    # print(f'My name is {layer.name}')
     # composite = copy.copy(IMAGE_DATA_STORE[layer.name])
     # print(f'Checking keys of inner dict: {color_dict.keys()}')
     # print(type(layer.colormap))
     # print(f'{layer.colormap} vs str() {str(layer.colormap)}')
     stripped_name = layer.name.rstrip('Composite') # Format is 'Cell 271'
 
-    for chn in ADJUSTED:
-        print(f'to be adjusted: {chn}')
-    print(f'\n DICT: {ADJUSTMENT_SETTINGS}')
+    # for chn in ADJUSTED:
+    #     print(f'to be adjusted: {chn}')
+    # print(f'\n DICT: {ADJUSTMENT_SETTINGS}')
 
     composite = []
     # get data from other CHECKED channels, not including Composite (always 8)
@@ -124,8 +125,8 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
     if Composite in ADJUSTED: need_gamma_adjustment.remove(8) # nervous about hard-coding this...
     fluors_only = copy.copy(CHANNELS)
     fluors_only.remove(8)
-    print(f'\n dumping ADJUSTED needed: {ADJUSTED}\n and CHANNELS: {CHANNELS}\n and CHANNELS_STR {CHANNELS_STR}\n and CHANNEL_ORDER {CHANNEL_ORDER}\n and something?? {CHANNELS}')
-    print(f'\n dumping adjustment needed: {need_gamma_adjustment}')
+    # print(f'\n dumping ADJUSTED needed: {ADJUSTED}\n and CHANNELS: {CHANNELS}\n and CHANNELS_STR {CHANNELS_STR}\n and CHANNEL_ORDER {CHANNEL_ORDER}\n and something?? {CHANNELS}')
+    # print(f'\n dumping adjustment needed: {need_gamma_adjustment}')
     for chn_pos in fluors_only:
         chn_str = CHANNEL_ORDER[chn_pos]
         chn_str = chn_str.lstrip('OPAL') # OPAL is not in the name of the data key
@@ -133,7 +134,7 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
         
         # In this certain case, don't show anything for this channel
         if Composite not in ADJUSTED and chn_pos not in need_gamma_adjustment:
-            print(f'Conditions satisfied!\n')
+            # print(f'Conditions satisfied!\n')
             chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
             chn_data.fill(0)
             chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)
@@ -141,7 +142,7 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
             continue
 
         if chn_pos in need_gamma_adjustment:
-            print(f'Will gamma adjust {chn_str}')
+            # print(f'Will gamma adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
 
             low = ADJUSTMENT_SETTINGS[chn_str+' black-in'] / 255.0
@@ -165,12 +166,12 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
         composite.append([chn_data])
 
 
-    print(f'Checking dimensions of composite: {np.asarray(composite).shape}')
+    # print(f'Checking dimensions of composite: {np.asarray(composite).shape}')
     composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
-    print(f'Checking dimensions of composite after extract: {np.asarray(composite).shape}')
+    # print(f'Checking dimensions of composite after extract: {np.asarray(composite).shape}')
     composite = np.sum(composite, axis=0) 
     composite=np.clip(composite,0,np.max(composite))
-    print(f'Checking dimensions of composite after sum: {np.asarray(composite).shape}')
+    # print(f'Checking dimensions of composite after sum: {np.asarray(composite).shape}')
     composite[:,:,3] = 1.0
 
     rgb_mins = [] ## Axis here?
@@ -189,8 +190,8 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
         composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
         composite[:,:,i] = composite[:,:,i] * 255.0
 
-    print(f'Final check of dimensions of composite before setting data: {np.asarray(composite).shape}')
-
+    IMAGE_DATA_ADJUSTED[layer.name] = composite.astype('int')
+    # print(f'Final check of dimensions of composite before setting data: {np.asarray(composite).shape}')
     layer.data = composite.astype('int') # casting is crucial
 
 
@@ -205,26 +206,26 @@ def adjust_composite_limits(layer):
         exec(f'rgb = TEMP(SC_DATA)', globals(), loc)
         return loc['rgb']
 
-    print(f'Checking keys of outer dict: {IMAGE_DATA_ORIGINAL.keys()}')
-    print(f'My name is {layer.name}')
+    # print(f'Checking keys of outer dict: {IMAGE_DATA_ORIGINAL.keys()}')
+    # print(f'My name is {layer.name}')
     # composite = copy.copy(IMAGE_DATA_STORE[layer.name])
     # print(f'Checking keys of inner dict: {color_dict.keys()}')
     # print(type(layer.colormap))
     # print(f'{layer.colormap} vs str() {str(layer.colormap)}')
     stripped_name = layer.name.rstrip('Composite') # Format is 'Cell 271'
 
-    for chn in ADJUSTED:
-        print(f'to be adjusted: {chn}')
+    # for chn in ADJUSTED:
+    #     print(f'to be adjusted: {chn}')
 
-    print(f'\n DICT: {ADJUSTMENT_SETTINGS}')
+    # print(f'\n DICT: {ADJUSTMENT_SETTINGS}')
     composite = []
     # get data from other CHECKED channels, not including Composite (always 8)
     need_contrast_adjustment = copy.copy(ADJUSTED)
     if Composite in ADJUSTED: need_contrast_adjustment.remove(Composite) # nervous about hard-coding this...
     fluors_only = copy.copy(CHANNELS)
     fluors_only.remove(Composite)
-    print(f'\n dumping ADJUSTED needed: {ADJUSTED}\n and CHANNELS: {CHANNELS}\n and CHANNELS_STR {CHANNELS_STR}\n and CHANNEL_ORDER {CHANNEL_ORDER}\n and something?? {CHANNELS}')
-    print(f'\n dumping contrast adjustment needed: {need_contrast_adjustment}')
+    # print(f'\n dumping ADJUSTED needed: {ADJUSTED}\n and CHANNELS: {CHANNELS}\n and CHANNELS_STR {CHANNELS_STR}\n and CHANNEL_ORDER {CHANNEL_ORDER}\n and something?? {CHANNELS}')
+    # print(f'\n dumping contrast adjustment needed: {need_contrast_adjustment}')
     for chn_pos in fluors_only:
         chn_str = CHANNEL_ORDER[chn_pos]
         chn_str = chn_str.lstrip('OPAL') # OPAL is not in the name of the data key
@@ -239,7 +240,7 @@ def adjust_composite_limits(layer):
             continue
 
         if chn_pos in need_contrast_adjustment:
-            print(f'Will contrast adjust {chn_str}')
+            # print(f'Will contrast adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
 
             low = ADJUSTMENT_SETTINGS[chn_str+' black-in'] / 255.0
@@ -256,16 +257,16 @@ def adjust_composite_limits(layer):
         else:
             print(f'Just fetching {chn_str} data...')
             chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
-        print(f'Converting back to rgb, using the {fluor_to_color[chn_str]} palette ...')
+        # print(f'Converting back to rgb, using the {fluor_to_color[chn_str]} palette ...')
         chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
         composite.append([chn_data])
 
 
-    print(f'Checking dimensions of composite: {np.asarray(composite).shape}')
+    # print(f'Checking dimensions of composite: {np.asarray(composite).shape}')
     composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
-    print(f'Checking dimensions of composite after extract: {np.asarray(composite).shape}')
+    # print(f'Checking dimensions of composite after extract: {np.asarray(composite).shape}')
     composite = np.sum(composite, axis=0) 
-    print(f'Checking dimensions of composite after sum: {np.asarray(composite).shape}')
+    # print(f'Checking dimensions of composite after sum: {np.asarray(composite).shape}')
     composite[:,:,3] = 1.0 # restore alpha value.
 
     rgb_mins = [] ## Axis here?
@@ -282,7 +283,9 @@ def adjust_composite_limits(layer):
         composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
         composite[:,:,i] = composite[:,:,i] * 255.0
 
-    print(f'Final check of dimensions of composite before setting data: {np.asarray(composite).shape}')
+    # Save result
+    IMAGE_DATA_ADJUSTED[layer.name] = composite.astype('int')
+    # print(f'Final check of dimensions of composite before setting data: {np.asarray(composite).shape}')
     layer.data = composite.astype('int') # casting is crucial
 
 def reuse_gamma():
@@ -334,7 +337,7 @@ def adjust_gamma_widget(gamma: float = 1.0) -> ImageData:
     adjust_gamma(VIEWER,gamma)
 
 @magicgui(auto_call=True,
-        white_in={"widget_type": "FloatSlider", "max":255, "label": "White-in"},
+        white_in={"widget_type": "FloatSlider", "max":255,"min":1.0, "label": "White-in"},
         layout = 'horizontal')
 def adjust_whitein(white_in: float = 255) -> ImageData:
     def _update_dictionary(name, val):
@@ -455,6 +458,7 @@ def concurrent_clear(viewer):
         Mode={"widget_type": "RadioButtons","orientation": "vertical",
         "choices": [("Show all channels", 1), ("Composite Only", 2)]})#,layout = 'horizontal')
 def toggle_composite_viewstatus(Mode: int = 1):
+    VIEWER.status = 'Saving data to file...'
     def _save_validation(VIEWER, Mode):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
@@ -507,18 +511,18 @@ def toggle_composite_viewstatus(Mode: int = 1):
     global COMPOSITE_MODE
     if Mode == 1: # change to Show All
         COMPOSITE_MODE = False
-        # VIEWER.layers.clear()
         print(f'\nAttempting to clear')
+        # VIEWER.layers.clear()
         concurrent_clear(VIEWER)
-        data = extract_phenotype_xldata()
-        add_layers(VIEWER,RAW_PYRAMID, data, int(OFFSET/2), show_all=True)
+        #data = extract_phenotype_xldata() # Don't need this since it is saved now
+        add_layers(VIEWER,RAW_PYRAMID, XY_STORE, int(OFFSET/2), show_all=True, new_batch=False)
     elif Mode ==2: # change to composite only
         COMPOSITE_MODE = True
-        # VIEWER.layers.clear()
         print(f'\nAttempting to clear')
+        # VIEWER.layers.clear()
         concurrent_clear(VIEWER)
-        data = extract_phenotype_xldata()
-        add_layers(VIEWER,RAW_PYRAMID, data, int(OFFSET/2), show_all=False)
+        #data = extract_phenotype_xldata() # Don't need this since it is saved now
+        add_layers(VIEWER,RAW_PYRAMID, XY_STORE, int(OFFSET/2), show_all=False, new_batch=False)
     else:
         raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {Mode}. Must be 1 or 2.")
         # Perform adjustments before exiting function
@@ -638,10 +642,10 @@ def set_notes_label(display_note_widget, ID):
 #   for the ctc cells. Gallery mode might end up being a pain for downstream.
 #   Counterpoint - how to apply filters to only some channels if they are in same image?
 #   Counterpoint to counterpoint - never get rid of numpy arrays and remake whole image as needed. 
-def add_layers(viewer,pyramid, cells, offset, show_all=True):
+def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
+    print(f'\n---------\n \n Entering the add_layers function')
     # Make the color bar that appears to the left of the composite image
     status_colors = {"unseen":"gray", "needs review":"bop orange", "confirmed":"green", "rejected":"red" }
-    hdata = pd.read_csv(OBJECT_DATA)
 
     # Choice depends on whether we want to be in composite only mode or not
     if show_all:
@@ -649,18 +653,24 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
     else:
         viewer.grid.stride = 2
 
-    def retrieve_status(cell_id):
-        print(f'Getting status for {cell_id}')
-        try:
-            status = hdata.loc[hdata['Object Id'] == cell_id, "Validation"].values[0]
-            print(f'Got it. Status is .{status}.')
-        except:
-            # Column doesn't exist, use default
-            status = "unseen"
-            print(f'exception. Could not grab status')
-        if type(status) is not str or status not in status_colors.keys():
-            status = "unseen"
-        return status
+    def retrieve_status(cell_id, cell):
+        ''' Kind of an anachronistic function at this point.'''
+        # print(f'Getting status for {cell_id}')
+        if new_batch:
+            try:
+                status = cell[3]
+                # print(f'Got it. Status is .{status}.')
+            except:
+                # Column doesn't exist, use default
+                status = "unseen"
+                # print(f'exception. Could not grab status')
+            if type(status) is not str or status not in status_colors.keys():
+                status = "unseen"
+            # Save to dict to make next retrieval faster
+            STATUS_LIST[cell_id] = status
+            return status
+        else:
+            return STATUS_LIST[cell_id]
 
     def add_status_bar(viewer, name, status = 'unseen'):
         if show_all:
@@ -820,7 +830,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
 
     def _convert_to_rgb(data, colormap, divisor):
         # You have to do it like this. Seriously. 
-        print(f'CONVERTING to {colormap}... \n')
+        # print(f'CONVERTING to {colormap}... \n')
         global SC_DATA, TEMP
         SC_DATA = data / divisor
         # SC_DATA /= divisor
@@ -833,7 +843,8 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
     
     print(f'Adding {len(cells)} cells to viewer...')
     while bool(cells): # coords left
-        cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]
+        print(f'Next round of while. Still {len(cells)} cells left')
+        cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; cell_status = retrieve_status(cell_id,cell)
         composite = []
         # add the rest of the layers to the viewer
         for i in range(pyramid.shape[2]): # loop through channels
@@ -849,9 +860,17 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
                 elif i==OPAL520: fluor='520'
                 elif i==AF: continue #fluor='AF' 
                 cell_name = f'Cell {cell_id} {fluor}'
-                # print(f'Adding cell {cell_x},{cell_y} - layer {i}')
+
+                # Shortcut if we have seen the cell before and done the work
+                if show_all and cell_name in IMAGE_DATA_ADJUSTED:
+                    # Have to apply a 255 multiplier since it's saved with a range of 0-1 (used for the composite calculations)
+                    add_layer(viewer,IMAGE_DATA_ADJUSTED[cell_name]*255, cell_name, colormap= cell_colors[i])
+                    continue # go on to the next
+
+                print(f'Adding cell {cell_x},{cell_y} - layer {i}')
                 # Save record of what colormap is chosen for what fluor. Useful for 
-                #   altering the composite image later (white-in / black-in)
+                #   altering the composite image later (white-in / black-in). 
+                # This is dumb - do it somewhere else
                 if cell_colors[i] == 'pink': cell_colors[i] = 'Pink'
                 global fluor_to_color; fluor_to_color[fluor] = cell_colors[i]
                 cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
@@ -866,7 +885,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
                 # should be floats now
                 # Normalize to range of 0.0 , 1.0 BEFORE passing through color map
 
-                print(f' MIN / MAX output {np.min(cell_punchout_raw)} / {np.max(cell_punchout_raw)}')
+                # print(f' MIN / MAX output {np.min(cell_punchout_raw)} / {np.max(cell_punchout_raw)}')
                 cell_punchout_raw = cell_punchout_raw #- cell_punchout_raw.min()
                 cell_punchout_raw = cell_punchout_raw / 255.0 #cell_punchout_raw.max()
 
@@ -874,7 +893,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
                 # cell_punchout = custom_map(cell_punchout_raw)*255
                 print(f'color chosen is |{cell_colors[i]}|')
 
-                print(f'len of channels is {len(CHANNELS)}')
+                # print(f'len of channels is {len(CHANNELS)}')
                 # STORING in global dicts
                 #TODO should be pre-RGB mapping intensities so that white-in / black-in threshold
                 #   can be properly applied. Need to copy that code again somewhere I guess
@@ -907,9 +926,14 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
                 # print(f'For cell number {cell_id}, channel {i}, the max value is {mymax}')
         # add composite
         cell_name = f'Cell {cell_id} Composite'
+        if cell_name in IMAGE_DATA_ADJUSTED:
+            add_layer(viewer, IMAGE_DATA_ADJUSTED[cell_name], cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
+            add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
+            continue
+
         composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
-        print(f'shape before summing is {composite.shape}')
-        print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
+        # print(f'shape before summing is {composite.shape}')
+        # print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
 
         composite = np.sum(composite, axis=0)
         composite = np.clip(composite,0,np.max(composite)) # ensures 0-1 scaling 
@@ -926,8 +950,8 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
             # print(f'Shape of intermediate is {temp.shape}')
             rgb_mins.append(np.min(temp))
             rgb_maxes.append(np.max(temp))
-        print(f'Using axis {1}, here are the mins: {rgb_mins}')
-        print(f'Here are the maxes: {rgb_maxes}')
+        # print(f'Using axis {1}, here are the mins: {rgb_mins}')
+        # print(f'Here are the maxes: {rgb_maxes}')
 
         # rgb_mins = np.amin(composite, axis=2) ## Axis here?
         # rgb_maxes = np.amax(composite, axis = 2)
@@ -954,8 +978,9 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
         # print(f'For cell number {cell_id} the datatype is {composite.dtype}, max value is {np.max(composite[:,:,0])} and the min is {np.min(composite[:,:,0])}')
         # print(f'also the shape is {composite.shape}') # (100,100,4)
         
+        IMAGE_DATA_ADJUSTED[cell_name] = composite.astype('int')
         add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
-        add_status_bar(viewer, f'Cell {cell_id} status', retrieve_status(cell_id))
+        add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
         # if len(cells) == 5:
         #     np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
     return True
@@ -1037,7 +1062,7 @@ def fetch_notes(cell_set):
     print(f'dumping dict {SAVED_NOTES}')
 
 '''Get object data from csv and parse.''' 
-def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', cell_id_start=None, cell_limit=None, phenotype=None):
+def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', new_batch = True, cell_id_start=None, cell_limit=None, phenotype=None):
     # get defaults from global space
     global CELL_ID_START
     if cell_id_start is None: cell_id_start = CELL_ID_START # ID of first cell in the set (smallest) 
@@ -1101,8 +1126,9 @@ def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', cell_id_
     for index,row in cell_set.iterrows():
         center_x = int((row['XMax']+row['XMin'])/2)
         center_y = int((row['YMax']+row['YMin'])/2)
-        tumor_cell_XYs.append([center_x, center_y, row["Object Id"]])
-
+        tumor_cell_XYs.append([center_x, center_y, row["Object Id"], row["Validation"]])
+    global XY_STORE
+    XY_STORE = copy.copy(tumor_cell_XYs)
     return tumor_cell_XYs
 
 def replace_note(cell_widget, note_widget):
@@ -1111,7 +1137,7 @@ def replace_note(cell_widget, note_widget):
     try: 
         cellID = int(cellID)
     except ValueError:
-        VIEWER.status = 'Error recording note: non-numeric CellId given'
+        VIEWER.status = 'Error recording note: non-numeric Cell Id given'
         return None 
     try:
         SAVED_NOTES[str(cellID)] # to trigger exception
@@ -1120,7 +1146,7 @@ def replace_note(cell_widget, note_widget):
         VIEWER.status = "Note recorded! Press 's' to save to file."
     except KeyError as e:
         print(f'\n{e}\n')
-        VIEWER.status = 'Error recording note: CellId not found in list'
+        VIEWER.status = 'Error recording note: Cell Id not found in list'
 
 ######------------------------- Remote Execution + Main ---------------------######
 
@@ -1197,7 +1223,6 @@ def main():
     viewer = napari.Viewer(title='CTC Gallery')
     global VIEWER
     VIEWER = viewer
-    print(f'$$$$$$ OFFSET is {OFFSET}')
     add_layers(viewer,pyramid,tumor_cell_XYs, int(OFFSET/2))
         # Perform adjustments before exiting function
     reuse_contrast_limits()
