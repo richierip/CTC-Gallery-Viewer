@@ -4,7 +4,6 @@ Started on 6/7/22
 Peter Richieri
 '''
 
-from pickle import TRUE
 import tifffile
 import napari
 from napari.types import ImageData
@@ -195,7 +194,7 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
     layer.data = composite.astype('int') # casting is crucial
 
 
-def adjust_composite_limits(layer, limit_type, limit_val):
+def adjust_composite_limits(layer):
 
     def _convert_to_rgb(data, colormap, divisor):
         # You have to do it like this. Seriously. 
@@ -286,12 +285,37 @@ def adjust_composite_limits(layer, limit_type, limit_val):
     print(f'Final check of dimensions of composite before setting data: {np.asarray(composite).shape}')
     layer.data = composite.astype('int') # casting is crucial
 
+def reuse_gamma():
+    # print(f'\nDumping adjustment dict... \n {ADJUSTMENT_SETTINGS}\n')
+    # print(f'ADJUSTED is {ADJUSTED}')
+    for ctclayer in VIEWER.layers:
+        # print(f'layername is {ctclayer}')
+        # no longer elif: want to do composite and all checked channels at the same time
+        if validate_adjustment(ctclayer):
+            # print(f"Validated! Searching dict for {ctclayer.name.split()[2]+' gamma'}")
+            # print(f"Result is {ADJUSTMENT_SETTINGS[ctclayer.name.split()[2]+' gamma']}")
+            # print(f"Result type is {type(ADJUSTMENT_SETTINGS[ctclayer.name.split()[2]+' gamma'])}")
+            ctclayer.gamma = ADJUSTMENT_SETTINGS[ctclayer.name.split()[2]+' gamma']
+        elif ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
+            # this gamma doesn't matter since it won't be considered - The final parameter
+            #   tells the function to skip it
+            adjust_composite_gamma(ctclayer,gamma = 1.0, keepSettingsTheSame=True)
+
+def reuse_contrast_limits():
+    for layer in VIEWER.layers:
+        if validate_adjustment(layer):
+            name = layer.name.split()[2]
+            layer.contrast_limits = (ADJUSTMENT_SETTINGS[name+' black-in'], ADJUSTMENT_SETTINGS[name+' white-in'])
+        elif layer.name.split()[2] == 'Composite' and len(ADJUSTED)>0: 
+            adjust_composite_limits(layer)
+
 ## --- Bottom bar functions and GUI elements 
 def adjust_gamma(viewer, gamma):
     def _update_dictionary(name, val):
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' gamma'] = val
-
+    # This allows the function to be called to reuse the same settings instead of updating them
+    #   useful for keeping settings when loading next batch or switching modes. 
     for fluor in ADJUSTED:
         fluorname = CHANNEL_ORDER[fluor].lstrip('OPAL')
         _update_dictionary(fluorname,gamma)
@@ -300,15 +324,13 @@ def adjust_gamma(viewer, gamma):
         # no longer elif: want to do composite and all checked channels at the same time
         if validate_adjustment(ctclayer):
             ctclayer.gamma = gamma
-            # _update_dictionary(ctclayer.name,gamma)
-            # print('Checking ', ctclayer.name)
         elif ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
             adjust_composite_gamma(ctclayer, gamma)
 
 @magicgui(auto_call=True,
         gamma={"widget_type": "FloatSlider", "max":1.0, "min":0.01},
         layout = 'horizontal')
-def adjust_gamma_widget(gamma: float = 1.0) -> ImageData:
+def adjust_gamma_widget(gamma: float = 1.0) -> ImageData: 
     adjust_gamma(VIEWER,gamma)
 
 @magicgui(auto_call=True,
@@ -318,7 +340,6 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
     def _update_dictionary(name, val):
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' white-in'] = val
-
     for fluor in ADJUSTED:
         fluorname = CHANNEL_ORDER[fluor].lstrip('OPAL')
         _update_dictionary(fluorname,white_in)
@@ -327,10 +348,9 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
         # no longer elif: want to do composite and all checked channels at the same time
         if validate_adjustment(ctclayer):
             ctclayer.contrast_limits = (ctclayer.contrast_limits[0], white_in)
-            # _update_dictionary(ctclayer.name, white_in)
-        
         elif ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
-            adjust_composite_limits(ctclayer, 'white-in', white_in)
+            # Works in both cases
+            adjust_composite_limits(ctclayer)
 
 @magicgui(auto_call=True,
         black_in={"widget_type": "FloatSlider", "max":255, "label":"Black-in"},
@@ -339,7 +359,7 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
     def _update_dictionary(name, val):
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' black-in'] = val
-
+    
     for fluor in ADJUSTED:
         fluorname = CHANNEL_ORDER[fluor].lstrip('OPAL')
         _update_dictionary(fluorname,black_in)
@@ -348,9 +368,8 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         # no longer elif: want to do composite and all checked channels at the same time
         if validate_adjustment(ctclayer):
             ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
-            # _update_dictionary(ctclayer.name,black_in)
         elif ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
-            adjust_composite_limits(ctclayer, 'black-in', black_in)
+            adjust_composite_limits(ctclayer)
 
 # Called in a loop to create as many GUI elements as needed
 #TODO use magicfactory decorator to do this. It probably is better practice, and surely looks nicer
@@ -379,6 +398,8 @@ def dynamic_checkbox_creator(checkbox_name, setChecked = True):
             # now remake composite images with the channels listed in ADJUSTED
             #   But only if the "Composite" check is active, otherwise show all channels in the image
             # if Composite not in ADJUSTED:
+        
+        # This will show/hide the appropriate layers in the composite image when checking the box
         for layer in VIEWER.layers:
             if layer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
                 adjust_composite_gamma(layer, gamma=0.5, keepSettingsTheSame = True)
@@ -500,6 +521,9 @@ def toggle_composite_viewstatus(Mode: int = 1):
         add_layers(VIEWER,RAW_PYRAMID, data, int(OFFSET/2), show_all=False)
     else:
         raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {Mode}. Must be 1 or 2.")
+        # Perform adjustments before exiting function
+    reuse_contrast_limits()
+    reuse_gamma() # might not need to do both of these... One is enough?
     return None
 
 @magicgui(call_button='Load Cells',
@@ -576,6 +600,9 @@ def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
         else:
             VIEWER.layers.clear()
             add_layers(VIEWER,RAW_PYRAMID, xydata, int(OFFSET/2), show_all=True)
+        # Perform adjustments before exiting function
+    reuse_contrast_limits()
+    reuse_gamma() # might not need to do both of these... One is enough?
     return None
     
 @magicgui(auto_call=True,
@@ -727,11 +754,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
         # even thought the slider gui shows the change
         #   Will have to do something else.
         if colormap is not None: # Luminescence image
-            shape_layer = viewer.add_image(layer, name = name, contrast_limits = contr, gamma = 0.5)
+            shape_layer = viewer.add_image(layer, name = name, contrast_limits = contr)
             shape_layer.colormap = custom_maps.retrieve_cm(colormap)
         elif contr is not None: # RBG image
             print(f'\n ~~~ Adding RGB Image ~~~ \n')
-            shape_layer = viewer.add_image(layer, name = name, contrast_limits = contr, gamma = 0.5)
+            shape_layer = viewer.add_image(layer, name = name, contrast_limits = contr)
         else:
             print(f'\n ~~~ Adding RGB Image auto contrast limit ~~~ \n')
             shape_layer = viewer.add_image(layer, name = name, gamma = 0.5)
@@ -854,9 +881,6 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
 
                 cp_save = cell_punchout_raw 
                 IMAGE_DATA_ORIGINAL[cell_name] = cp_save; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
-                ADJUSTMENT_SETTINGS[fluor+ ' black-in']=0
-                ADJUSTMENT_SETTINGS[fluor+ ' white-in']=255
-                ADJUSTMENT_SETTINGS[fluor+ ' gamma']=1.0
 
                 # #TODO Gamma correct right here since there's a bug that doesn't allow passing to the viewer
                 # cell_punchout_raw = np.asarray([x**0.5 for x in cell_punchout_raw])
@@ -932,9 +956,8 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True):
         
         add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
         add_status_bar(viewer, f'Cell {cell_id} status', retrieve_status(cell_id))
-        if len(cells) == 5:
-            np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
-
+        # if len(cells) == 5:
+        #     np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
     return True
 
 ######------------------------- Misc + Viewer keybindings ---------------------######
@@ -998,7 +1021,14 @@ def tsv_wrapper(viewer):
         for layer in VIEWER.layers:
             if 'status' in layer.name:
                 layer.visible = not layer.visible
-       
+
+def set_initial_adjustment_parameters():
+    for fluor in CHANNELS_STR:
+        fluor = fluor.lstrip("OPAL")
+        ADJUSTMENT_SETTINGS[fluor+ ' black-in']=0
+        ADJUSTMENT_SETTINGS[fluor+ ' white-in']=255
+        ADJUSTMENT_SETTINGS[fluor+ ' gamma']= 1.0
+
 def fetch_notes(cell_set):
     '''Grab notes for each cell in the list and save to global dict'''
     for index,row in cell_set.iterrows():
@@ -1162,12 +1192,16 @@ def main():
     global RAW_PYRAMID
     RAW_PYRAMID=pyramid
     tumor_cell_XYs = extract_phenotype_xldata()
+    set_initial_adjustment_parameters() # set defaults: 1.0 gamma, 0 black in, 255 white in
     
     viewer = napari.Viewer(title='CTC Gallery')
-    print(f'$$$$$$ OFFSET is {OFFSET}')
-    add_layers(viewer,pyramid,tumor_cell_XYs, int(OFFSET/2))
     global VIEWER
     VIEWER = viewer
+    print(f'$$$$$$ OFFSET is {OFFSET}')
+    add_layers(viewer,pyramid,tumor_cell_XYs, int(OFFSET/2))
+        # Perform adjustments before exiting function
+    reuse_contrast_limits()
+    reuse_gamma() # might not need to do both of these... One is enough?
     viewer.grid.enabled = True
     viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)+1) # +1 because of the status layer.
 
