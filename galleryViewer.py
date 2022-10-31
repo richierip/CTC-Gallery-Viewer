@@ -509,20 +509,23 @@ def toggle_composite_viewstatus(Mode: int = 1):
     _save_validation(VIEWER, Mode)
 
     global COMPOSITE_MODE
+
+    print("|||| XY STORE INFO ||||")
+    print(f"length is {len(XY_STORE)} and type is {type(XY_STORE)}")
     if Mode == 1: # change to Show All
         COMPOSITE_MODE = False
         print(f'\nAttempting to clear')
-        # VIEWER.layers.clear()
-        concurrent_clear(VIEWER)
+        VIEWER.layers.clear()
+        # concurrent_clear(VIEWER)
         #data = extract_phenotype_xldata() # Don't need this since it is saved now
-        add_layers(VIEWER,RAW_PYRAMID, XY_STORE, int(OFFSET/2), show_all=True, new_batch=False)
+        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(OFFSET/2), show_all=True, new_batch=False)
     elif Mode ==2: # change to composite only
         COMPOSITE_MODE = True
         print(f'\nAttempting to clear')
-        # VIEWER.layers.clear()
-        concurrent_clear(VIEWER)
+        VIEWER.layers.clear()
+        # concurrent_clear(VIEWER)
         #data = extract_phenotype_xldata() # Don't need this since it is saved now
-        add_layers(VIEWER,RAW_PYRAMID, XY_STORE, int(OFFSET/2), show_all=False, new_batch=False)
+        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(OFFSET/2), show_all=False, new_batch=False)
     else:
         raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {Mode}. Must be 1 or 2.")
         # Perform adjustments before exiting function
@@ -644,6 +647,7 @@ def set_notes_label(display_note_widget, ID):
 #   Counterpoint to counterpoint - never get rid of numpy arrays and remake whole image as needed. 
 def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
     print(f'\n---------\n \n Entering the add_layers function')
+    print(f"pyramid shape is {pyramid.shape}")
     # Make the color bar that appears to the left of the composite image
     status_colors = {"unseen":"gray", "needs review":"bop orange", "confirmed":"green", "rejected":"red" }
 
@@ -1201,43 +1205,47 @@ def GUI_execute_cheat(userInfo):
 def main():
     #TODO do this in a function because this is ugly
     with tifffile.Timer(f'\nLoading pyramid from {qptiff}...\n'):
-        pyramid = tifffile.imread(qptiff)
+        # pyramid = tifffile.imread(qptiff)
 
-        # raw = tifffile.TiffFile(qptiff)
-        # pages = raw.series[0]
-        # pyramid = []
-        # i=1
-        # for page in pages:
-        #     print(f"Page {i}")
-        #     pyramid.append(page.asarray())
-        #     i+=1
-        pyramid = np.asarray(pyramid)
+        # # raw = tifffile.TiffFile(qptiff)
+        # # pages = raw.series[0]
+        # # pyramid = []
+        # # i=1
+        # # for page in pages:
+        # #     print(f"Page {i}")
+        # #     pyramid.append(page.asarray())
+        # #     i+=1
+        # pyramid = np.asarray(pyramid)
         # can pick select pages
         # image = imread('temp.tif', key=0)
         # images = imread('temp.tif', key=range(4, 40, 2))
+        print("NOT reading anything right now... trying to use a memory mapped object.")
+
+        pyramid = tifffile.memmap('mmtest.tif')
+        pyramid = np.transpose(pyramid,(2,1,0))
         print('... completed in ', end='')
     # print(f'\nFinal pyramid levels: {[p.shape for p in pyramid]}\n')
 
     # Find location of channels in np array. Save that value, and subset the rest (one nparray per channel)
-    print(f'pyramid array as np array shape is {pyramid.shape}\n')
-    arr = np.array(pyramid.shape)
-    channels = min(arr)
-    channel_index = np.where(arr == channels)[0][0]
-    # print(f'least is {channels}, type is {type(channels)} and its at {channel_index}, test is {channel_index==0}')
+    # print(f'pyramid array as np array shape is {pyramid.shape}\n')
+    # arr = np.array(pyramid.shape)
+    # channels = min(arr)
+    # channel_index = np.where(arr == channels)[0][0]
+    # # print(f'least is {channels}, type is {type(channels)} and its at {channel_index}, test is {channel_index==0}')
 
-    # have to grab the first to instantiate napari viewer
-    if channel_index == 0:
-        # Added this because the high quality layer of my sample QPTIFF data seemed to be flipped
-        # i.e. array looks like (channels, y, x)
-        pyramid = np.transpose(pyramid,(2,1,0))
-        # print(f'FLIPPED SHAPE is {pyramid.shape}\n')
-        firstLayer = pyramid[:,:,0]
-    else:
-        firstLayer = pyramid[:,:,0]
-    print(f'Single layer shape is {firstLayer.shape}\n')
+    # # have to grab the first to instantiate napari viewer
+    # if channel_index == 0:
+    #     # Added this because the high quality layer of my sample QPTIFF data seemed to be flipped
+    #     # i.e. array looks like (channels, y, x)
+    #     pyramid = np.transpose(pyramid,(2,1,0))
+    #     # print(f'FLIPPED SHAPE is {pyramid.shape}\n')
+    #     firstLayer = pyramid[:,:,0]
+    # else:
+    #     firstLayer = pyramid[:,:,0]
+    # print(f'Single layer shape is {firstLayer.shape}\n')
 
-    #TODO think of something better than this. It tanks RAM usage to store this thing
-    #       Literally  ~ 10GB difference
+    # #TODO think of something better than this. It tanks RAM usage to store this thing
+    # #       Literally  ~ 10GB difference
     global RAW_PYRAMID
     RAW_PYRAMID=pyramid
     tumor_cell_XYs = extract_phenotype_xldata()
