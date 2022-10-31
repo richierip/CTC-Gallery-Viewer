@@ -122,9 +122,9 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
     composite = []
     # get data from other CHECKED channels, not including Composite (always 8)
     need_gamma_adjustment = copy.copy(ADJUSTED)
-    if Composite in ADJUSTED: need_gamma_adjustment.remove(8) # nervous about hard-coding this...
+    if Composite in ADJUSTED: need_gamma_adjustment.remove(Composite)
     fluors_only = copy.copy(CHANNELS)
-    fluors_only.remove(8)
+    fluors_only.remove(Composite)
     # print(f'\n dumping ADJUSTED needed: {ADJUSTED}\n and CHANNELS: {CHANNELS}\n and CHANNELS_STR {CHANNELS_STR}\n and CHANNEL_ORDER {CHANNEL_ORDER}\n and something?? {CHANNELS}')
     # print(f'\n dumping adjustment needed: {need_gamma_adjustment}')
     for chn_pos in fluors_only:
@@ -867,7 +867,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
                     add_layer(viewer,IMAGE_DATA_ADJUSTED[cell_name]*255, cell_name, colormap= cell_colors[i])
                     continue # go on to the next
 
-                print(f'Adding cell {cell_x},{cell_y} - layer {i}')
+                # print(f'Adding cell {cell_x},{cell_y} - layer {i}')
                 # Save record of what colormap is chosen for what fluor. Useful for 
                 #   altering the composite image later (white-in / black-in). 
                 # This is dumb - do it somewhere else
@@ -1063,6 +1063,10 @@ def fetch_notes(cell_set):
 
 '''Get object data from csv and parse.''' 
 def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', new_batch = True, cell_id_start=None, cell_limit=None, phenotype=None):
+    
+    sort_by_intensity = 'OPAL520' # None means 'don't do it', while a channel name means 'put highest at the top'
+    sort_by_intensity = sort_by_intensity.replace('OPAL','Opal ') + ' Cell Intensity'
+
     # get defaults from global space
     global CELL_ID_START
     if cell_id_start is None: cell_id_start = CELL_ID_START # ID of first cell in the set (smallest) 
@@ -1087,8 +1091,14 @@ def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', new_batc
         halo_export.to_csv(OBJECT_DATA, index=False)
     except:
         pass
+
     # Get relevant columns
-    halo_export = halo_export.loc[:, ["Object Id","Validation","Notes", "XMin","XMax","YMin", "YMax", phenotype]]
+    all_possible_intensities = ['DAPI Cell Intensity', 'Opal 480 Cell Intensity','Opal 520 Cell Intensity',
+            'Opal 570 Cell Intensity', 'Opal 620 Cell Intensity', 'Opal 690 Cell Intensity','Opal 780 Cell Intensity',
+            'AF Cell Intensity','Autofluorescence Cell Intensity'] # not sure what the correct nomenclature is here
+    cols_to_keep = ["Object Id","Validation","Notes", "XMin","XMax","YMin", "YMax", phenotype] + all_possible_intensities
+    cols_to_keep = halo_export.columns.intersection(cols_to_keep)
+    halo_export = halo_export.loc[:, cols_to_keep]
     
     if cell_id_start < len(halo_export) and cell_id_start > 0:
         if direction =='fwd':     
@@ -1121,7 +1131,10 @@ def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', new_batc
         # Likely changing composite modes, so don't do any manipulations
         cell_set = cell_set[:cell_limit]
     
+    if sort_by_intensity is not None:
+        cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = False, kind = 'mergesort')
     fetch_notes(cell_set)
+
     tumor_cell_XYs = []
     for index,row in cell_set.iterrows():
         center_x = int((row['XMax']+row['XMin'])/2)
@@ -1189,6 +1202,16 @@ def main():
     #TODO do this in a function because this is ugly
     with tifffile.Timer(f'\nLoading pyramid from {qptiff}...\n'):
         pyramid = tifffile.imread(qptiff)
+
+        # raw = tifffile.TiffFile(qptiff)
+        # pages = raw.series[0]
+        # pyramid = []
+        # i=1
+        # for page in pages:
+        #     print(f"Page {i}")
+        #     pyramid.append(page.asarray())
+        #     i+=1
+        pyramid = np.asarray(pyramid)
         # can pick select pages
         # image = imread('temp.tif', key=0)
         # images = imread('temp.tif', key=range(4, 40, 2))
@@ -1239,7 +1262,7 @@ def main():
     note_button = QPushButton("Replace note for cell")
     note_text_entry.setPlaceholderText('Enter new note')
     note_text_entry.setFixedWidth(200)
-    note_cell_entry.setPlaceholderText("CellId")
+    note_cell_entry.setPlaceholderText("Cell Id")
     note_cell_entry.setFixedWidth(50)
     # Pass pointer to widgets to function on button press
     note_button.pressed.connect(lambda: replace_note(note_cell_entry, note_text_entry))

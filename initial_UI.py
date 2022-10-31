@@ -1,6 +1,7 @@
 #############################################################################
 
-from PyQt5.QtCore import QDateTime, Qt, QTimer, QThread, pyqtSignal
+from PyQt5.QtCore import (QDateTime, Qt, QTimer, QThread, 
+        pyqtSignal, QObject, QRunnable, QThreadPool, pyqtSlot)
 from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDateTimeEdit,
         QDial, QDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
@@ -17,27 +18,29 @@ import ctypes
 import threading
 import logging
 from datetime import datetime
+import os
 
+VERSION_NUMBER = '1.0'
 FONT_SIZE = 12
-DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
+#DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
 CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
 AVAILABLE_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'pink', 'cyan']
 
-# class ExternalCounter(QThread):
-#     """
-#     Runs a counter thread.
-#     """
-#     countChanged = pyqtSignal(int)
-#     def __init__(self, time_limit):
-#         super(ExternalCounter, self).__init__()
-#         self.time_limit = time_limit
+class ExternalCounter(QThread):
+    """
+    Runs a counter thread.
+    """
+    countChanged = pyqtSignal(int)
+    def __init__(self, time_limit):
+        super(ExternalCounter, self).__init__()
+        self.time_limit = time_limit
 
-#     def run(self):
-#         count = 0
-#         while count < self.time_limit:
-#             count +=1
-#             time.sleep(1)
-#             self.countChanged.emit(count)
+    def run(self):
+        count = 0
+        while count < self.time_limit:
+            count +=1
+            time.sleep(1)
+            self.countChanged.emit(count)
 
 class ViewerPresets(QDialog):
     def __init__(self, app, parent=None):
@@ -63,7 +66,7 @@ class ViewerPresets(QDialog):
         cc_logo = QLabel()
         pixmap = QPixmap('data/mgh-mgb-cc-logo2 (Custom).png')
         cc_logo.setPixmap(pixmap)
-        titleLabel = QLabel(f"Jon Walsh Pre-Release v1.0")#{chr(8482)} TBD
+        titleLabel = QLabel(f"Jon Walsh Pre-Release v"+VERSION_NUMBER)#{chr(8482)} TBD
         titleLabel.setAlignment(Qt.AlignCenter)
 
         self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
@@ -265,13 +268,17 @@ class ViewerPresets(QDialog):
         layout.rowStretch(-100)
         self.topRightGroupBox.setLayout(layout)
 
-    # def createProgressBar(self):
-    #     size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
-    #     eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
+    def createProgressBar(self):
+        size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
+        eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
 
-    #     self.progressBar = QProgressBar()
-    #     self.progressBar.setRange(0, eta)
-    #     self.progressBar.setValue(0)
+        self.progressBar = QProgressBar()
+        self.progressBar.setRange(0, eta)
+        self.progressBar.setValue(0)
+
+        # self.timer = ExternalCounter(time_limit=eta)
+        # self.timer.countChanged.connect(self.advanceProgressBar)
+        # self.timer.start()
 
     #     # self.timer = ExternalCounter(time_limit=eta)
     #     # self.timer.countChanged.connect(self.advanceProgressBar)
@@ -302,8 +309,8 @@ class ViewerPresets(QDialog):
         # self.app.processEvents()
 
         # self.createProgressBar()
-        # self.startProgressBar()
         # self.mainLayout.addWidget(self.progressBar, 3, 0, 1, 2)
+        # self.startProgressBar()
 
         # t = threading.Thread(target = self.startProgressBar, name = "Testing thread capabilities")
         # t.daemon = True
@@ -311,9 +318,13 @@ class ViewerPresets(QDialog):
         # print(f'progress bar thread w/daemon should be started now...')
 
         #TODO make this relative with the os package
-        logpath = r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer"
-        logpath += '\\' + datetime.today().strftime('%Y-%m-%d_crashlog_%H%M%S.txt')
+        folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_crashlog_%H%M%S.txt')))
         try:
+            # for i in range(15):
+            #     time.sleep(1)
             GUI_execute(self.userInfo)
         except Exception as e:
             logging.basicConfig(filename=logpath, encoding='utf-8', level=logging.DEBUG)
@@ -326,7 +337,7 @@ class ViewerPresets(QDialog):
 if __name__ == '__main__':
     # This gets python to tell Windows it is merely hosting another app
     #   Therefore, the icon I've attached to the app before is displayed in the taskbar, instead of the python default icon. 
-    myappid = 'MGH.CellGalleryViewer.v1.0' # arbitrary string
+    myappid = 'MGH.CellGalleryViewer.v'+VERSION_NUMBER # arbitrary string
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     app = QApplication([])
     customStyle = ""
