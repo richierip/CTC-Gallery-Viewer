@@ -516,7 +516,7 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     elif Mode==2 and COMPOSITE_MODE==True: return None
 
     # Hide the widgets to avoid crashing?
-    for widg in ALL_CUSTOM_WIDGETS:
+    for widg in ALL_CUSTOM_WIDGETS.values():
         widg.setVisible(False)
     # Save data to file from current set
     VIEWER.status = 'Saving data to file...'
@@ -543,7 +543,7 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
         # Perform adjustments before exiting function
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
-    for widg in ALL_CUSTOM_WIDGETS: # restore widgets
+    for widg in ALL_CUSTOM_WIDGETS.values(): # restore widgets
         widg.setVisible(True)
     return None
 
@@ -553,7 +553,7 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
 #         Amount={"widget_type": "SpinBox", "value":15,
 #         "max":1000,"min":5})
 def show_next_cell_group(next_cell_rb, previous_cell_rb, amount_sp):
-    for widg in ALL_CUSTOM_WIDGETS:
+    for widg in ALL_CUSTOM_WIDGETS.values():
         widg.setVisible(False)
     def _save_validation(VIEWER,numcells):
         print(f'reading from {OBJECT_DATA}')
@@ -627,7 +627,7 @@ def show_next_cell_group(next_cell_rb, previous_cell_rb, amount_sp):
         # Perform adjustments before exiting function
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
-    for widg in ALL_CUSTOM_WIDGETS:
+    for widg in ALL_CUSTOM_WIDGETS.values():
         widg.setVisible(True)
     return None
     
@@ -739,9 +739,10 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
                 # print('else')
                 VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
 
-        @status_layer.bind_key('Space')
-        def toggle_status(shape_layer):
+        def get_layer_name(shape_layer):
+            # Find details for the layer under the mouse
             status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
+            # Find this layers corresponding status layer
             for candidate in VIEWER.layers:
                 cellnum = candidate.name.split()[1]
                 if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
@@ -749,15 +750,67 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
                     break
                 else:
                     continue
-            name = status_layer.name
+            return status_layer.name,status_layer
+            
+        @status_layer.bind_key('Space')
+        def toggle_status(shape_layer):
+            name,status_layer = get_layer_name(shape_layer)
+            # Rename the status layer and change the color
             if 'status' in name:
                 cur_status = name.split('_')[1] 
                 cur_index = list(status_colors.keys()).index(cur_status)
                 next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
+                print(f'next status (shape_layer) is {next_status}')
                 status_layer.colormap = status_colors[next_status]
                 status_layer.name = name.split('_')[0] +'_'+next_status 
             else:
-                # print('passing')
+                pass
+        
+        @status_layer.bind_key('c')
+        def set_unseen(shape_layer):
+            next_status = 'unseen'
+
+            name,status_layer = get_layer_name(shape_layer)
+            # Rename the status layer and change the color
+            if 'status' in name:
+                status_layer.colormap = status_colors[next_status]
+                status_layer.name = name.split('_')[0] +'_'+next_status 
+            else:
+                pass
+
+        @status_layer.bind_key('v')
+        def set_nr(shape_layer):
+            next_status = 'needs review'
+
+            name,status_layer = get_layer_name(shape_layer)
+            # Rename the status layer and change the color
+            if 'status' in name:
+                status_layer.colormap = status_colors[next_status]
+                status_layer.name = name.split('_')[0] +'_'+next_status 
+            else:
+                pass
+        @status_layer.bind_key('b')
+        def set_confirmed(shape_layer):
+            next_status = 'confirmed'
+
+            name,status_layer = get_layer_name(shape_layer)
+            # Rename the status layer and change the color
+            if 'status' in name:
+                status_layer.colormap = status_colors[next_status]
+                status_layer.name = name.split('_')[0] +'_'+next_status 
+            else:
+                pass
+
+        @status_layer.bind_key('n')
+        def set_rejected(shape_layer):
+            next_status = 'rejected'
+
+            name,status_layer = get_layer_name(shape_layer)
+            # Rename the status layer and change the color
+            if 'status' in name:
+                status_layer.colormap = status_colors[next_status]
+                status_layer.name = name.split('_')[0] +'_'+next_status 
+            else:
                 pass
 
     def add_layer(viewer, layer, name, colormap = None, contr = [0,255] ):
@@ -826,8 +879,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
                 # print('else')
                 VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
 
-        @shape_layer.bind_key('Space')
-        def toggle_status(shape_layer):
+        def get_layer_name(shape_layer):
             # Find details for the layer under the mouse
             status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
             # Find this layers corresponding status layer
@@ -838,12 +890,64 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
                     break
                 else:
                     continue
-            name = status_layer.name
+            return status_layer.name,status_layer
+            
+        @shape_layer.bind_key('Space')
+        def toggle_status(shape_layer):
+            name,status_layer = get_layer_name(shape_layer)
             # Rename the status layer and change the color
             if 'status' in name:
                 cur_status = name.split('_')[1] 
                 cur_index = list(status_colors.keys()).index(cur_status)
                 next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
+                print(f'next status (shape_layer) is {next_status}')
+                status_layer.colormap = status_colors[next_status]
+                status_layer.name = name.split('_')[0] +'_'+next_status 
+            else:
+                pass
+        
+        @shape_layer.bind_key('c')
+        def set_unseen(shape_layer):
+            next_status = 'unseen'
+
+            name,status_layer = get_layer_name(shape_layer)
+            # Rename the status layer and change the color
+            if 'status' in name:
+                status_layer.colormap = status_colors[next_status]
+                status_layer.name = name.split('_')[0] +'_'+next_status 
+            else:
+                pass
+
+        @shape_layer.bind_key('v')
+        def set_nr(shape_layer):
+            next_status = 'needs review'
+
+            name,status_layer = get_layer_name(shape_layer)
+            # Rename the status layer and change the color
+            if 'status' in name:
+                status_layer.colormap = status_colors[next_status]
+                status_layer.name = name.split('_')[0] +'_'+next_status 
+            else:
+                pass
+        @shape_layer.bind_key('b')
+        def set_confirmed(shape_layer):
+            next_status = 'confirmed'
+
+            name,status_layer = get_layer_name(shape_layer)
+            # Rename the status layer and change the color
+            if 'status' in name:
+                status_layer.colormap = status_colors[next_status]
+                status_layer.name = name.split('_')[0] +'_'+next_status 
+            else:
+                pass
+
+        @shape_layer.bind_key('n')
+        def set_rejected(shape_layer):
+            next_status = 'rejected'
+
+            name,status_layer = get_layer_name(shape_layer)
+            # Rename the status layer and change the color
+            if 'status' in name:
                 status_layer.colormap = status_colors[next_status]
                 status_layer.name = name.split('_')[0] +'_'+next_status 
             else:
@@ -1076,7 +1180,6 @@ def tsv_wrapper(viewer):
         else:
             show_vis_radio.setChecked(True)
             hide_vis_radio.setChecked(False)
-            
     
     # Find status layers and toggle visibility
         # for layer in VIEWER.layers:
@@ -1336,7 +1439,7 @@ def main():
     ALL_CUSTOM_WIDGETS['switch mode buton']=switch_mode_button; 
     ALL_CUSTOM_WIDGETS['show visibility radio']=visibility_show; ALL_CUSTOM_WIDGETS['hide visibility radio']=visibility_hide
 
-    # for widg in ALL_CUSTOM_WIDGETS:
+    # for widg in ALL_CUSTOM_WIDGETS.values():
     #     widg.setVisible(False)
 
     all_boxes = []

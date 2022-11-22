@@ -10,10 +10,13 @@ data/composite.txt
 sample_UI.py
 mp_test.py
 QPTIFF_test.py
+nDrive_test.py
 threading_test.py
+threading_test2.py
+raster_testing.py
 setup.py
 test.spec
-
+*.tif
 
 # Compiled source #
 ###################
