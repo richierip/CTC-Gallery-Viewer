@@ -66,7 +66,7 @@ class ViewerPresets(QDialog):
         cc_logo = QLabel()
         pixmap = QPixmap('data/mgh-mgb-cc-logo2 (Custom).png')
         cc_logo.setPixmap(pixmap)
-        titleLabel = QLabel(f"Jon Walsh Pre-Release v"+VERSION_NUMBER)#{chr(8482)} TBD
+        titleLabel = QLabel(f"Pre-Release v"+VERSION_NUMBER)#{chr(8482)} TBD
         titleLabel.setAlignment(Qt.AlignCenter)
 
         self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here

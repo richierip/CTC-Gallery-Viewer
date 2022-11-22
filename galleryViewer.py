@@ -9,11 +9,11 @@ import napari
 from napari.types import ImageData
 from napari.qt.threading import thread_worker # Needed to add / remove a lot of layers without freezing
 from magicgui import magicgui, magic_factory
-from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton
+from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton, QRadioButton, QSpinBox, QButtonGroup
 from PyQt5.QtCore import Qt
 import numpy as np
 import pandas as pd
-import openpyxl
+import openpyxl # necessary, do not remove
 # import skimage.filters
 # import gc # might garbage collect later
 # import math
@@ -42,12 +42,14 @@ for colormap in cell_colors:
 
 cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink', 'cyan'] # for local execution
 fluor_to_color = {}
-qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
+# qptiff = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\memmap_test.tif"
+qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\auto_test.tif"
 OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
+# OBJECT_DATA = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\PMR_test_Results.csv"
 OFFSET = 90 # microns or pixels? Probably pixels
 CELL_OFFSET= 0 # Saves the current number of cells shown. Useful when pulling 'next 10 cells' 
 CELL_LIMIT = 15 # How many cells will be shown in next batch
-PHENOTYPE = 'Tumor'
+PHENOTYPE = 'Tumor' #'CTC 488pos'
 CELL_ID_START = 550 # debug?
 DAPI = 0; OPAL480 = 3; OPAL520 = 6; OPAL570 = 1; OPAL620 = 4; OPAL690 = 2; OPAL780 = 5; AF=7; Composite = 8
 # CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
@@ -62,7 +64,7 @@ TEMP = None
 IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}; ADJUSTMENT_SETTINGS={}; 
 SAVED_NOTES={} ; STATUS_LIST={}; XY_STORE = [1,2,3]
 RAW_PYRAMID=None
-NOTES_WIDGET = None
+NOTES_WIDGET = None; ALL_CUSTOM_WIDGETS = {}
 COMPOSITE_MODE = False
 
 
@@ -335,6 +337,7 @@ def adjust_gamma(viewer, gamma):
         layout = 'horizontal')
 def adjust_gamma_widget(gamma: float = 1.0) -> ImageData: 
     adjust_gamma(VIEWER,gamma)
+adjust_gamma_widget.visible=False
 
 @magicgui(auto_call=True,
         white_in={"widget_type": "FloatSlider", "max":255,"min":1.0, "label": "White-in"},
@@ -383,7 +386,6 @@ def dynamic_checkbox_creator(checkbox_name, setChecked = True):
             layout = 'horizontal')
     def myfunc(check: bool = setChecked):
         # print(f'in myfunc backend CHANNELS are {CHANNELS}, and {CHANNELS_STR}. Trying to remove {checkbox_name}, whose global value is {globals()[checkbox_name]}, from {ADJUSTED}')
-        
         if not COMPOSITE_MODE:
             if check:
                 ADJUSTED.append(globals()[checkbox_name])
@@ -452,13 +454,13 @@ def one_by_one_layers(viewer):
 def concurrent_clear(viewer):
     layers = one_by_one_layers(viewer)
     for layer in layers:
+        # viewer.processEvents()
         viewer.layers.remove(layer)
 
-@magicgui(call_button='Change Mode',
-        Mode={"widget_type": "RadioButtons","orientation": "vertical",
-        "choices": [("Show all channels", 1), ("Composite Only", 2)]})#,layout = 'horizontal')
-def toggle_composite_viewstatus(Mode: int = 1):
-    VIEWER.status = 'Saving data to file...'
+# @magicgui(call_button='Change Mode',
+#         Mode={"widget_type": "RadioButtons","orientation": "vertical",
+#         "choices": [("Show all channels", 1), ("Composite Only", 2)]})#,layout = 'horizontal')
+def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     def _save_validation(VIEWER, Mode):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
@@ -505,25 +507,35 @@ def toggle_composite_viewstatus(Mode: int = 1):
             # OBJECT_DATA,sheet_name='Exported from gallery viewer')
         VIEWER.status = 'Done saving!'
     
-    # Save data to file from current set
-    _save_validation(VIEWER, Mode)
+    if all_channels_rb.isChecked(): Mode = 1
+    else: Mode=2
 
-    global COMPOSITE_MODE
+    # Do nothing in these cases
+    global COMPOSITE_MODE # needed for changes later 
+    if Mode==1 and COMPOSITE_MODE==False: return None
+    elif Mode==2 and COMPOSITE_MODE==True: return None
+
+    # Hide the widgets to avoid crashing?
+    for widg in ALL_CUSTOM_WIDGETS:
+        widg.setVisible(False)
+    # Save data to file from current set
+    VIEWER.status = 'Saving data to file...'
+    _save_validation(VIEWER, Mode)
 
     print("|||| XY STORE INFO ||||")
     print(f"length is {len(XY_STORE)} and type is {type(XY_STORE)}")
     if Mode == 1: # change to Show All
         COMPOSITE_MODE = False
         print(f'\nAttempting to clear')
-        VIEWER.layers.clear()
-        # concurrent_clear(VIEWER)
+        # VIEWER.layers.clear()
+        concurrent_clear(VIEWER)
         #data = extract_phenotype_xldata() # Don't need this since it is saved now
         add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(OFFSET/2), show_all=True, new_batch=False)
     elif Mode ==2: # change to composite only
         COMPOSITE_MODE = True
         print(f'\nAttempting to clear')
-        VIEWER.layers.clear()
-        # concurrent_clear(VIEWER)
+        # VIEWER.layers.clear()
+        concurrent_clear(VIEWER)
         #data = extract_phenotype_xldata() # Don't need this since it is saved now
         add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(OFFSET/2), show_all=False, new_batch=False)
     else:
@@ -531,15 +543,18 @@ def toggle_composite_viewstatus(Mode: int = 1):
         # Perform adjustments before exiting function
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
+    for widg in ALL_CUSTOM_WIDGETS: # restore widgets
+        widg.setVisible(True)
     return None
 
-@magicgui(call_button='Load Cells',
-        Direction={"widget_type": "RadioButtons","orientation": "horizontal",
-        "choices": [("Next", 'fwd'), ("Previous", 'bkwd')]},
-        Amount={"widget_type": "SpinBox", "value":15,
-        "max":1000,"min":5})
-def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
-
+# @magicgui(call_button='Load Cells',
+#         Direction={"widget_type": "RadioButtons","orientation": "horizontal",
+#         "choices": [("Next", 'fwd'), ("Previous", 'bkwd')]},
+#         Amount={"widget_type": "SpinBox", "value":15,
+#         "max":1000,"min":5})
+def show_next_cell_group(next_cell_rb, previous_cell_rb, amount_sp):
+    for widg in ALL_CUSTOM_WIDGETS:
+        widg.setVisible(False)
     def _save_validation(VIEWER,numcells):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
@@ -570,7 +585,7 @@ def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
         try:
             VIEWER.status = 'Saving ...'
             hdata.to_csv(OBJECT_DATA, index=False)
-            VIEWER.status = 'Saved to file! Next {numcells} cells loaded.'
+            VIEWER.status = f'Saved to file! Next {numcells} cells loaded.'
             return True
         except:
             # Maybe it's an excel sheet?
@@ -581,7 +596,9 @@ def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
         VIEWER.status = 'Done saving!'
     # Take note of new starting point
     global CELL_ID_START, CELL_LIMIT, CELL_OFFSET
-
+    if next_cell_rb.isChecked(): Direction = 'fwd'
+    else: Direction = 'bkwd'
+    Amount = amount_sp.value()
     print(f'\nDebug prints. Spinbox reads {Amount}, type {type(Amount)}')
 
     # Save data to file from current set
@@ -610,12 +627,17 @@ def show_next_cell_group(Amount: int = 1, Direction: str='fwd'):
         # Perform adjustments before exiting function
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
+    for widg in ALL_CUSTOM_WIDGETS:
+        widg.setVisible(True)
     return None
     
-@magicgui(auto_call=True,
-        Status_Bar_Visibility={"widget_type": "RadioButtons","orientation": "vertical",
-        "choices": [("Show", 1), ("Hide", 2)]})
-def toggle_statusbar_visibility(Status_Bar_Visibility: int=1):
+# @magicgui(auto_call=True,
+#         Status_Bar_Visibility={"widget_type": "RadioButtons","orientation": "vertical",
+#         "choices": [("Show", 1), ("Hide", 2)]})
+# def toggle_statusbar_visibility(Status_Bar_Visibility: int=1):
+def toggle_statusbar_visibility(show_widget):
+    if show_widget.isChecked(): Status_Bar_Visibility = 1
+    else: Status_Bar_Visibility = 2
     # Find status layers and toggle visibility
     if Status_Bar_Visibility==1:
         for layer in VIEWER.layers:
@@ -1046,10 +1068,20 @@ def sv_wrapper(viewer):
 def tsv_wrapper(viewer):
     @viewer.bind_key('h')
     def toggle_statusbar_visibility(viewer):
+        show_vis_radio = ALL_CUSTOM_WIDGETS['show visibility radio']
+        hide_vis_radio = ALL_CUSTOM_WIDGETS['hide visibility radio']
+        if show_vis_radio.isChecked() == True:
+            show_vis_radio.setChecked(False)
+            hide_vis_radio.setChecked(True)
+        else:
+            show_vis_radio.setChecked(True)
+            hide_vis_radio.setChecked(False)
+            
+    
     # Find status layers and toggle visibility
-        for layer in VIEWER.layers:
-            if 'status' in layer.name:
-                layer.visible = not layer.visible
+        # for layer in VIEWER.layers:
+        #     if 'status' in layer.name:
+        #         layer.visible = not layer.visible
 
 def set_initial_adjustment_parameters():
     for fluor in CHANNELS_STR:
@@ -1068,8 +1100,9 @@ def fetch_notes(cell_set):
 '''Get object data from csv and parse.''' 
 def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', new_batch = True, cell_id_start=None, cell_limit=None, phenotype=None):
     
-    sort_by_intensity = 'OPAL520' # None means 'don't do it', while a channel name means 'put highest at the top'
-    sort_by_intensity = sort_by_intensity.replace('OPAL','Opal ') + ' Cell Intensity'
+    sort_by_intensity = None# 'OPAL520' # None means 'don't do it', while a channel name means 'put highest at the top'
+    if sort_by_intensity is not None:
+        sort_by_intensity = sort_by_intensity.replace('OPAL','Opal ') + ' Cell Intensity'
 
     # get defaults from global space
     global CELL_ID_START
@@ -1207,22 +1240,12 @@ def main():
     with tifffile.Timer(f'\nLoading pyramid from {qptiff}...\n'):
         # pyramid = tifffile.imread(qptiff)
 
-        # # raw = tifffile.TiffFile(qptiff)
-        # # pages = raw.series[0]
-        # # pyramid = []
-        # # i=1
-        # # for page in pages:
-        # #     print(f"Page {i}")
-        # #     pyramid.append(page.asarray())
-        # #     i+=1
-        # pyramid = np.asarray(pyramid)
-        # can pick select pages
-        # image = imread('temp.tif', key=0)
-        # images = imread('temp.tif', key=range(4, 40, 2))
         print("NOT reading anything right now... trying to use a memory mapped object.")
-
-        pyramid = tifffile.memmap('mmtest.tif')
-        pyramid = np.transpose(pyramid,(2,1,0))
+        try:
+            pyramid = tifffile.memmap(qptiff)
+        except:
+            raise Exception("Expecting a memory mapped tif. Got something else.")
+        # pyramid = np.transpose(pyramid,(2,1,0))
         print('... completed in ', end='')
     # print(f'\nFinal pyramid levels: {[p.shape for p in pyramid]}\n')
 
@@ -1275,15 +1298,46 @@ def main():
     # Pass pointer to widgets to function on button press
     note_button.pressed.connect(lambda: replace_note(note_cell_entry, note_text_entry))
 
+    next_cell_rb = QRadioButton("Next") ; next_cell_rb.setChecked(True)
+    previous_cell_rb = QRadioButton("Previous")
+    batch_group = QButtonGroup(); batch_group.addButton(next_cell_rb); batch_group.addButton(previous_cell_rb)
+    next_batch_amt = QSpinBox(); next_batch_amt.setRange(5,150); next_batch_amt.setValue(15)
+    next_batch_button = QPushButton("Go")
+    next_batch_button.pressed.connect(lambda: show_next_cell_group(next_cell_rb, previous_cell_rb, next_batch_amt))
     viewer.window.add_dock_widget([NOTES_WIDGET,note_text_entry, note_cell_entry, note_button], name = 'Take notes', area = 'right')
+    viewer.window.add_dock_widget([next_cell_rb,previous_cell_rb, next_batch_amt, next_batch_button], name = 'Change Batch', area = 'right')
+    
+    all_channels_rb = QRadioButton("Show All Channels"); all_channels_rb.setChecked(True)
+    composite_only_rb = QRadioButton("Composite Mode")
+    comp_group = QButtonGroup(); comp_group.addButton(composite_only_rb); comp_group.addButton(all_channels_rb)
+    switch_mode_button = QPushButton("Change Mode")
+    switch_mode_button.pressed.connect(lambda: toggle_composite_viewstatus(all_channels_rb,composite_only_rb))
+    viewer.window.add_dock_widget([all_channels_rb,composite_only_rb,switch_mode_button],name ="Mode",area="right")
+    
+    visibility_show = QRadioButton("Show label overlay"); visibility_show.setChecked(True)
+    visibility_hide = QRadioButton("Hide label overlay"); visibility_hide.setChecked(False)
+    vis_group = QButtonGroup(); vis_group.addButton(visibility_show);vis_group.addButton(visibility_hide)
+    visibility_hide.toggled.connect(lambda: toggle_statusbar_visibility(visibility_show))
+    visibility_show.toggled.connect(lambda: toggle_statusbar_visibility(visibility_show))
+    viewer.window.add_dock_widget([visibility_show,visibility_hide],name ="Label Opacity",area="right")
+
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
-
-    viewer.window.add_dock_widget(toggle_composite_viewstatus,name = 'Test', area = 'right')
-    viewer.window.add_dock_widget(show_next_cell_group,name = 'Test2', area = 'right')
-    viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test3', area = 'right')
+    # viewer.window.add_dock_widget(toggle_composite_viewstatus,name = 'Test', area = 'right')
+    # viewer.window.add_dock_widget(show_next_cell_group,name = 'Test2', area = 'right')
+    # viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test3', area = 'right')
     # print(f'\n {dir()}') # prints out the namespace variables 
+    ALL_CUSTOM_WIDGETS['notes label']=NOTES_WIDGET; ALL_CUSTOM_WIDGETS['notes text entry']=note_text_entry
+    ALL_CUSTOM_WIDGETS['notes cell entry']= note_cell_entry;ALL_CUSTOM_WIDGETS['notes button']=note_button
+    ALL_CUSTOM_WIDGETS['next cell radio']=next_cell_rb;ALL_CUSTOM_WIDGETS['previous cell radio']=previous_cell_rb
+    ALL_CUSTOM_WIDGETS['next batch amount']=next_batch_amt;ALL_CUSTOM_WIDGETS['next batch button']=next_batch_button
+    ALL_CUSTOM_WIDGETS['channels mode radio']=all_channels_rb; ALL_CUSTOM_WIDGETS['composite mode radio']=composite_only_rb
+    ALL_CUSTOM_WIDGETS['switch mode buton']=switch_mode_button; 
+    ALL_CUSTOM_WIDGETS['show visibility radio']=visibility_show; ALL_CUSTOM_WIDGETS['hide visibility radio']=visibility_hide
+
+    # for widg in ALL_CUSTOM_WIDGETS:
+    #     widg.setVisible(False)
 
     all_boxes = []
     for marker_function in CHANNELS_STR:
@@ -1293,6 +1347,10 @@ def main():
     viewer.window.add_dock_widget(all_boxes,area='bottom')
     sv_wrapper(viewer)
     tsv_wrapper(viewer)
+
+    # Get rid of the crap on the left sidebar for a cleaner screen
+    viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
+    viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
     napari.run()
 
 # Main should work now using the defaults specified at the top of this script in the global variable space
