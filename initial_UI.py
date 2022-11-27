@@ -26,21 +26,21 @@ FONT_SIZE = 12
 CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
 AVAILABLE_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'pink', 'cyan']
 
-class ExternalCounter(QThread):
-    """
-    Runs a counter thread.
-    """
-    countChanged = pyqtSignal(int)
-    def __init__(self, time_limit):
-        super(ExternalCounter, self).__init__()
-        self.time_limit = time_limit
+# class ExternalCounter(QThread):
+#     """
+#     Runs a counter thread.
+#     """
+#     countChanged = pyqtSignal(int)
+#     def __init__(self, time_limit):
+#         super(ExternalCounter, self).__init__()
+#         self.time_limit = time_limit
 
-    def run(self):
-        count = 0
-        while count < self.time_limit:
-            count +=1
-            time.sleep(1)
-            self.countChanged.emit(count)
+#     def run(self):
+#         count = 0
+#         while count < self.time_limit:
+#             count +=1
+#             time.sleep(1)
+#             self.countChanged.emit(count)
 
 class ViewerPresets(QDialog):
     def __init__(self, app, parent=None):
@@ -94,8 +94,14 @@ class ViewerPresets(QDialog):
         dataEntryLabel.setAlignment(Qt.AlignCenter)
         dataEntryLabel.setMaximumWidth(600)
 
+        # Push button to start reading image data and start up napari by remotely executing main method of main script
         self.findDataButton = QPushButton("Load Gallery Images")
         self.findDataButton.setDefault(False)
+
+        self.status_label = QLabel("Test Status for Loading")
+        self.status_label.setStyleSheet('color: green ; font-size: 15pt')
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setVisible(False)
 
         self.createTopLeftGroupBox()
         self.createTopRightGroupBox()
@@ -123,6 +129,7 @@ class ViewerPresets(QDialog):
         # mainLayout.addWidget(self.bottomLeftTabWidget, 2, 0)
         # mainLayout.addWidget(self.bottomRightGroupBox, 2, 1)
         self.mainLayout.addWidget(self.findDataButton,2,0,1,0)
+        self.mainLayout.addWidget(self.status_label,3,0,1,0)
         
         self.mainLayout.setRowStretch(1, 1)
         self.mainLayout.setRowStretch(2, 1)
@@ -215,9 +222,6 @@ class ViewerPresets(QDialog):
             layout.addWidget(button, pos%4,col)
             exec(f'layout.addWidget({colorComboName},{pos%4}, {col+1})')
 
-
-
-            
         self.topLeftGroupBox.setLayout(layout)    
 
     def createTopRightGroupBox(self):
@@ -297,6 +301,9 @@ class ViewerPresets(QDialog):
     #     QApplication.processEvents()
 
     def loadGallery(self):
+        # self.status_label.setVisible(True)
+        # self.app.processEvents()
+
         self.findDataButton.setEnabled(False) # disable load button after click
         store_and_load.storeObject(self.userInfo, 'data/presets')
         # Correct color order
@@ -322,10 +329,28 @@ class ViewerPresets(QDialog):
         if not os.path.exists(folder):
             os.makedirs(folder)
         logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_crashlog_%H%M%S.txt')))
+
+        # self.app.setStyleSheet('')
         try:
             # for i in range(15):
             #     time.sleep(1)
-            GUI_execute(self.userInfo)
+            print('Calling GUI execute...')
+            # Reset stylesheet
+            newStyle = ''
+            # for elem in ["QLabel","QComboBox","QLineEdit","QPushButton","QCheckBox", "QSpinBox", "QGroupBox"]:
+            #     if elem == "QGroupBox" or elem == "QPushButton":
+            #         exec(f'newStyle += "{elem}{{font-size: {FONT_SIZE-10}pt;}}"')
+            #     elif elem == QSpinBox:
+            #         exec(f'newStyle += "{elem}{{font-size: {FONT_SIZE-10}pt;}}"')
+            #     else:
+            #         exec(f'newStyle += "{elem}{{font-size: {FONT_SIZE-10}pt;}}"')
+            # self.app.setStyleSheet(newStyle)
+            # self.processEvents()
+            # close this window
+            # self.close()
+            GUI_execute(self)
+            # time.sleep(5)
+            # print("done")
         except Exception as e:
             logging.basicConfig(filename=logpath, encoding='utf-8', level=logging.DEBUG)
             logging.exception("Napari crashed after trying to load QPTiff with GUI load button. Error: %s", e)
@@ -349,7 +374,7 @@ if __name__ == '__main__':
         else:
             exec(f'customStyle += "{elem}{{font-size: {FONT_SIZE}pt;}}"')
     app.setStyleSheet(customStyle)
-    # app.setStyle('Fusion')
+    app.setStyle('Fusion')
     gallery = ViewerPresets(app)
     gallery.show()
     # app.processEvents()

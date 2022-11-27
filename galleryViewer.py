@@ -9,7 +9,7 @@ import napari
 from napari.types import ImageData
 from napari.qt.threading import thread_worker # Needed to add / remove a lot of layers without freezing
 from magicgui import magicgui, magic_factory
-from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton, QRadioButton, QSpinBox, QButtonGroup
+from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton, QRadioButton, QSpinBox, QButtonGroup, QSizePolicy
 from PyQt5.QtCore import Qt
 import numpy as np
 import pandas as pd
@@ -48,7 +48,7 @@ OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data
 # OBJECT_DATA = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\PMR_test_Results.csv"
 OFFSET = 90 # microns or pixels? Probably pixels
 CELL_OFFSET= 0 # Saves the current number of cells shown. Useful when pulling 'next 10 cells' 
-CELL_LIMIT = 15 # How many cells will be shown in next batch
+CELL_LIMIT = 5 # How many cells will be shown in next batch
 PHENOTYPE = 'Tumor' #'CTC 488pos'
 CELL_ID_START = 550 # debug?
 DAPI = 0; OPAL480 = 3; OPAL520 = 6; OPAL570 = 1; OPAL620 = 4; OPAL690 = 2; OPAL780 = 5; AF=7; Composite = 8
@@ -1021,7 +1021,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
 
                 # custom_map = vpc.get_colormap('single_hue',hue=40, saturation_range=[0.1,0.8], value=0.5)
                 # cell_punchout = custom_map(cell_punchout_raw)*255
-                print(f'color chosen is |{cell_colors[i]}|')
+                # print(f'color chosen is |{cell_colors[i]}|')
 
                 # print(f'len of channels is {len(CHANNELS)}')
                 # STORING in global dicts
@@ -1304,7 +1304,8 @@ def replace_note(cell_widget, note_widget):
 ######------------------------- Remote Execution + Main ---------------------######
 
 ''' Reset globals and proceed to main '''
-def GUI_execute(userInfo):
+def GUI_execute(preprocess_class):
+    userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
     global cell_colors, qptiff, OFFSET, CELL_LIMIT, CHANNELS_STR, CHANNEL_ORDER
     global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, CELL_ID_START
 
@@ -1333,42 +1334,53 @@ def GUI_execute(userInfo):
     # for checkbox_name in CHANNELS_STR:   
     #     print(f'checkbox name is {checkbox_name} and type is {type(checkbox_name)}')
     #     exec(f"globals()[\'{checkbox_name+'_box'}\'].show()") # If doing this is wrong I don't want to be right
+    main(preprocess_class)
+
+def GUI_execute_cheat():
     main()
 
-def GUI_execute_cheat(userInfo):
-    main()
-
-def main():
+def main(preprocess_class = None):
     #TODO do this in a function because this is ugly
-    with tifffile.Timer(f'\nLoading pyramid from {qptiff}...\n'):
-        # pyramid = tifffile.imread(qptiff)
+    # Status update helper
+    def _update_status(status):
+        preprocess_class.status_label.setText(status)
+        preprocess_class.app.processEvents()
+    
+    preprocess_class.status_label.setVisible(True)
+    status = "Loading memory-mapped object..."
+    _update_status(status)
 
+    with tifffile.Timer(f'\nLoading pyramid from {qptiff}...\n'):
         print("NOT reading anything right now... trying to use a memory mapped object.")
         try:
             pyramid = tifffile.memmap(qptiff)
+            status+="  Done.\n Initializing Napari session..."
+            _update_status(status)
         except:
-            raise Exception("Expecting a memory mapped tif. Got something else.")
-        # pyramid = np.transpose(pyramid,(2,1,0))
+            status+="  Failed.\n Attempting to load raw image..."
+            _update_status(status)
+            try:
+                pyramid = tifffile.imread(qptiff) # print(f'\nFinal pyramid levels: {[p.shape for p in pyramid]}\n')
+                # Find location of channels in np array. Save that value, and subset the rest (one nparray per channel)
+                print(f'pyramid array as np array shape is {pyramid.shape}\n')
+                arr = np.array(pyramid.shape)
+                channels = min(arr)
+                channel_index = np.where(arr == channels)[0][0]
+                # have to grab the first to instantiate napari viewer
+                if channel_index == 0:
+                    # Added this because the high quality layer of my sample QPTIFF data seemed to be flipped
+                    # i.e. array looks like (channels, y, x)
+                    pyramid = np.transpose(pyramid,(2,1,0))
+                    # firstLayer = pyramid[:,:,0]
+                else:
+                    pass #firstLayer = pyramid[:,:,0]
+                status+="  Done.\n Initializing Napari session..."
+                _update_status(status)
+            except:
+                status+="  Failed.\n Aborting startup ..."
+                _update_status(status)
+                raise Exception("There was a problem reading the image data. Expecting a regular or memory-mapped tif/qptiff. Got something else.")
         print('... completed in ', end='')
-    # print(f'\nFinal pyramid levels: {[p.shape for p in pyramid]}\n')
-
-    # Find location of channels in np array. Save that value, and subset the rest (one nparray per channel)
-    # print(f'pyramid array as np array shape is {pyramid.shape}\n')
-    # arr = np.array(pyramid.shape)
-    # channels = min(arr)
-    # channel_index = np.where(arr == channels)[0][0]
-    # # print(f'least is {channels}, type is {type(channels)} and its at {channel_index}, test is {channel_index==0}')
-
-    # # have to grab the first to instantiate napari viewer
-    # if channel_index == 0:
-    #     # Added this because the high quality layer of my sample QPTIFF data seemed to be flipped
-    #     # i.e. array looks like (channels, y, x)
-    #     pyramid = np.transpose(pyramid,(2,1,0))
-    #     # print(f'FLIPPED SHAPE is {pyramid.shape}\n')
-    #     firstLayer = pyramid[:,:,0]
-    # else:
-    #     firstLayer = pyramid[:,:,0]
-    # print(f'Single layer shape is {firstLayer.shape}\n')
 
     # #TODO think of something better than this. It tanks RAM usage to store this thing
     # #       Literally  ~ 10GB difference
@@ -1407,22 +1419,22 @@ def main():
     next_batch_amt = QSpinBox(); next_batch_amt.setRange(5,150); next_batch_amt.setValue(15)
     next_batch_button = QPushButton("Go")
     next_batch_button.pressed.connect(lambda: show_next_cell_group(next_cell_rb, previous_cell_rb, next_batch_amt))
-    viewer.window.add_dock_widget([NOTES_WIDGET,note_text_entry, note_cell_entry, note_button], name = 'Take notes', area = 'right')
-    viewer.window.add_dock_widget([next_cell_rb,previous_cell_rb, next_batch_amt, next_batch_button], name = 'Change Batch', area = 'right')
-    
+    notes_container = viewer.window.add_dock_widget([NOTES_WIDGET,note_text_entry, note_cell_entry, note_button], name = 'Take notes', area = 'right')
+    batch_container = viewer.window.add_dock_widget([next_cell_rb,previous_cell_rb, next_batch_amt, next_batch_button], name = 'Change Batch', area = 'right')
+
     all_channels_rb = QRadioButton("Show All Channels"); all_channels_rb.setChecked(True)
     composite_only_rb = QRadioButton("Composite Mode")
     comp_group = QButtonGroup(); comp_group.addButton(composite_only_rb); comp_group.addButton(all_channels_rb)
     switch_mode_button = QPushButton("Change Mode")
     switch_mode_button.pressed.connect(lambda: toggle_composite_viewstatus(all_channels_rb,composite_only_rb))
-    viewer.window.add_dock_widget([all_channels_rb,composite_only_rb,switch_mode_button],name ="Mode",area="right")
+    mode_container = viewer.window.add_dock_widget([all_channels_rb,composite_only_rb,switch_mode_button],name ="Mode",area="right")
     
     visibility_show = QRadioButton("Show label overlay"); visibility_show.setChecked(True)
     visibility_hide = QRadioButton("Hide label overlay"); visibility_hide.setChecked(False)
     vis_group = QButtonGroup(); vis_group.addButton(visibility_show);vis_group.addButton(visibility_hide)
     visibility_hide.toggled.connect(lambda: toggle_statusbar_visibility(visibility_show))
     visibility_show.toggled.connect(lambda: toggle_statusbar_visibility(visibility_show))
-    viewer.window.add_dock_widget([visibility_show,visibility_hide],name ="Label Opacity",area="right")
+    vis_container = viewer.window.add_dock_widget([visibility_show,visibility_hide],name ="Label Opacity",area="right")
 
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
@@ -1438,9 +1450,13 @@ def main():
     ALL_CUSTOM_WIDGETS['channels mode radio']=all_channels_rb; ALL_CUSTOM_WIDGETS['composite mode radio']=composite_only_rb
     ALL_CUSTOM_WIDGETS['switch mode buton']=switch_mode_button; 
     ALL_CUSTOM_WIDGETS['show visibility radio']=visibility_show; ALL_CUSTOM_WIDGETS['hide visibility radio']=visibility_hide
+    notes_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+    batch_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+    mode_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+    vis_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
 
     # for widg in ALL_CUSTOM_WIDGETS.values():
-    #     widg.setVisible(False)
+    #     widg.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
 
     all_boxes = []
     for marker_function in CHANNELS_STR:
@@ -1454,6 +1470,9 @@ def main():
     # Get rid of the crap on the left sidebar for a cleaner screen
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
     viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
+
+    status+="  Done.\n Goodbye" ;_update_status(status)
+    preprocess_class.close() # close other window
     napari.run()
 
 # Main should work now using the defaults specified at the top of this script in the global variable space
