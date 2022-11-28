@@ -658,7 +658,10 @@ def sort_by_intensity():
 
 def set_notes_label(display_note_widget, ID):
     note = str(SAVED_NOTES[ID])
-    if note == '-' or note == '': note = 'None'
+    if note == '-' or note == '' or note is None: note = f'{ID}'
+    # print(f'Namespace is {dir()}')
+    print(f'Notes widget is {NOTES_WIDGET}\n type is {type(NOTES_WIDGET)}')
+    # print(f"$@@@@@{ALL_CUSTOM_WIDGETS}")
     display_note_widget.setText(note)
     return None
 ######------------------------- Image loading and processing functions ---------------------######
@@ -973,7 +976,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
     
     print(f'Adding {len(cells)} cells to viewer...')
     while bool(cells): # coords left
-        print(f'Next round of while. Still {len(cells)} cells left\n')
+        print(f'Next round of while. Still {len(cells)} cells left')
         cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; cell_status = retrieve_status(cell_id,cell)
         composite = []
         # add the rest of the layers to the viewer
@@ -1343,16 +1346,17 @@ def main(preprocess_class = None):
     #TODO do this in a function because this is ugly
     # Status update helper
     def _update_status(status):
-        preprocess_class.status_label.setText(status)
-        preprocess_class.app.processEvents()
+        if preprocess_class is not None:
+            preprocess_class.status_label.setText(status)
+            preprocess_class.app.processEvents()
     
-    preprocess_class.status_label.setVisible(True)
+    if preprocess_class is not None: preprocess_class.status_label.setVisible(True)
     status = "Loading memory-mapped object..."
     _update_status(status)
 
     with tifffile.Timer(f'\nLoading pyramid from {qptiff}...\n'):
-        print("NOT reading anything right now... trying to use a memory mapped object.")
         try:
+            print("NOT reading anything right now... trying to use a memory mapped object.")
             pyramid = tifffile.memmap(qptiff)
             status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
             _update_status(status)
@@ -1390,8 +1394,10 @@ def main(preprocess_class = None):
     set_initial_adjustment_parameters() # set defaults: 1.0 gamma, 0 black in, 255 white in
     
     viewer = napari.Viewer(title='CTC Gallery')
-    global VIEWER
+    global VIEWER,NOTES_WIDGET
     VIEWER = viewer
+    NOTES_WIDGET = QLabel('Placeholder note'); NOTES_WIDGET.setAlignment(Qt.AlignCenter)
+    print(f'Notes widget is {NOTES_WIDGET}\n type is {type(NOTES_WIDGET)}')
     add_layers(viewer,pyramid,tumor_cell_XYs, int(OFFSET/2))
         # Perform adjustments before exiting function
     reuse_contrast_limits()
@@ -1401,8 +1407,6 @@ def main(preprocess_class = None):
 
     #TODO arrange these more neatly
     #TODO these dock widgets cause VERY strange behavior when trying to clear all layers / load more
-    global NOTES_WIDGET
-    NOTES_WIDGET = QLabel('Placeholder note'); NOTES_WIDGET.setAlignment(Qt.AlignCenter)
     note_text_entry = QLineEdit()
     note_cell_entry = QLineEdit()
     note_button = QPushButton("Replace note for cell")
@@ -1472,7 +1476,7 @@ def main(preprocess_class = None):
     viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
 
     status+='<font color="#7dbc39">  Done.</font><br> Goodbye' ;_update_status(status)
-    preprocess_class.close() # close other window
+    if preprocess_class is not None: preprocess_class.close() # close other window
     napari.run()
 
 # Main should work now using the defaults specified at the top of this script in the global variable space
