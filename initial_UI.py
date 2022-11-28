@@ -2,7 +2,7 @@
 
 from PyQt5.QtCore import (QDateTime, Qt, QTimer, QThread, 
         pyqtSignal, QObject, QRunnable, QThreadPool, pyqtSlot)
-from PyQt5.QtGui import QIcon, QPixmap
+from PyQt5.QtGui import QIcon, QPixmap,QColor
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDateTimeEdit,
         QDial, QDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
         QProgressBar, QPushButton, QRadioButton, QScrollBar, QSizePolicy,
@@ -58,6 +58,7 @@ class ViewerPresets(QDialog):
         # For TESTING
         print(f'Initial test print for colors: {self.userInfo.UI_color_display}')
 
+        self.combobox_index = 0 # for combobox color changing
         self.myColors = []
         # print(f'SP\pinning up ... preset colors are {self.userInfo.cell_colors}')
         self.originalPalette = QApplication.palette()
@@ -99,7 +100,7 @@ class ViewerPresets(QDialog):
         self.findDataButton.setDefault(False)
 
         self.status_label = QLabel("Test Status for Loading")
-        self.status_label.setStyleSheet('color: green ; font-size: 15pt')
+        self.status_label.setStyleSheet('color:#075cbf ; font-size: 15pt')
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setVisible(False)
 
@@ -172,7 +173,27 @@ class ViewerPresets(QDialog):
 
     def saveColors(self):
         for colorWidget in self.myColors:
-            print(f'---------In loop----------')
+            # Set each the color of each QSpin
+            if colorWidget.currentText() == 'gray': # gray
+                    colorWidget.setStyleSheet("selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0); background-color: rgba(170,170,170, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'purple': # purple
+                colorWidget.setStyleSheet("selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0);background-color: rgba(160,32,240, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'blue': # blue
+                colorWidget.setStyleSheet("selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0);background-color: rgba(100,100,255, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'green': # green
+                colorWidget.setStyleSheet("selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0);background-color: rgba(60,179,113, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'orange': # orange
+                colorWidget.setStyleSheet("selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0);background-color: rgba(255,127,80, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'red': # red
+                colorWidget.setStyleSheet("selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0);background-color: rgba(215,40,40, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'yellow': # yellow
+                colorWidget.setStyleSheet("selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0);background-color: rgba(255,215,0, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'pink': # pink
+                colorWidget.setStyleSheet("selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0);background-color: rgba(255,105,180     , 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'cyan': # cyan
+                colorWidget.setStyleSheet("selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0);background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+
+            # colorWidget.setItemData(0,QColor("red"),Qt.BackgroundRole)
             print(f'My trigger was {colorWidget.objectName()}')
             colorChannel = colorWidget.objectName()
             print(f'#### Channel order fsr: {store_and_load.CHANNELS_STR} \n 1. also userinfo.cell_colors before change: {self.userInfo.cell_colors}')
@@ -188,7 +209,6 @@ class ViewerPresets(QDialog):
             # self.userInfo.UI_color_display.pop(colorPos)
             # self.userInfo.UI_color_display.insert(colorPos, colorWidget.currentText())
             
-
     def createTopLeftGroupBox(self):
         self.topLeftGroupBox = QGroupBox("Channels and Colors")
 
@@ -204,12 +224,68 @@ class ViewerPresets(QDialog):
         
         layout = QGridLayout()
         
+        def set_color_index(index):
+            for colorWidget in self.myColors:
+                if index ==0: # gray
+                    colorWidget.setStyleSheet("selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                elif index ==1: # purple
+                    colorWidget.setStyleSheet("selection-background-color: rgba(160,32,240, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                elif index ==2: # blue
+                    colorWidget.setStyleSheet("selection-background-color: rgba(100,100,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                elif index ==3: # green
+                    colorWidget.setStyleSheet("selection-background-color: rgba(60,179,113, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                elif index ==4: # orange
+                    colorWidget.setStyleSheet("selection-background-color: rgba(255,127,80, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                elif index ==5: # red
+                    colorWidget.setStyleSheet("selection-background-color: rgba(215,40,40, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                elif index ==6: # yellow
+                    colorWidget.setStyleSheet("selection-background-color: rgba(255,215,0, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                elif index ==7: # pink
+                    colorWidget.setStyleSheet("selection-background-color: rgba(255,105,180     , 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                elif index ==8: # cyan
+                    colorWidget.setStyleSheet("selection-background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                # colorWidget.setStyleSheet(f"color: {colorWidget.currentText()}; font-size: {FONT_SIZE}pt;")
+        def change_color(current_widget = None):
+            print(f"current is {current_widget} and type is {type(current_widget)}")
+            current_widget.setStyleSheet(f"color: {current_widget.itemText(self.combobox_index)}; font-size: {FONT_SIZE}pt;")
         # Space / time saving way to create 16 widgets and change their parameters
         for pos,button in enumerate(self.mycheckbuttons):
             colorComboName = button.objectName() + "_colors"
             exec(f'{colorComboName} = QComboBox()')
+            colored_items = [f'<font color="{item}">{item}</font>' for item in store_and_load.CELL_COLORS]
             exec(f'{colorComboName}.addItems(store_and_load.CELL_COLORS)')
             exec(f'{colorComboName}.setCurrentText("{self.userInfo.UI_color_display[pos]}")')
+
+            # exec(f'{colorComboName}.setItemData(0,QColor("red"),Qt.ForegroundRole)')
+            # test = QComboBox()
+            # test.setItemData(0,value=QColor('red'))
+
+            # colorWidget.setItemData(0,QColor("red"),Qt.BackgroundRole)
+
+            exec(f'{colorComboName}.setItemData(1,QColor(100,100,100,0),Qt.BackgroundRole)') # gray
+            exec(f'{colorComboName}.setItemData(1,QColor(0,0,0,255),Qt.ForegroundRole)')
+            exec(f'{colorComboName}.setItemData(1,QColor(160,32,240,0),Qt.BackgroundRole)') # purple
+            exec(f'{colorComboName}.setItemData(1,QColor(0,0,0,255),Qt.ForegroundRole)')
+            exec(f'{colorComboName}.setItemData(2,QColor(20,20,255,0),Qt.BackgroundRole)') # blue
+            exec(f'{colorComboName}.setItemData(2,QColor(0,0,0,255),Qt.ForegroundRole)')
+            exec(f'{colorComboName}.setItemData(3,QColor(0,255,0,0),Qt.BackgroundRole)') # green
+            exec(f'{colorComboName}.setItemData(3,QColor(0,0,0,255),Qt.ForegroundRole)')
+            exec(f'{colorComboName}.setItemData(4,QColor(255,0,0,0),Qt.BackgroundRole)') # red
+            exec(f'{colorComboName}.setItemData(4,QColor(0,0,0,255),Qt.ForegroundRole)') 
+            exec(f'{colorComboName}.setItemData(5,QColor(255,165,0,0),Qt.BackgroundRole)') # orange
+            exec(f'{colorComboName}.setItemData(5,QColor(0,0,0,255),Qt.ForegroundRole)')
+            exec(f'{colorComboName}.setItemData(6,QColor(255,255,0,0),Qt.BackgroundRole)')# yellow
+            exec(f'{colorComboName}.setItemData(6,QColor(0,0,0,255),Qt.ForegroundRole)')
+            exec(f'{colorComboName}.setItemData(7,QColor(255,0,255,0),Qt.BackgroundRole)') # pink
+            exec(f'{colorComboName}.setItemData(7,QColor(0,0,0,255),Qt.ForegroundRole)')
+            exec(f'{colorComboName}.setItemData(8,QColor(0,255,255,0),Qt.BackgroundRole)') # cyan
+            exec(f'{colorComboName}.setItemData(8,QColor(0,0,0,255),Qt.ForegroundRole)')
+            
+            # exec(f'{colorComboName}.setStyleSheet("background-color: rgb(0,0,0); selection-background-color: rgba(255,255,255,1);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")')
+            # exec(f'{colorComboName}.setStyleSheet("selection-background-color: rgba(255,0,0,255);selection-color: rgb(255,255,255); font-size:{FONT_SIZE}pt;")')
+            # exec(f'{colorComboName}.setStyleSheet("color:{self.userInfo.UI_color_display[pos]};font-size:{FONT_SIZE}pt;")')
+            exec(f'{colorComboName}.highlighted[int].connect(set_color_index)')
+            # exec(f'{colorComboName}.highlighted.connect(change_color)')
             exec(f'{colorComboName}.setObjectName("{button.objectName()}")')
             if button.objectName() in self.userInfo.channels and button.objectName != 'AF':
                 button.setChecked(True)
@@ -222,6 +298,29 @@ class ViewerPresets(QDialog):
             layout.addWidget(button, pos%4,col)
             exec(f'layout.addWidget({colorComboName},{pos%4}, {col+1})')
 
+            
+        for colorWidget in self.myColors:
+            # Set each the color of each QSpin
+            if colorWidget.currentText() == 'gray': # gray
+                    colorWidget.setStyleSheet("background-color: rgba(170,170,170, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'purple': # purple
+                colorWidget.setStyleSheet("background-color: rgba(160,32,240, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'blue': # blue
+                colorWidget.setStyleSheet("background-color: rgba(100,100,255, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'green': # green
+                colorWidget.setStyleSheet("background-color: rgba(60,179,113, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'orange': # orange
+                colorWidget.setStyleSheet("background-color: rgba(255,127,80, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'red': # red
+                colorWidget.setStyleSheet("background-color: rgba(215,40,40, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'yellow': # yellow
+                colorWidget.setStyleSheet("background-color: rgba(255,215,0, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'pink': # pink
+                colorWidget.setStyleSheet("background-color: rgba(255,105,180     , 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif colorWidget.currentText() == 'cyan': # cyan
+                colorWidget.setStyleSheet("background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+
+        
         self.topLeftGroupBox.setLayout(layout)    
 
     def createTopRightGroupBox(self):
@@ -366,16 +465,16 @@ if __name__ == '__main__':
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     app = QApplication([])
     customStyle = ""
-    for elem in ["QLabel","QComboBox","QLineEdit","QPushButton","QCheckBox", "QSpinBox", "QGroupBox"]:
+    for elem in ["QLabel","QLineEdit","QPushButton","QCheckBox", "QSpinBox", "QGroupBox"]:
         if elem == "QGroupBox" or elem == "QPushButton":
             exec(f'customStyle += "{elem}{{font-size: {FONT_SIZE+2}pt;}}"')
         elif elem == QSpinBox:
             exec(f'customStyle += "{elem}{{font-size: {FONT_SIZE-2}pt;}}"')
         else:
             exec(f'customStyle += "{elem}{{font-size: {FONT_SIZE}pt;}}"')
+    customStyle += f"QComboBox{{font-size: {FONT_SIZE}pt;}}"
     app.setStyleSheet(customStyle)
     app.setStyle('Fusion')
     gallery = ViewerPresets(app)
     gallery.show()
-    # app.processEvents()
     sys.exit(app.exec())

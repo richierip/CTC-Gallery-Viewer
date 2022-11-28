@@ -973,7 +973,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
     
     print(f'Adding {len(cells)} cells to viewer...')
     while bool(cells): # coords left
-        print(f'Next round of while. Still {len(cells)} cells left')
+        print(f'Next round of while. Still {len(cells)} cells left\n')
         cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; cell_status = retrieve_status(cell_id,cell)
         composite = []
         # add the rest of the layers to the viewer
@@ -1004,7 +1004,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
                 if cell_colors[i] == 'pink': cell_colors[i] = 'Pink'
                 global fluor_to_color; fluor_to_color[fluor] = cell_colors[i]
                 cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
-                print(f'\nTrying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}\n')
+                print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}')
 
                 if show_all: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
                     add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
@@ -1354,10 +1354,10 @@ def main(preprocess_class = None):
         print("NOT reading anything right now... trying to use a memory mapped object.")
         try:
             pyramid = tifffile.memmap(qptiff)
-            status+="  Done.\n Initializing Napari session..."
+            status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
             _update_status(status)
         except:
-            status+="  Failed.\n Attempting to load raw image..."
+            status+='<font color="#f5551a">  Failed.</font><br> Attempting to load raw image, this will take a while ...'
             _update_status(status)
             try:
                 pyramid = tifffile.imread(qptiff) # print(f'\nFinal pyramid levels: {[p.shape for p in pyramid]}\n')
@@ -1374,10 +1374,10 @@ def main(preprocess_class = None):
                     # firstLayer = pyramid[:,:,0]
                 else:
                     pass #firstLayer = pyramid[:,:,0]
-                status+="  Done.\n Initializing Napari session..."
+                status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
                 _update_status(status)
             except:
-                status+="  Failed.\n Aborting startup ..."
+                status+='<font color="#f5551a">  Failed.</font><br> Aborting startup, please contact Peter.'
                 _update_status(status)
                 raise Exception("There was a problem reading the image data. Expecting a regular or memory-mapped tif/qptiff. Got something else.")
         print('... completed in ', end='')
@@ -1471,7 +1471,7 @@ def main(preprocess_class = None):
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
     viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
 
-    status+="  Done.\n Goodbye" ;_update_status(status)
+    status+='<font color="#7dbc39">  Done.</font><br> Goodbye' ;_update_status(status)
     preprocess_class.close() # close other window
     napari.run()
 

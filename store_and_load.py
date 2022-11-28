@@ -31,7 +31,7 @@ class userPresets:
         self.imageSize = imageSize
         self.channels = channels
         self.cell_colors = cell_colors
-        self.UI_color_display = copy.copy(CELL_COLORS)
+        self.UI_color_display = copy.copy(CELL_COLORS) # keep track of user selected colors for fluors
         self.cell_count = cell_count
         self.phenotype = phenotype
         self.channelOrder = channelOrder
