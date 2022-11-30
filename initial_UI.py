@@ -194,7 +194,6 @@ class ViewerPresets(QDialog):
             elif colorWidget.currentText() == 'cyan': # cyan
                 colorWidget.setStyleSheet("background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
 
-            # colorWidget.setItemData(0,QColor("red"),Qt.BackgroundRole)
             # print(f'My trigger was {colorWidget.objectName()}')
             colorChannel = colorWidget.objectName()
             # print(f'#### Channel order fsr: {store_and_load.CHANNELS_STR} \n 1. also userinfo.cell_colors before change: {self.userInfo.cell_colors}')
@@ -348,7 +347,7 @@ class ViewerPresets(QDialog):
      
         explanationLabel1 = QLabel("Cell image size in <b>pixels</b>")
         explanationLabel2 = QLabel("Exclude cells with a <i>Cell ID</i> <b>&lt;</b> ")
-        explanationLabel3 = QLabel("Limit the display to the first ")
+        explanationLabel3 = QLabel("Limit the display to the <b>first<b> ")
 
         self.imageSize = QSpinBox(self.topRightGroupBox)
         self.imageSize.setRange(50,200)

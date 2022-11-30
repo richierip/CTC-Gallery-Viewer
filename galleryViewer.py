@@ -432,6 +432,7 @@ def fix_default_composite_adj():
 
 ## --- Side bar functions and GUI elements 
 
+### --- The following attempts at removing layers with a separate thread are deprecated
 def threading_remove_layer(layer):
     try:
         VIEWER.layers.remove(layer)
@@ -457,6 +458,7 @@ def concurrent_clear(viewer):
         # viewer.processEvents()
         viewer.layers.remove(layer)
 
+### --- 
 # @magicgui(call_button='Change Mode',
 #         Mode={"widget_type": "RadioButtons","orientation": "vertical",
 #         "choices": [("Show all channels", 1), ("Composite Only", 2)]})#,layout = 'horizontal')
@@ -658,10 +660,11 @@ def sort_by_intensity():
 
 def set_notes_label(display_note_widget, ID):
     note = str(SAVED_NOTES[ID])
-    if note == '-' or note == '' or note is None: note = f'{ID}'
-    # print(f'Namespace is {dir()}')
-    print(f'Notes widget is {NOTES_WIDGET}\n type is {type(NOTES_WIDGET)}')
-    # print(f"$@@@@@{ALL_CUSTOM_WIDGETS}")
+    prefix = f'CID: <div style= "display:inline-block; color:#f5551a;font-size: 10pt">{ID}</div>'
+    if note == '-' or note == '' or note is None: 
+        note = prefix
+    else:
+        note = prefix +'<br>'+ note
     display_note_widget.setText(note)
     return None
 ######------------------------- Image loading and processing functions ---------------------######
@@ -1177,17 +1180,30 @@ def tsv_wrapper(viewer):
     def toggle_statusbar_visibility(viewer):
         show_vis_radio = ALL_CUSTOM_WIDGETS['show visibility radio']
         hide_vis_radio = ALL_CUSTOM_WIDGETS['hide visibility radio']
-        if show_vis_radio.isChecked() == True:
+        if show_vis_radio.isChecked():
             show_vis_radio.setChecked(False)
             hide_vis_radio.setChecked(True)
         else:
             show_vis_radio.setChecked(True)
             hide_vis_radio.setChecked(False)
-    
-    # Find status layers and toggle visibility
-        # for layer in VIEWER.layers:
-        #     if 'status' in layer.name:
-        #         layer.visible = not layer.visible
+
+def chn_key_wrapper(viewer):
+    def create_fun(position,channel):
+        @viewer.bind_key(str(position+1))
+        def toggle_channel_visibility(viewer,pos=position,chn=channel):
+            widget_name = chn+'_box'
+            # print(f'You are trying to toggle {widget_name} with pos {pos}')
+            widget_obj = globals()[widget_name]
+            if widget_obj.check.value:
+                widget_obj.check.value =False
+            else:
+                widget_obj.check.value=True
+        return toggle_channel_visibility
+
+    for pos, chn in enumerate(CHANNELS_STR):
+        binding_func_name = f'{chn}_box_func'
+        exec(f'globals()["{binding_func_name}"] = create_fun({pos},"{chn}")')
+        
 
 def set_initial_adjustment_parameters():
     for fluor in CHANNELS_STR:
@@ -1470,7 +1486,8 @@ def main(preprocess_class = None):
     viewer.window.add_dock_widget(all_boxes,area='bottom')
     sv_wrapper(viewer)
     tsv_wrapper(viewer)
-
+    chn_key_wrapper(viewer)
+    # magicgui
     # Get rid of the crap on the left sidebar for a cleaner screen
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
     viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
