@@ -44,16 +44,16 @@ class userPresets:
     def _correct_color_order(self):
         self.cell_colors = []
         # print(f'\n \n GETTING TO THE BOTTOM OF THS SHIT')
-        print(f'CHANNELS_STR {CHANNELS_STR}')
-        print(f'CHANNEL_ORDER {CHANNEL_ORDER}')
-        print(f'self.cell_colors {self.cell_colors}')
-        print(f'self.UI_color_display {self.UI_color_display}')
+        # print(f'CHANNELS_STR {CHANNELS_STR}')
+        # print(f'CHANNEL_ORDER {CHANNEL_ORDER}')
+        # print(f'self.cell_colors {self.cell_colors}')
+        # print(f'self.UI_color_display {self.UI_color_display}')
         for chnl in CHANNEL_ORDER:
-                print(f'current var is {chnl} and the global value is {globals()[chnl]}')
+                # print(f'current var is {chnl} and the global value is {globals()[chnl]}')
                 # this inserts colors into backend ordered array in the right place off the bat. 
                 pos = CHANNELS_STR.index(chnl)
                 self.cell_colors.append(self.UI_color_display[pos])
-        print(f'DONE CORRECTING. colors to be passed are {self.cell_colors}')
+        print(f'Color correction finished, will pass {self.cell_colors}')
 
 def storeObject(obj, filename):
     try:

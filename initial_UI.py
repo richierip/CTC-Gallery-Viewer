@@ -13,7 +13,7 @@ import sys
 import os
 import time
 import store_and_load
-from galleryViewer import GUI_execute, GUI_execute_cheat
+from galleryViewer import GUI_execute
 import ctypes
 import threading
 import logging
@@ -226,30 +226,28 @@ class ViewerPresets(QDialog):
         
         def create_func(colorWidget):
             def set_color_index(index):
-                print(f" index is {index} and widget is {colorWidget}, type is {type(colorWidget)}")
                 # return None
                 # for colorWidget in self.myColors:
                 if index ==0: # gray
-                    colorWidget.setStyleSheet("selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                    colorWidget.setStyleSheet(f"selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
                 elif index ==1: # purple
-                    colorWidget.setStyleSheet("selection-background-color: rgba(160,32,240, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                    colorWidget.setStyleSheet(f"selection-background-color: rgba(160,32,240, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
                 elif index ==2: # blue
-                    colorWidget.setStyleSheet("selection-background-color: rgba(100,100,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                    colorWidget.setStyleSheet(f"selection-background-color: rgba(100,100,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
                 elif index ==3: # green
-                    colorWidget.setStyleSheet("selection-background-color: rgba(60,179,113, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                    colorWidget.setStyleSheet(f"selection-background-color: rgba(60,179,113, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
                 elif index ==4: # orange
-                    colorWidget.setStyleSheet("selection-background-color: rgba(255,127,80, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                    colorWidget.setStyleSheet(f"selection-background-color: rgba(255,127,80, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
                 elif index ==5: # red
-                    colorWidget.setStyleSheet("selection-background-color: rgba(215,40,40, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                    colorWidget.setStyleSheet(f"selection-background-color: rgba(215,40,40, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
                 elif index ==6: # yellow
-                    colorWidget.setStyleSheet("selection-background-color: rgba(255,215,0, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                    colorWidget.setStyleSheet(f"selection-background-color: rgba(255,215,0, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
                 elif index ==7: # pink
-                    colorWidget.setStyleSheet("selection-background-color: rgba(255,105,180, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                    colorWidget.setStyleSheet(f"selection-background-color: rgba(255,105,180, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
                 elif index ==8: # cyan
-                    colorWidget.setStyleSheet("selection-background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                    colorWidget.setStyleSheet(f"selection-background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
                 # colorWidget.setStyleSheet(f"color: {colorWidget.currentText()}; font-size: {FONT_SIZE}pt;")
-            return set_color_index
-        
+            return set_color_index 
         # Space / time saving way to create 16 widgets and change their parameters
         for pos,button in enumerate(self.mycheckbuttons):
             colorComboName = button.objectName() + "_colors"

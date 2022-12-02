@@ -33,7 +33,7 @@ cell_colors = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'Pi
 print('\n--------------- adding custom cmaps\n')
 
 for colormap in cell_colors:
-    print(f'cmap: {colormap}')
+    # print(f'cmap: {colormap}')
     if colormap == 'gray': continue
     exec(f'my_map = custom_maps.create_{colormap}_lut()')
     exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
@@ -413,14 +413,19 @@ def dynamic_checkbox_creator(checkbox_name, setChecked = True):
 
 # print(f'dir is {dir()}')
 def checkbox_setup():
+    all_boxes = []
     for checkbox_name in CHANNELS_STR:   
         #Turn off composite by default.
+        print(f'creating checkbox func for {checkbox_name}')
         if False: #checkbox_name == 'Composite':
             ADJUSTMENT_SETTINGS[checkbox_name+' box'] = False
             exec(f"globals()[\'{checkbox_name+'_box'}\'] = globals()[\'dynamic_checkbox_creator\'](checkbox_name, setChecked=False)") # If doing this is wrong I don't want to be right
         else:
             # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = True
             exec(f"globals()[\'{checkbox_name+'_box'}\'] = globals()[\'dynamic_checkbox_creator\'](checkbox_name)")
+        all_boxes.append(globals()[f'{checkbox_name}_box'])
+        # exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
+    return all_boxes
 checkbox_setup()
 
 # This is called in GUI_execute, because the global 'ADJUSTED' variable will be changed at that time. 
@@ -660,11 +665,11 @@ def sort_by_intensity():
 
 def set_notes_label(display_note_widget, ID):
     note = str(SAVED_NOTES[ID])
-    prefix = f'CID: <div style= "display:inline-block; color:#f5551a;font-size: 10pt">{ID}</div>'
+    prefix = f'CID: <font color="#f5551a">{ID}</font>'
     if note == '-' or note == '' or note is None: 
         note = prefix
     else:
-        note = prefix +'<br>'+ note
+        note = prefix +'<br>'+ f'<font size="5pt">{note}</font>'
     display_note_widget.setText(note)
     return None
 ######------------------------- Image loading and processing functions ---------------------######
@@ -704,19 +709,41 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
         else:
             return STATUS_LIST[cell_id]
 
+    def generate_status_box(color):
+        if color == 'red':
+            color_tuple = (255,0,0,255)
+        elif color == 'green':
+            color_tuple = (0,255,0,255)
+        elif color =='bop orange':
+            color_tuple = (255,160,0,255)
+        else: # assume 'gray'
+            color_tuple = (150,150,150,255)
+
+        corner_box_size = 8
+
+        top_or_bottom = [color_tuple, ] *(OFFSET+1)
+        x = np.array([[color_tuple, (0,0,0,0), color_tuple]])
+        y = np.repeat(x,[1,OFFSET-1,1],axis=1)
+        mid = np.repeat(y,OFFSET-(corner_box_size), axis=0)
+
+        z = np.repeat(x,[corner_box_size,OFFSET-(corner_box_size),1],axis=1)
+        above_mid = np.repeat(z,corner_box_size-1, axis=0)
+        top = np.append([top_or_bottom],above_mid,axis=0)
+        # z = np.repeat([np.repeat([0],12)],2,axis=0)
+        xy = np.append(top,mid, axis=0)
+        return np.append(xy,[top_or_bottom],axis=0)
+
     def add_status_bar(viewer, name, status = 'unseen'):
         if show_all:
             # Make a strip - will display at the left of each row of channels (one row per cell)
             x = np.array([[0,255,0]])
             y = np.repeat(x,[OFFSET-8,7,1],axis=1)
-            xy = np.repeat(y,OFFSET,axis=0)
+            overlay = np.repeat(y,OFFSET,axis=0)
+            status_layer = viewer.add_image(overlay, name = f'{name}_{status}', colormap = status_colors[status])
         else:
             # Create a small box - will display in the top left corner above each composite image
-            x = np.array([[255,0]])
-            y = np.repeat(x,[10,2],axis=1)
-            z = np.repeat([np.repeat([0],12)],2,axis=0)
-            xy = np.append(np.repeat(y,10,axis=0),z, axis=0)
-        status_layer = viewer.add_image(xy, name = f'{name}_{status}', colormap = status_colors[status])
+            overlay = generate_status_box(status_colors[status])
+            status_layer = viewer.add_image(overlay, name = f'{name}_{status}')#, colormap = status_colors[status])
 
         def find_mouse(shape_layer, pos):
             data_coordinates = shape_layer.world_to_data(pos)
@@ -767,8 +794,12 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
                 cur_index = list(status_colors.keys()).index(cur_status)
                 next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
                 print(f'next status (shape_layer) is {next_status}')
-                status_layer.colormap = status_colors[next_status]
-                status_layer.name = name.split('_')[0] +'_'+next_status 
+                status_layer.name = name.split('_')[0] +'_'+next_status
+                if COMPOSITE_MODE: 
+                    status_layer.data = generate_status_box(status_colors[next_status])
+                else:
+                    status_layer.colormap = status_colors[next_status]
+
             else:
                 pass
         
@@ -779,8 +810,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
             name,status_layer = get_layer_name(shape_layer)
             # Rename the status layer and change the color
             if 'status' in name:
-                status_layer.colormap = status_colors[next_status]
-                status_layer.name = name.split('_')[0] +'_'+next_status 
+                status_layer.name = name.split('_')[0] +'_'+next_status
+                if COMPOSITE_MODE: 
+                    status_layer.data = generate_status_box(status_colors[next_status])
+                else:
+                    status_layer.colormap = status_colors[next_status] 
             else:
                 pass
 
@@ -791,8 +825,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
             name,status_layer = get_layer_name(shape_layer)
             # Rename the status layer and change the color
             if 'status' in name:
-                status_layer.colormap = status_colors[next_status]
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                if COMPOSITE_MODE: 
+                    status_layer.data = generate_status_box(status_colors[next_status])
+                else:
+                    status_layer.colormap = status_colors[next_status]
             else:
                 pass
         @status_layer.bind_key('b')
@@ -802,8 +839,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
             name,status_layer = get_layer_name(shape_layer)
             # Rename the status layer and change the color
             if 'status' in name:
-                status_layer.colormap = status_colors[next_status]
-                status_layer.name = name.split('_')[0] +'_'+next_status 
+                status_layer.name = name.split('_')[0] +'_'+next_status
+                if COMPOSITE_MODE: 
+                    status_layer.data = generate_status_box(status_colors[next_status])
+                else:
+                    status_layer.colormap = status_colors[next_status]
             else:
                 pass
 
@@ -814,8 +854,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
             name,status_layer = get_layer_name(shape_layer)
             # Rename the status layer and change the color
             if 'status' in name:
-                status_layer.colormap = status_colors[next_status]
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                if COMPOSITE_MODE: 
+                    status_layer.data = generate_status_box(status_colors[next_status])
+                else:
+                    status_layer.colormap = status_colors[next_status]
             else:
                 pass
 
@@ -907,8 +950,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
                 cur_index = list(status_colors.keys()).index(cur_status)
                 next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
                 print(f'next status (shape_layer) is {next_status}')
-                status_layer.colormap = status_colors[next_status]
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                if COMPOSITE_MODE: 
+                    status_layer.data = generate_status_box(status_colors[next_status])
+                else:
+                    status_layer.colormap = status_colors[next_status]
             else:
                 pass
         
@@ -919,8 +965,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
             name,status_layer = get_layer_name(shape_layer)
             # Rename the status layer and change the color
             if 'status' in name:
-                status_layer.colormap = status_colors[next_status]
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                if COMPOSITE_MODE: 
+                    status_layer.data = generate_status_box(status_colors[next_status])
+                else:
+                    status_layer.colormap = status_colors[next_status]
             else:
                 pass
 
@@ -931,8 +980,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
             name,status_layer = get_layer_name(shape_layer)
             # Rename the status layer and change the color
             if 'status' in name:
-                status_layer.colormap = status_colors[next_status]
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                if COMPOSITE_MODE: 
+                    status_layer.data = generate_status_box(status_colors[next_status])
+                else:
+                    status_layer.colormap = status_colors[next_status]
             else:
                 pass
         @shape_layer.bind_key('b')
@@ -942,8 +994,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
             name,status_layer = get_layer_name(shape_layer)
             # Rename the status layer and change the color
             if 'status' in name:
-                status_layer.colormap = status_colors[next_status]
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                if COMPOSITE_MODE: 
+                    status_layer.data = generate_status_box(status_colors[next_status])
+                else:
+                    status_layer.colormap = status_colors[next_status]
             else:
                 pass
 
@@ -954,8 +1009,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
             name,status_layer = get_layer_name(shape_layer)
             # Rename the status layer and change the color
             if 'status' in name:
-                status_layer.colormap = status_colors[next_status]
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                if COMPOSITE_MODE: 
+                    status_layer.data = generate_status_box(status_colors[next_status])
+                else:
+                    status_layer.colormap = status_colors[next_status]
             else:
                 pass
 
@@ -1341,22 +1399,20 @@ def GUI_execute(preprocess_class):
     if "Composite" not in CHANNEL_ORDER: CHANNEL_ORDER.append("Composite")
     CHANNELS = []
     for pos,chn in enumerate(CHANNEL_ORDER):
-        print(f'enumerating {chn} and {pos} for {CHANNELS_STR}')
+        # print(f'enumerating {chn} and {pos} for {CHANNELS_STR}')
         exec(f"globals()['{chn}'] = {pos}") # Important to do this for ALL channels
         if chn in CHANNELS_STR:
-            print(f'IF triggered with {chn} and {pos}')
+            # print(f'IF triggered with {chn} and {pos}')
             exec(f"globals()['CHANNELS'].append({chn})")
-    print(f'GUI execute channels are {CHANNELS}')
+    # print(f'GUI execute channels are {CHANNELS}')
     ADJUSTED = copy.copy(CHANNELS)
+
     # fix_default_composite_adj()
 
     # for checkbox_name in CHANNELS_STR:   
     #     print(f'checkbox name is {checkbox_name} and type is {type(checkbox_name)}')
     #     exec(f"globals()[\'{checkbox_name+'_box'}\'].show()") # If doing this is wrong I don't want to be right
     main(preprocess_class)
-
-def GUI_execute_cheat():
-    main()
 
 def main(preprocess_class = None):
     #TODO do this in a function because this is ugly
@@ -1368,13 +1424,14 @@ def main(preprocess_class = None):
     
     if preprocess_class is not None: preprocess_class.status_label.setVisible(True)
     status = "Loading memory-mapped object..."
+
     _update_status(status)
 
     with tifffile.Timer(f'\nLoading pyramid from {qptiff}...\n'):
         try:
             print("NOT reading anything right now... trying to use a memory mapped object.")
             pyramid = tifffile.memmap(qptiff)
-            status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
+            status+='<font color="#7dbc39">  Done.</font><br> Parsing object data...'
             _update_status(status)
         except:
             status+='<font color="#f5551a">  Failed.</font><br> Attempting to load raw image, this will take a while ...'
@@ -1394,7 +1451,7 @@ def main(preprocess_class = None):
                     # firstLayer = pyramid[:,:,0]
                 else:
                     pass #firstLayer = pyramid[:,:,0]
-                status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
+                status+='<font color="#7dbc39">  Done.</font><br> Parsing object data...'
                 _update_status(status)
             except:
                 status+='<font color="#f5551a">  Failed.</font><br> Aborting startup, please contact Peter.'
@@ -1406,7 +1463,11 @@ def main(preprocess_class = None):
     # #       Literally  ~ 10GB difference
     global RAW_PYRAMID
     RAW_PYRAMID=pyramid
+    
     tumor_cell_XYs = extract_phenotype_xldata()
+    status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
+    _update_status(status)
+
     set_initial_adjustment_parameters() # set defaults: 1.0 gamma, 0 black in, 255 white in
     
     viewer = napari.Viewer(title='CTC Gallery')
@@ -1429,7 +1490,7 @@ def main(preprocess_class = None):
     note_text_entry.setPlaceholderText('Enter new note')
     note_text_entry.setFixedWidth(200)
     note_cell_entry.setPlaceholderText("Cell Id")
-    note_cell_entry.setFixedWidth(50)
+    note_cell_entry.setFixedWidth(100)
     # Pass pointer to widgets to function on button press
     note_button.pressed.connect(lambda: replace_note(note_cell_entry, note_text_entry))
 
@@ -1478,21 +1539,30 @@ def main(preprocess_class = None):
     # for widg in ALL_CUSTOM_WIDGETS.values():
     #     widg.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
 
+    
+
+    # Get rid of the crap on the left sidebar for a cleaner screen
+    viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
+    viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
+
+    print('Before')
+    print(type(viewer.window))
+
     all_boxes = []
     for marker_function in CHANNELS_STR:
         # Only make visible the chosen markers
         all_boxes.append(globals()[f'{marker_function}_box'])
         # exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
-    viewer.window.add_dock_widget(all_boxes,area='bottom')
+
+    status+='<font color="#7dbc39">  Done.</font><br> Goodbye' ;_update_status(status)
     sv_wrapper(viewer)
     tsv_wrapper(viewer)
     chn_key_wrapper(viewer)
-    # magicgui
-    # Get rid of the crap on the left sidebar for a cleaner screen
-    viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
-    viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
+    print('After')
+    print(type(viewer.window))
 
-    status+='<font color="#7dbc39">  Done.</font><br> Goodbye' ;_update_status(status)
+    viewer.window.add_dock_widget(all_boxes,area='bottom')
+
     if preprocess_class is not None: preprocess_class.close() # close other window
     napari.run()
 
