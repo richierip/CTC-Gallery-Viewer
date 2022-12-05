@@ -46,7 +46,7 @@ fluor_to_color = {}
 qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\auto_test.tif"
 OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
 # OBJECT_DATA = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\PMR_test_Results.csv"
-OFFSET = 90 # microns or pixels? Probably pixels
+PUNCHOUT_SIZE = 90 # microns or pixels? Probably pixels
 CELL_OFFSET= 0 # Saves the current number of cells shown. Useful when pulling 'next 10 cells' 
 CELL_LIMIT = 5 # How many cells will be shown in next batch
 PHENOTYPE = 'Tumor' #'CTC 488pos'
@@ -65,7 +65,7 @@ IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}; ADJUSTMENT_SETTINGS={};
 SAVED_NOTES={} ; STATUS_LIST={}; XY_STORE = [1,2,3]
 RAW_PYRAMID=None
 NOTES_WIDGET = None; ALL_CUSTOM_WIDGETS = {}
-COMPOSITE_MODE = False
+COMPOSITE_MODE = True # Start in composite mode
 
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
@@ -522,12 +522,13 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     if Mode==1 and COMPOSITE_MODE==False: return None
     elif Mode==2 and COMPOSITE_MODE==True: return None
 
-    # Hide the widgets to avoid crashing?
-    for widg in ALL_CUSTOM_WIDGETS.values():
-        widg.setVisible(False)
     # Save data to file from current set
     VIEWER.status = 'Saving data to file...'
     _save_validation(VIEWER, Mode)
+
+    # Hide the widgets to avoid crashing?
+    for widg in ALL_CUSTOM_WIDGETS.values():
+        widg.setVisible(False)
 
     print("|||| XY STORE INFO ||||")
     print(f"length is {len(XY_STORE)} and type is {type(XY_STORE)}")
@@ -537,14 +538,14 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
         # VIEWER.layers.clear()
         concurrent_clear(VIEWER)
         #data = extract_phenotype_xldata() # Don't need this since it is saved now
-        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(OFFSET/2), show_all=True, new_batch=False)
+        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_enabled=False, new_batch=False)
     elif Mode ==2: # change to composite only
         COMPOSITE_MODE = True
         print(f'\nAttempting to clear')
         # VIEWER.layers.clear()
         concurrent_clear(VIEWER)
         #data = extract_phenotype_xldata() # Don't need this since it is saved now
-        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(OFFSET/2), show_all=False, new_batch=False)
+        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_enabled=True, new_batch=False)
     else:
         raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {Mode}. Must be 1 or 2.")
         # Perform adjustments before exiting function
@@ -552,6 +553,8 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     reuse_gamma() # might not need to do both of these... One is enough?
     for widg in ALL_CUSTOM_WIDGETS.values(): # restore widgets
         widg.setVisible(True)
+
+    set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
     return None
 
 # @magicgui(call_button='Load Cells',
@@ -560,8 +563,6 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
 #         Amount={"widget_type": "SpinBox", "value":15,
 #         "max":1000,"min":5})
 def show_next_cell_group(next_cell_rb, previous_cell_rb, amount_sp):
-    for widg in ALL_CUSTOM_WIDGETS.values():
-        widg.setVisible(False)
     def _save_validation(VIEWER,numcells):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
@@ -612,6 +613,11 @@ def show_next_cell_group(next_cell_rb, previous_cell_rb, amount_sp):
     if not _save_validation(VIEWER, Amount):
         print(f'Could not save...')
         return None
+    
+    # might not be necessary. Was put here in an attempt to avoid weird GUI element deletion glitch
+    # Must come after attempting to save, otherwise widgets vanish when an error occurs...
+    for widg in ALL_CUSTOM_WIDGETS.values():
+        widg.setVisible(False)
 
     CELL_OFFSET = CELL_LIMIT 
     CELL_LIMIT = int(Amount)
@@ -623,17 +629,18 @@ def show_next_cell_group(next_cell_rb, previous_cell_rb, amount_sp):
             VIEWER.status="Can't load cells: out of bounds error."
         else:
             VIEWER.layers.clear()
-            add_layers(VIEWER,RAW_PYRAMID, xydata, int(OFFSET/2), show_all=False)
+            add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_enabled=True)
     else:
         xydata = extract_phenotype_xldata(change_startID=True,direction=Direction)
         if xydata is False:
             VIEWER.status="Can't load cells: out of bounds error."
         else:
             VIEWER.layers.clear()
-            add_layers(VIEWER,RAW_PYRAMID, xydata, int(OFFSET/2), show_all=True)
+            add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_enabled=False)
         # Perform adjustments before exiting function
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
+    set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
     for widg in ALL_CUSTOM_WIDGETS.values():
         widg.setVisible(True)
     return None
@@ -678,14 +685,14 @@ def set_notes_label(display_note_widget, ID):
 #   for the ctc cells. Gallery mode might end up being a pain for downstream.
 #   Counterpoint - how to apply filters to only some channels if they are in same image?
 #   Counterpoint to counterpoint - never get rid of numpy arrays and remake whole image as needed. 
-def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
+def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, new_batch=True):
     print(f'\n---------\n \n Entering the add_layers function')
     print(f"pyramid shape is {pyramid.shape}")
     # Make the color bar that appears to the left of the composite image
     status_colors = {"unseen":"gray", "needs review":"bop orange", "confirmed":"green", "rejected":"red" }
 
     # Choice depends on whether we want to be in composite only mode or not
-    if show_all:
+    if not composite_enabled:
         viewer.grid.stride = 1
     else:
         viewer.grid.stride = 2
@@ -721,12 +728,12 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
 
         corner_box_size = 8
 
-        top_or_bottom = [color_tuple, ] *(OFFSET+1)
+        top_or_bottom = [color_tuple, ] *(PUNCHOUT_SIZE+1)
         x = np.array([[color_tuple, (0,0,0,0), color_tuple]])
-        y = np.repeat(x,[1,OFFSET-1,1],axis=1)
-        mid = np.repeat(y,OFFSET-(corner_box_size), axis=0)
+        y = np.repeat(x,[1,PUNCHOUT_SIZE-1,1],axis=1)
+        mid = np.repeat(y,PUNCHOUT_SIZE-(corner_box_size), axis=0)
 
-        z = np.repeat(x,[corner_box_size,OFFSET-(corner_box_size),1],axis=1)
+        z = np.repeat(x,[corner_box_size,PUNCHOUT_SIZE-(corner_box_size),1],axis=1)
         above_mid = np.repeat(z,corner_box_size-1, axis=0)
         top = np.append([top_or_bottom],above_mid,axis=0)
         # z = np.repeat([np.repeat([0],12)],2,axis=0)
@@ -734,11 +741,11 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
         return np.append(xy,[top_or_bottom],axis=0)
 
     def add_status_bar(viewer, name, status = 'unseen'):
-        if show_all:
+        if not composite_enabled:
             # Make a strip - will display at the left of each row of channels (one row per cell)
             x = np.array([[0,255,0]])
-            y = np.repeat(x,[OFFSET-8,7,1],axis=1)
-            overlay = np.repeat(y,OFFSET,axis=0)
+            y = np.repeat(x,[PUNCHOUT_SIZE-8,7,1],axis=1)
+            overlay = np.repeat(y,PUNCHOUT_SIZE,axis=0)
             status_layer = viewer.add_image(overlay, name = f'{name}_{status}', colormap = status_colors[status])
         else:
             # Create a small box - will display in the top left corner above each composite image
@@ -1056,7 +1063,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
                 cell_name = f'Cell {cell_id} {fluor}'
 
                 # Shortcut if we have seen the cell before and done the work
-                if show_all and cell_name in IMAGE_DATA_ADJUSTED:
+                if not composite_enabled and cell_name in IMAGE_DATA_ADJUSTED:
                     # Have to apply a 255 multiplier since it's saved with a range of 0-1 (used for the composite calculations)
                     add_layer(viewer,IMAGE_DATA_ADJUSTED[cell_name]*255, cell_name, colormap= cell_colors[i])
                     continue # go on to the next
@@ -1070,7 +1077,7 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
                 cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
                 print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}')
 
-                if show_all: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
+                if not composite_enabled: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
                     add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
                 
                 # normalize to 1.0
@@ -1180,6 +1187,12 @@ def add_layers(viewer,pyramid, cells, offset, show_all=True, new_batch=True):
     return True
 
 ######------------------------- Misc + Viewer keybindings ---------------------######
+
+#TODO make a button to do this as well?
+def set_viewer_to_neutral_zoom(viewer):
+    viewer.camera.center = (300,250) # these values seem to work best
+    viewer.camera.zoom = 1.3
+
 
 def add_custom_colors():
     for colormap in cell_colors:
@@ -1383,12 +1396,12 @@ def replace_note(cell_widget, note_widget):
 ''' Reset globals and proceed to main '''
 def GUI_execute(preprocess_class):
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
-    global cell_colors, qptiff, OFFSET, CELL_LIMIT, CHANNELS_STR, CHANNEL_ORDER
+    global cell_colors, qptiff, PUNCHOUT_SIZE, CELL_LIMIT, CHANNELS_STR, CHANNEL_ORDER
     global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, CELL_ID_START
 
     cell_colors = userInfo.cell_colors
     qptiff = userInfo.qptiff
-    OFFSET = userInfo.imageSize
+    PUNCHOUT_SIZE = userInfo.imageSize
     PHENOTYPE = userInfo.phenotype
     CELL_ID_START = userInfo.cell_ID_start
     CELL_LIMIT = userInfo.cell_count
@@ -1475,7 +1488,7 @@ def main(preprocess_class = None):
     VIEWER = viewer
     NOTES_WIDGET = QLabel('Placeholder note'); NOTES_WIDGET.setAlignment(Qt.AlignCenter)
     print(f'Notes widget is {NOTES_WIDGET}\n type is {type(NOTES_WIDGET)}')
-    add_layers(viewer,pyramid,tumor_cell_XYs, int(OFFSET/2))
+    add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
         # Perform adjustments before exiting function
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
@@ -1503,8 +1516,8 @@ def main(preprocess_class = None):
     notes_container = viewer.window.add_dock_widget([NOTES_WIDGET,note_text_entry, note_cell_entry, note_button], name = 'Take notes', area = 'right')
     batch_container = viewer.window.add_dock_widget([next_cell_rb,previous_cell_rb, next_batch_amt, next_batch_button], name = 'Change Batch', area = 'right')
 
-    all_channels_rb = QRadioButton("Show All Channels"); all_channels_rb.setChecked(True)
-    composite_only_rb = QRadioButton("Composite Mode")
+    all_channels_rb = QRadioButton("Show All Channels")
+    composite_only_rb = QRadioButton("Composite Mode"); composite_only_rb.setChecked(True) # Start in composite mode
     comp_group = QButtonGroup(); comp_group.addButton(composite_only_rb); comp_group.addButton(all_channels_rb)
     switch_mode_button = QPushButton("Change Mode")
     switch_mode_button.pressed.connect(lambda: toggle_composite_viewstatus(all_channels_rb,composite_only_rb))
@@ -1539,8 +1552,6 @@ def main(preprocess_class = None):
     # for widg in ALL_CUSTOM_WIDGETS.values():
     #     widg.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
 
-    
-
     # Get rid of the crap on the left sidebar for a cleaner screen
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
     viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
@@ -1560,6 +1571,8 @@ def main(preprocess_class = None):
     chn_key_wrapper(viewer)
     print('After')
     print(type(viewer.window))
+    viewer.grid.stride = 2 # start in composite mode
+    set_viewer_to_neutral_zoom(viewer) # Fix zoomed out issue
 
     viewer.window.add_dock_widget(all_boxes,area='bottom')
 
