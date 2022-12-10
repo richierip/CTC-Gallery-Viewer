@@ -294,6 +294,7 @@ def reuse_gamma():
     # print(f'\nDumping adjustment dict... \n {ADJUSTMENT_SETTINGS}\n')
     # print(f'ADJUSTED is {ADJUSTED}')
     for ctclayer in VIEWER.layers:
+        if ctclayer.name == 'Batch Name': continue
         # print(f'layername is {ctclayer}')
         # no longer elif: want to do composite and all checked channels at the same time
         if validate_adjustment(ctclayer):
@@ -308,6 +309,7 @@ def reuse_gamma():
 
 def reuse_contrast_limits():
     for layer in VIEWER.layers:
+        if layer.name == 'Batch Name': continue
         if validate_adjustment(layer):
             name = layer.name.split()[2]
             layer.contrast_limits = (ADJUSTMENT_SETTINGS[name+' black-in'], ADJUSTMENT_SETTINGS[name+' white-in'])
@@ -326,6 +328,7 @@ def adjust_gamma(viewer, gamma):
         _update_dictionary(fluorname,gamma)
 
     for ctclayer in viewer.layers:
+        if ctclayer.name == 'Batch Name': continue
         # no longer elif: want to do composite and all checked channels at the same time
         if validate_adjustment(ctclayer):
             ctclayer.gamma = gamma
@@ -351,6 +354,7 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
         _update_dictionary(fluorname,white_in)
     
     for ctclayer in VIEWER.layers:
+        if ctclayer.name == 'Batch Name': continue
         # no longer elif: want to do composite and all checked channels at the same time
         if validate_adjustment(ctclayer):
             ctclayer.contrast_limits = (ctclayer.contrast_limits[0], white_in)
@@ -371,6 +375,7 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         _update_dictionary(fluorname,black_in)
 
     for ctclayer in VIEWER.layers:
+        if ctclayer.name == 'Batch Name': continue
         # no longer elif: want to do composite and all checked channels at the same time
         if validate_adjustment(ctclayer):
             ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
@@ -406,6 +411,7 @@ def dynamic_checkbox_creator(checkbox_name, setChecked = True):
         
         # This will show/hide the appropriate layers in the composite image when checking the box
         for layer in VIEWER.layers:
+            if layer.name == 'Batch Name': continue
             if layer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
                 adjust_composite_gamma(layer, gamma=0.5, keepSettingsTheSame = True)
             
@@ -671,14 +677,17 @@ def sort_by_intensity():
     pass
 
 def set_notes_label(display_note_widget, ID):
-    note = str(SAVED_NOTES[ID])
+    try:
+        note = str(SAVED_NOTES[ID])
+    except KeyError: # in case the name was off
+        return False
     prefix = f'CID: <font color="#f5551a">{ID}</font>'
     if note == '-' or note == '' or note is None: 
         note = prefix
     else:
         note = prefix +'<br>'+ f'<font size="5pt">{note}</font>'
     display_note_widget.setText(note)
-    return None
+    return True
 ######------------------------- Image loading and processing functions ---------------------######
 
 #TODO consider combining numpy arrays before adding layers? So that we create ONE image, and have ONE layer
@@ -757,6 +766,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             coords = np.round(data_coordinates).astype(int)
             val = None
             for img in VIEWER.layers:
+                if img.name == 'Batch Name': continue
                 data_coordinates = img.world_to_data(pos)
                 val = img.get_value(data_coordinates)
                 if val is not None:
@@ -784,6 +794,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
             # Find this layers corresponding status layer
             for candidate in VIEWER.layers:
+                if candidate.name == 'Batch Name': continue
                 cellnum = candidate.name.split()[1]
                 if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
                     status_layer = candidate
@@ -913,6 +924,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             coords = np.round(data_coordinates).astype(int)
             val = None
             for img in VIEWER.layers:
+                if img.name == 'Batch Name': continue
+
                 data_coordinates = img.world_to_data(pos)
                 val = img.get_value(data_coordinates)
                 if val is not None:
@@ -940,6 +953,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
             # Find this layers corresponding status layer
             for candidate in VIEWER.layers:
+                if candidate.name == 'Batch Name': continue
+
                 cellnum = candidate.name.split()[1]
                 if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
                     status_layer = candidate
@@ -1184,6 +1199,15 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
         # if len(cells) == 5:
         #     np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
+    
+    #TODO make a batch label... 
+    # add polygon (just for text label)
+    # text = {'string': 'Batch name goes here', 'anchor': 'center', 'size': 8,'color': 'white'}
+    # shapes_layer1 = viewer.add_shapes([[0,0], [40,0], [40,40],[0,40]], shape_type = 'polygon',
+    #                 edge_color = 'green', face_color='transparent',text=text, name='Batch Name') 
+    # shapes_layer2 = viewer.add_shapes([[0,0], [40,0], [40,40],[0,40]], shape_type = 'polygon',
+    #                 edge_color = 'green', face_color='transparent',text=text, name='Batch Name') 
+
     return True
 
 ######------------------------- Misc + Viewer keybindings ---------------------######
@@ -1201,7 +1225,7 @@ def add_custom_colors():
         exec(f'my_map = custom_maps.create_{colormap}_lut()')
         exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
         exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
-    return None
+    return True
 
 def sv_wrapper(viewer):
     @viewer.bind_key('s')
@@ -1575,10 +1599,8 @@ def main(preprocess_class = None):
     set_viewer_to_neutral_zoom(viewer) # Fix zoomed out issue
 
     viewer.window.add_dock_widget(all_boxes,area='bottom')
-
     if preprocess_class is not None: preprocess_class.close() # close other window
     napari.run()
-
 # Main should work now using the defaults specified at the top of this script in the global variable space
 if __name__ == '__main__':
     main()
