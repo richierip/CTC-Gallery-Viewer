@@ -5,9 +5,11 @@ Peter Richieri
 '''
 
 import tifffile
+import rasterio
+from rasterio.windows import Window
 import napari
 from napari.types import ImageData
-from napari.qt.threading import thread_worker # Needed to add / remove a lot of layers without freezing
+# from napari.qt.threading import thread_worker # Needed to add / remove a lot of layers without freezing
 from magicgui import magicgui, magic_factory
 from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton, QRadioButton, QSpinBox, QButtonGroup, QSizePolicy
 from PyQt5.QtCore import Qt
@@ -26,6 +28,8 @@ import custom_maps
 # norm = plt.Normalize()
 import copy
 import time
+import warnings
+warnings.filterwarnings("ignore")
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
@@ -66,6 +70,7 @@ SAVED_NOTES={} ; STATUS_LIST={}; XY_STORE = [1,2,3]
 RAW_PYRAMID=None
 NOTES_WIDGET = None; ALL_CUSTOM_WIDGETS = {}
 COMPOSITE_MODE = True # Start in composite mode
+RASTERS = None
 
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
@@ -1057,13 +1062,18 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         exec(f'rgb = TEMP(SC_DATA)', globals(), loc)
         return loc['rgb']
     
-    print(f'Adding {len(cells)} cells to viewer...')
+    print(f'Adding {len(cells)} cells to viewer... Channels are {CHANNELS} // {CHANNELS_STR}')
     while bool(cells): # coords left
         print(f'Next round of while. Still {len(cells)} cells left')
         cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; cell_status = retrieve_status(cell_id,cell)
         composite = []
         # add the rest of the layers to the viewer
-        for i in range(pyramid.shape[2]): # loop through channels
+        if RASTERS is not None:
+            # Raster channels for qptiffs are saved as subdatasets of the opened raster object
+            num_channels = len(RASTERS) 
+        else:
+            num_channels = pyramid.shape[2] # Data is [X,Y,C]
+        for i in range(num_channels): # loop through channels
             if i in CHANNELS:
                 # name cell layer
                 #TODO this should REALLY be a dictionary lookup...
@@ -1089,7 +1099,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 # This is dumb - do it somewhere else
                 if cell_colors[i] == 'pink': cell_colors[i] = 'Pink'
                 global fluor_to_color; fluor_to_color[fluor] = cell_colors[i]
-                cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
+                # print(f'Testing if raster used: {RASTERS}') # YES can see subdatasets.
+                if RASTERS is not None:
+                    with rasterio.open(RASTERS[i]) as channel:
+                        cell_punchout_raw = channel.read(1,window=Window(cell_x-offset,cell_y-offset, offset*2,offset*2)).astype('float64')
+                else:
+                    cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
                 print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}')
 
                 if not composite_enabled: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
@@ -1146,7 +1161,6 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             add_layer(viewer, IMAGE_DATA_ADJUSTED[cell_name], cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
             add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
             continue
-
         composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
         # print(f'shape before summing is {composite.shape}')
         # print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
@@ -1458,15 +1472,36 @@ def main(preprocess_class = None):
         if preprocess_class is not None:
             preprocess_class.status_label.setText(status)
             preprocess_class.app.processEvents()
-    
+    global RAW_PYRAMID, RASTERS, VIEWER,NOTES_WIDGET, ALL_CUSTOM_WIDGETS
     if preprocess_class is not None: preprocess_class.status_label.setVisible(True)
-    status = "Loading memory-mapped object..."
-
+    status = "Loading image as raster..."
     _update_status(status)
 
-    with tifffile.Timer(f'\nLoading pyramid from {qptiff}...\n'):
+    start_time = time.time()
+
+    print(f'\nLoading pyramid from {qptiff}...\n')
+    try:
+        print("Try using rasterio first.")
+        with rasterio.open(qptiff) as src:
+            pyramid = src
+            raw_subdata = copy.copy(src.subdatasets)
+        # Remove overview pic and label pic from subdataset. Some other crap at the end too?  
+        #   They happen to be in the middle of the set, and aren't really well labelled.
+        to_remove = []
+        for i,sds in enumerate(raw_subdata):
+            # These are the IDS of the crap data.
+            if sds.lstrip('GTIFF_DIR:').startswith('50') or sds.lstrip('GTIFF_DIR:').startswith('51') or sds.lstrip('GTIFF_DIR:').startswith('9'):  
+                to_remove.append(sds)  
+        for sds in to_remove:
+            raw_subdata.remove(sds)
+        RASTERS = raw_subdata
+
+        status+='<font color="#7dbc39">  Done.</font><br> Parsing object data...'
+        _update_status(status)
+    except:
+        status+='<font color="#f5551a">  Failed.</font><br> Attempting to load memory-mapped object...'
+        _update_status(status)
         try:
-            print("NOT reading anything right now... trying to use a memory mapped object.")
             pyramid = tifffile.memmap(qptiff)
             status+='<font color="#7dbc39">  Done.</font><br> Parsing object data...'
             _update_status(status)
@@ -1494,11 +1529,13 @@ def main(preprocess_class = None):
                 status+='<font color="#f5551a">  Failed.</font><br> Aborting startup, please contact Peter.'
                 _update_status(status)
                 raise Exception("There was a problem reading the image data. Expecting a regular or memory-mapped tif/qptiff. Got something else.")
-        print('... completed in ', end='')
+    finally:
+        end_time = time.time()
+        print(f'... completed in {end_time-start_time} seconds')
 
     # #TODO think of something better than this. It tanks RAM usage to store this thing
     # #       Literally  ~ 10GB difference
-    global RAW_PYRAMID
+    
     RAW_PYRAMID=pyramid
     
     tumor_cell_XYs = extract_phenotype_xldata()
@@ -1508,7 +1545,6 @@ def main(preprocess_class = None):
     set_initial_adjustment_parameters() # set defaults: 1.0 gamma, 0 black in, 255 white in
     
     viewer = napari.Viewer(title='CTC Gallery')
-    global VIEWER,NOTES_WIDGET
     VIEWER = viewer
     NOTES_WIDGET = QLabel('Placeholder note'); NOTES_WIDGET.setAlignment(Qt.AlignCenter)
     print(f'Notes widget is {NOTES_WIDGET}\n type is {type(NOTES_WIDGET)}')
@@ -1601,6 +1637,10 @@ def main(preprocess_class = None):
     viewer.window.add_dock_widget(all_boxes,area='bottom')
     if preprocess_class is not None: preprocess_class.close() # close other window
     napari.run()
+    # close image file
+    if RASTERS is not None:
+        print('Not sure if we have to close this file... the "with" statement should handle it.')
+        RAW_PYRAMID.close()
 # Main should work now using the defaults specified at the top of this script in the global variable space
 if __name__ == '__main__':
     main()
