@@ -695,7 +695,16 @@ def set_notes_label(display_note_widget, ID):
         note = str(SAVED_NOTES[ID])
     except KeyError: # in case the name was off
         return False
-    prefix = f'CID: <font color="#f5551a">{ID}</font>'
+    status = STATUS_LIST[int(ID)]
+    if status == 'confirmed':
+        idcolor = '#00ff00'
+    elif status == 'rejected':
+        idcolor = '#ff0000'
+    elif status == 'needs review':
+        idcolor = '#ffa000'
+    else:
+        idcolor = '#ffffff'
+    prefix = f'CID: <font color="{idcolor}">{ID}</font>'
     if note == '-' or note == '' or note is None: 
         note = prefix
     else:
@@ -831,6 +840,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
                 print(f'next status (shape_layer) is {next_status}')
                 status_layer.name = name.split('_')[0] +'_'+next_status
+                STATUS_LIST[int(name.split()[1])] = next_status
                 if COMPOSITE_MODE: 
                     status_layer.data = generate_status_box(status_colors[next_status])
                 else:
@@ -847,6 +857,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             # Rename the status layer and change the color
             if 'status' in name:
                 status_layer.name = name.split('_')[0] +'_'+next_status
+                STATUS_LIST[int(name.split()[1])] = next_status
                 if COMPOSITE_MODE: 
                     status_layer.data = generate_status_box(status_colors[next_status])
                 else:
@@ -862,6 +873,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             # Rename the status layer and change the color
             if 'status' in name:
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                STATUS_LIST[int(name.split()[1])] = next_status
                 if COMPOSITE_MODE: 
                     status_layer.data = generate_status_box(status_colors[next_status])
                 else:
@@ -876,6 +888,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             # Rename the status layer and change the color
             if 'status' in name:
                 status_layer.name = name.split('_')[0] +'_'+next_status
+                STATUS_LIST[int(name.split()[1])] = next_status
                 if COMPOSITE_MODE: 
                     status_layer.data = generate_status_box(status_colors[next_status])
                 else:
@@ -891,6 +904,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             # Rename the status layer and change the color
             if 'status' in name:
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                STATUS_LIST[int(name.split()[1])] = next_status
                 if COMPOSITE_MODE: 
                     status_layer.data = generate_status_box(status_colors[next_status])
                 else:
@@ -991,6 +1005,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
                 print(f'next status (shape_layer) is {next_status}')
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                STATUS_LIST[int(name.split()[1])] = next_status
                 if COMPOSITE_MODE: 
                     status_layer.data = generate_status_box(status_colors[next_status])
                 else:
@@ -1006,6 +1021,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             # Rename the status layer and change the color
             if 'status' in name:
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                STATUS_LIST[int(name.split()[1])] = next_status
                 if COMPOSITE_MODE: 
                     status_layer.data = generate_status_box(status_colors[next_status])
                 else:
@@ -1021,6 +1037,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             # Rename the status layer and change the color
             if 'status' in name:
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                STATUS_LIST[int(name.split()[1])] = next_status
                 if COMPOSITE_MODE: 
                     status_layer.data = generate_status_box(status_colors[next_status])
                 else:
@@ -1035,6 +1052,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             # Rename the status layer and change the color
             if 'status' in name:
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                STATUS_LIST[int(name.split()[1])] = next_status
                 if COMPOSITE_MODE: 
                     status_layer.data = generate_status_box(status_colors[next_status])
                 else:
@@ -1050,6 +1068,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             # Rename the status layer and change the color
             if 'status' in name:
                 status_layer.name = name.split('_')[0] +'_'+next_status 
+                STATUS_LIST[int(name.split()[1])] = next_status
                 if COMPOSITE_MODE: 
                     status_layer.data = generate_status_box(status_colors[next_status])
                 else:
