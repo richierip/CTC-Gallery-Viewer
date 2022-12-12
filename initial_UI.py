@@ -15,10 +15,12 @@ import time
 import store_and_load
 from galleryViewer import GUI_execute
 import ctypes
-import threading
+import threading # no longer needed in all likelihood
 import logging
 from datetime import datetime
 import os
+import warnings
+warnings.filterwarnings("ignore")
 
 VERSION_NUMBER = '1.0'
 FONT_SIZE = 12

@@ -28,8 +28,6 @@ import custom_maps
 # norm = plt.Normalize()
 import copy
 import time
-import warnings
-warnings.filterwarnings("ignore")
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
@@ -506,6 +504,15 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[cell_id]
             except:
                 print("There's an issue... ")
+            # Now do it for the saved cache
+            try:
+                global XY_STORE, STATUS_LIST
+                for i,row in enumerate(XY_STORE):
+                    if str(row[2]) == cell_id: 
+                        XY_STORE[i][3] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
+                        STATUS_LIST[int(cell_id)] = status
+            except:
+                print("XY_Store saving issue.")
         try:
             VIEWER.status = 'Saving ...'
             hdata.to_csv(OBJECT_DATA, index=False)
@@ -530,6 +537,7 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
 
     # Do nothing in these cases
     global COMPOSITE_MODE # needed for changes later 
+    # print(f'Mode {Mode} and Composite? {COMPOSITE_MODE}')
     if Mode==1 and COMPOSITE_MODE==False: return None
     elif Mode==2 and COMPOSITE_MODE==True: return None
 
@@ -546,15 +554,15 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     if Mode == 1: # change to Show All
         COMPOSITE_MODE = False
         print(f'\nAttempting to clear')
-        # VIEWER.layers.clear()
-        concurrent_clear(VIEWER)
-        #data = extract_phenotype_xldata() # Don't need this since it is saved now
+        VIEWER.layers.clear()
+        # concurrent_clear(VIEWER)
+        # data = extract_phenotype_xldata() # Don't need this since it is saved now
         add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_enabled=False, new_batch=False)
     elif Mode ==2: # change to composite only
         COMPOSITE_MODE = True
         print(f'\nAttempting to clear')
-        # VIEWER.layers.clear()
-        concurrent_clear(VIEWER)
+        VIEWER.layers.clear()
+        # concurrent_clear(VIEWER)
         #data = extract_phenotype_xldata() # Don't need this since it is saved now
         add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_enabled=True, new_batch=False)
     else:
@@ -641,6 +649,7 @@ def show_next_cell_group(next_cell_rb, previous_cell_rb, amount_sp):
         else:
             VIEWER.layers.clear()
             add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_enabled=True)
+            
     else:
         xydata = extract_phenotype_xldata(change_startID=True,direction=Direction)
         if xydata is False:
@@ -728,8 +737,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             STATUS_LIST[cell_id] = status
             return status
         else:
-            return STATUS_LIST[cell_id]
-
+            # Just grab it because it's there already
+            try:
+                return STATUS_LIST[cell_id]
+            except:
+                raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {STATUS_LIST}")
+                
     def generate_status_box(color):
         if color == 'red':
             color_tuple = (255,0,0,255)
@@ -1134,6 +1147,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
 
                 # #TODO Gamma correct right here since there's a bug that doesn't allow passing to the viewer
                 # cell_punchout_raw = np.asarray([x**0.5 for x in cell_punchout_raw])
+                # print(f'\n\n Type before color mapping is {cell_punchout_raw.dtype}, shape is {cell_punchout_raw.shape}|| there are {len(np.unique(cell_punchout_raw))} unique elements. Min/max is {np.min(cell_punchout_raw)} |{np.max(cell_punchout_raw)}\n\n')
                 cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
 
 
@@ -1230,7 +1244,6 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
 def set_viewer_to_neutral_zoom(viewer):
     viewer.camera.center = (300,250) # these values seem to work best
     viewer.camera.zoom = 1.3
-
 
 def add_custom_colors():
     for colormap in cell_colors:
