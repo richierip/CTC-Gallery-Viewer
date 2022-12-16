@@ -11,7 +11,7 @@ import napari
 from napari.types import ImageData
 # from napari.qt.threading import thread_worker # Needed to add / remove a lot of layers without freezing
 from magicgui import magicgui, magic_factory
-from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton, QRadioButton, QSpinBox, QButtonGroup, QSizePolicy
+from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton, QRadioButton, QSpinBox, QButtonGroup, QSizePolicy, QComboBox
 from PyQt5.QtCore import Qt
 import numpy as np
 import pandas as pd
@@ -49,10 +49,9 @@ qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\auto_test.tif"
 OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
 # OBJECT_DATA = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\PMR_test_Results.csv"
 PUNCHOUT_SIZE = 90 # microns or pixels? Probably pixels
-CELL_OFFSET= 0 # Saves the current number of cells shown. Useful when pulling 'next 10 cells' 
-CELL_LIMIT = 5 # How many cells will be shown in next batch
+PAGE_SIZE = 15 # How many cells will be shown in next page
+SPECIFIC_CELL = None # Will be an int if the user wants to load the page with that cell
 PHENOTYPE = 'Tumor' #'CTC 488pos'
-CELL_ID_START = 550 # debug?
 DAPI = 0; OPAL480 = 3; OPAL520 = 6; OPAL570 = 1; OPAL620 = 4; OPAL690 = 2; OPAL780 = 5; AF=7; Composite = 8
 # CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
 CHANNELS_STR = ["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
@@ -297,7 +296,7 @@ def reuse_gamma():
     # print(f'\nDumping adjustment dict... \n {ADJUSTMENT_SETTINGS}\n')
     # print(f'ADJUSTED is {ADJUSTED}')
     for ctclayer in VIEWER.layers:
-        if ctclayer.name == 'Batch Name': continue
+        if ctclayer.name == 'Page Name': continue
         # print(f'layername is {ctclayer}')
         # no longer elif: want to do composite and all checked channels at the same time
         if validate_adjustment(ctclayer):
@@ -312,7 +311,7 @@ def reuse_gamma():
 
 def reuse_contrast_limits():
     for layer in VIEWER.layers:
-        if layer.name == 'Batch Name': continue
+        if layer.name == 'Page Name': continue
         if validate_adjustment(layer):
             name = layer.name.split()[2]
             layer.contrast_limits = (ADJUSTMENT_SETTINGS[name+' black-in'], ADJUSTMENT_SETTINGS[name+' white-in'])
@@ -325,13 +324,13 @@ def adjust_gamma(viewer, gamma):
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' gamma'] = val
     # This allows the function to be called to reuse the same settings instead of updating them
-    #   useful for keeping settings when loading next batch or switching modes. 
+    #   useful for keeping settings when loading next page or switching modes. 
     for fluor in ADJUSTED:
         fluorname = CHANNEL_ORDER[fluor].lstrip('OPAL')
         _update_dictionary(fluorname,gamma)
 
     for ctclayer in viewer.layers:
-        if ctclayer.name == 'Batch Name': continue
+        if ctclayer.name == 'Page Name': continue
         # no longer elif: want to do composite and all checked channels at the same time
         if validate_adjustment(ctclayer):
             ctclayer.gamma = gamma
@@ -357,7 +356,7 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
         _update_dictionary(fluorname,white_in)
     
     for ctclayer in VIEWER.layers:
-        if ctclayer.name == 'Batch Name': continue
+        if ctclayer.name == 'Page Name': continue
         # no longer elif: want to do composite and all checked channels at the same time
         if validate_adjustment(ctclayer):
             ctclayer.contrast_limits = (ctclayer.contrast_limits[0], white_in)
@@ -378,7 +377,7 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         _update_dictionary(fluorname,black_in)
 
     for ctclayer in VIEWER.layers:
-        if ctclayer.name == 'Batch Name': continue
+        if ctclayer.name == 'Page Name': continue
         # no longer elif: want to do composite and all checked channels at the same time
         if validate_adjustment(ctclayer):
             ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
@@ -414,7 +413,7 @@ def dynamic_checkbox_creator(checkbox_name, setChecked = True):
         
         # This will show/hide the appropriate layers in the composite image when checking the box
         for layer in VIEWER.layers:
-            if layer.name == 'Batch Name': continue
+            if layer.name == 'Page Name': continue
             if layer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
                 adjust_composite_gamma(layer, gamma=0.5, keepSettingsTheSame = True)
             
@@ -557,14 +556,14 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
         VIEWER.layers.clear()
         # concurrent_clear(VIEWER)
         # data = extract_phenotype_xldata() # Don't need this since it is saved now
-        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_enabled=False, new_batch=False)
+        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_enabled=False, new_page=False)
     elif Mode ==2: # change to composite only
         COMPOSITE_MODE = True
         print(f'\nAttempting to clear')
         VIEWER.layers.clear()
         # concurrent_clear(VIEWER)
         #data = extract_phenotype_xldata() # Don't need this since it is saved now
-        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_enabled=True, new_batch=False)
+        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_enabled=True, new_page=False)
     else:
         raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {Mode}. Must be 1 or 2.")
         # Perform adjustments before exiting function
@@ -581,7 +580,7 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
 #         "choices": [("Next", 'fwd'), ("Previous", 'bkwd')]},
 #         Amount={"widget_type": "SpinBox", "value":15,
 #         "max":1000,"min":5})
-def show_next_cell_group(next_cell_rb, previous_cell_rb, amount_sp):
+def show_next_cell_group(page_cb_widget, single_cell_lineEdit):
     def _save_validation(VIEWER,numcells):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
@@ -622,14 +621,14 @@ def show_next_cell_group(next_cell_rb, previous_cell_rb, amount_sp):
             # OBJECT_DATA,sheet_name='Exported from gallery viewer')
         VIEWER.status = 'Done saving!'
     # Take note of new starting point
-    global CELL_ID_START, CELL_LIMIT, CELL_OFFSET
-    if next_cell_rb.isChecked(): Direction = 'fwd'
-    else: Direction = 'bkwd'
-    Amount = amount_sp.value()
-    print(f'\nDebug prints. Spinbox reads {Amount}, type {type(Amount)}')
+    global PAGE_SIZE
+    page_number = int(page_cb_widget.currentText().split()[-1])
+    cell_choice = single_cell_lineEdit.text()
+    if cell_choice == '': cell_choice = None
 
     # Save data to file from current set
-    if not _save_validation(VIEWER, Amount):
+    #TODO Fix amount field
+    if not _save_validation(VIEWER, PAGE_SIZE):
         print(f'Could not save...')
         return None
     
@@ -638,12 +637,10 @@ def show_next_cell_group(next_cell_rb, previous_cell_rb, amount_sp):
     for widg in ALL_CUSTOM_WIDGETS.values():
         widg.setVisible(False)
 
-    CELL_OFFSET = CELL_LIMIT 
-    CELL_LIMIT = int(Amount)
-    VIEWER.grid.shape = (CELL_LIMIT, len(CHANNELS)+1)
+    VIEWER.grid.shape = (PAGE_SIZE, len(CHANNELS)+1)
     # Load into same mode as the current
     if COMPOSITE_MODE:
-        xydata = extract_phenotype_xldata(change_startID=True,direction=Direction)
+        xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice)
         if xydata is False:
             VIEWER.status="Can't load cells: out of bounds error."
         else:
@@ -651,13 +648,15 @@ def show_next_cell_group(next_cell_rb, previous_cell_rb, amount_sp):
             add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_enabled=True)
             
     else:
-        xydata = extract_phenotype_xldata(change_startID=True,direction=Direction)
+        xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice)
         if xydata is False:
             VIEWER.status="Can't load cells: out of bounds error."
         else:
             VIEWER.layers.clear()
             add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_enabled=False)
-        # Perform adjustments before exiting function
+    
+    single_cell_lineEdit.clear() # reset the widget
+    # Perform adjustments before exiting function
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
     set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
@@ -704,7 +703,7 @@ def set_notes_label(display_note_widget, ID):
         idcolor = '#ffa000'
     else:
         idcolor = '#ffffff'
-    prefix = f'CID: <font color="{idcolor}">{ID}</font>'
+    prefix = f'{SAVED_NOTES["page"]}<br>CID: <font color="{idcolor}">{ID}</font>'
     if note == '-' or note == '' or note is None: 
         note = prefix
     else:
@@ -717,7 +716,7 @@ def set_notes_label(display_note_widget, ID):
 #   for the ctc cells. Gallery mode might end up being a pain for downstream.
 #   Counterpoint - how to apply filters to only some channels if they are in same image?
 #   Counterpoint to counterpoint - never get rid of numpy arrays and remake whole image as needed. 
-def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, new_batch=True):
+def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, new_page=True):
     print(f'\n---------\n \n Entering the add_layers function')
     print(f"pyramid shape is {pyramid.shape}")
     # Make the color bar that appears to the left of the composite image
@@ -732,7 +731,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
     def retrieve_status(cell_id, cell):
         ''' Kind of an anachronistic function at this point.'''
         # print(f'Getting status for {cell_id}')
-        if new_batch:
+        if new_page:
             try:
                 status = cell[3]
                 # print(f'Got it. Status is .{status}.')
@@ -793,7 +792,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             coords = np.round(data_coordinates).astype(int)
             val = None
             for img in VIEWER.layers:
-                if img.name == 'Batch Name': continue
+                if img.name == 'Page Name': continue
                 data_coordinates = img.world_to_data(pos)
                 val = img.get_value(data_coordinates)
                 if val is not None:
@@ -821,7 +820,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
             # Find this layers corresponding status layer
             for candidate in VIEWER.layers:
-                if candidate.name == 'Batch Name': continue
+                if candidate.name == 'Page Name': continue
                 cellnum = candidate.name.split()[1]
                 if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
                     status_layer = candidate
@@ -956,7 +955,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             coords = np.round(data_coordinates).astype(int)
             val = None
             for img in VIEWER.layers:
-                if img.name == 'Batch Name': continue
+                if img.name == 'Page Name': continue
 
                 data_coordinates = img.world_to_data(pos)
                 val = img.get_value(data_coordinates)
@@ -985,7 +984,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
             # Find this layers corresponding status layer
             for candidate in VIEWER.layers:
-                if candidate.name == 'Batch Name': continue
+                if candidate.name == 'Page Name': continue
 
                 cellnum = candidate.name.split()[1]
                 if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
@@ -1247,13 +1246,13 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         # if len(cells) == 5:
         #     np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
     
-    #TODO make a batch label... 
+    #TODO make a page label... 
     # add polygon (just for text label)
-    # text = {'string': 'Batch name goes here', 'anchor': 'center', 'size': 8,'color': 'white'}
+    # text = {'string': 'Page name goes here', 'anchor': 'center', 'size': 8,'color': 'white'}
     # shapes_layer1 = viewer.add_shapes([[0,0], [40,0], [40,40],[0,40]], shape_type = 'polygon',
-    #                 edge_color = 'green', face_color='transparent',text=text, name='Batch Name') 
+    #                 edge_color = 'green', face_color='transparent',text=text, name='Page Name') 
     # shapes_layer2 = viewer.add_shapes([[0,0], [40,0], [40,40],[0,40]], shape_type = 'polygon',
-    #                 edge_color = 'green', face_color='transparent',text=text, name='Batch Name') 
+    #                 edge_color = 'green', face_color='transparent',text=text, name='Page Name') 
 
     return True
 
@@ -1361,19 +1360,17 @@ def fetch_notes(cell_set):
     print(f'dumping dict {SAVED_NOTES}')
 
 '''Get object data from csv and parse.''' 
-def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', new_batch = True, cell_id_start=None, cell_limit=None, phenotype=None):
-    
+def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1, 
+                            specific_cell = None, combobox_widget = None):
+    print('function start')
     sort_by_intensity = None# 'OPAL520' # None means 'don't do it', while a channel name means 'put highest at the top'
     if sort_by_intensity is not None:
         sort_by_intensity = sort_by_intensity.replace('OPAL','Opal ') + ' Cell Intensity'
 
     # get defaults from global space
-    global CELL_ID_START
-    if cell_id_start is None: cell_id_start = CELL_ID_START # ID of first cell in the set (smallest) 
-    if cell_limit is None: cell_limit=CELL_LIMIT # Number of cells to be shown
+    if page_size is None: page_size=PAGE_SIZE # Number of cells to be shown
     if phenotype is None: phenotype=PHENOTYPE # Name of phenotype of interest
-    # Also using CELL_OFFSET to know how big the current set size is
-    print(f'ORDERING PARAMS: id start: {cell_id_start}, limit: {cell_limit}, direction: {direction}, change?: {change_startID}')
+    # print(f'ORDERING PARAMS: id start: {cell_id_start}, page size: {page_size}, direction: {direction}, change?: {change_startID}')
     halo_export = pd.read_csv(OBJECT_DATA)
 
     # Add columns w/defaults if they aren't there to avoid runtime issues
@@ -1392,7 +1389,8 @@ def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', new_batc
     except:
         pass
 
-    # Get relevant columns
+    # Get relevant columns for intensity sorting
+    # TODO make this conditional, and in a try except format
     all_possible_intensities = ['DAPI Cell Intensity', 'Opal 480 Cell Intensity','Opal 520 Cell Intensity',
             'Opal 570 Cell Intensity', 'Opal 620 Cell Intensity', 'Opal 690 Cell Intensity','Opal 780 Cell Intensity',
             'AF Cell Intensity','Autofluorescence Cell Intensity'] # not sure what the correct nomenclature is here
@@ -1400,37 +1398,43 @@ def extract_phenotype_xldata(change_startID = False ,direction = 'fwd', new_batc
     cols_to_keep = halo_export.columns.intersection(cols_to_keep)
     halo_export = halo_export.loc[:, cols_to_keep]
     
-    if cell_id_start < len(halo_export) and cell_id_start > 0:
-        if direction =='fwd':     
-            cell_set = halo_export[cell_id_start:] # Exclude cells prior to target ID
-            cell_set = cell_set[cell_set[phenotype]==1]
-            if CELL_OFFSET > len(cell_set.index):
-                return False
-            new_CID = int(cell_set.iloc[CELL_OFFSET]['Object Id'])
-        elif direction=='bkwd':
-            # In this case we have a negative offset, meaning we want to check out cells with
-            #   a target ID of LESS than the start ID
-            # Use cell_limit here, NOT CELL_OFFSET because we want to use the new set size to determine the smallest ID  
-            cell_set = halo_export[:cell_id_start]
-            cell_set = cell_set[cell_set[phenotype]==1]
-            if cell_limit > len(cell_set.index):
-                return False
-            new_CID = int(cell_set.iloc[len(cell_set.index)-cell_limit]['Object Id'])
-        else:
-            raise Exception(f"Invalid parameter 'direction' in extract_phenotype_xldata: {direction}. Expecting 'fwd' or 'bkwd'")
+    # #acquire 
+    print('page code start')
+    # Figure out which range of cells to get based on page number and size
+    phen_only_df = halo_export[halo_export[phenotype]==1].reset_index()
+    last_page = len(phen_only_df.index) // page_size
+    print(f"last page is {last_page}")
+    global ALL_CUSTOM_WIDGETS
+    combobox_widget =  ALL_CUSTOM_WIDGETS['page combobox']
+    print(f"got widget. max is {combobox_widget.maxCount()} max visible is {combobox_widget.maxVisibleItems()}")
+    # If page numbers haven't been added to the widget, do it now   
+    if combobox_widget.currentIndex() == -1: # This means it's empty
+        for i in range(1,last_page+1):
+            bname = f'{phenotype} page {i}'
+            combobox_widget.addItem(bname)
 
-    if change_startID:
-        CELL_ID_START = new_CID
-        print(f'\nThe new CID you requested is {new_CID}\n')
+    # If a certain cell is desired, find its page
+    print(f"testing if specific cell {specific_cell} and type {type(specific_cell)}")
+    if specific_cell is not None:
+        try:
+            singlecell_df = phen_only_df[phen_only_df['Object Id']==int(specific_cell)]
+            sc_index = singlecell_df.index[0]
+            page_number = (sc_index//page_size)+1
+            #TODO set the combobox widget to the current page number
+        except (KeyError,IndexError, ValueError):
+            print(f'The cell ID {specific_cell} is not in my list of {phenotype}. Loading default page instead ')
+            VIEWER.status = f'The cell ID {specific_cell} is not in my list of {phenotype}. Loaded default page instead'
 
-        cell_set = halo_export[new_CID:]
-        cell_set = cell_set[cell_set[phenotype]==1] # pare down cell list (now containing only phenotype of interest) to desired length
-        if cell_limit < len(cell_set.index) and cell_limit > 0: 
-            cell_set = cell_set[:cell_limit]
+    # set widget to current page number 
+    combobox_widget.setCurrentIndex(page_number-1)
+    SAVED_NOTES['page'] = combobox_widget.currentText()
+    # Get the appropriate set
+    if page_number != last_page:
+        cell_set = phen_only_df[(page_number-1)*page_size: page_number*page_size]
     else:
-        # Likely changing composite modes, so don't do any manipulations
-        cell_set = cell_set[:cell_limit]
+        cell_set = phen_only_df[(page_number-1)*page_size:]
     
+
     if sort_by_intensity is not None:
         cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = False, kind = 'mergesort')
     fetch_notes(cell_set)
@@ -1466,15 +1470,15 @@ def replace_note(cell_widget, note_widget):
 ''' Reset globals and proceed to main '''
 def GUI_execute(preprocess_class):
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
-    global cell_colors, qptiff, PUNCHOUT_SIZE, CELL_LIMIT, CHANNELS_STR, CHANNEL_ORDER
-    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, CELL_ID_START
+    global cell_colors, qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER
+    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, SPECIFIC_CELL
 
     cell_colors = userInfo.cell_colors
     qptiff = userInfo.qptiff
     PUNCHOUT_SIZE = userInfo.imageSize
     PHENOTYPE = userInfo.phenotype
-    CELL_ID_START = userInfo.cell_ID_start
-    CELL_LIMIT = userInfo.cell_count
+    PAGE_SIZE = userInfo.page_size
+    SPECIFIC_CELL = userInfo.specific_cell
     OBJECT_DATA = userInfo.objectData
     CHANNELS_STR = userInfo.channels
     if "Composite" not in CHANNELS_STR: CHANNELS_STR.append("Composite")
@@ -1568,24 +1572,14 @@ def main(preprocess_class = None):
     # #TODO think of something better than this. It tanks RAM usage to store this thing
     # #       Literally  ~ 10GB difference
     
-    RAW_PYRAMID=pyramid
-    
-    tumor_cell_XYs = extract_phenotype_xldata()
-    status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
-    _update_status(status)
-
-    set_initial_adjustment_parameters() # set defaults: 1.0 gamma, 0 black in, 255 white in
-    
     viewer = napari.Viewer(title='CTC Gallery')
     VIEWER = viewer
+    # Get rid of the crap on the left sidebar for a cleaner screen
+    viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
+    viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
+
     NOTES_WIDGET = QLabel('Placeholder note'); NOTES_WIDGET.setAlignment(Qt.AlignCenter)
     print(f'Notes widget is {NOTES_WIDGET}\n type is {type(NOTES_WIDGET)}')
-    add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
-        # Perform adjustments before exiting function
-    reuse_contrast_limits()
-    reuse_gamma() # might not need to do both of these... One is enough?
-    viewer.grid.enabled = True
-    viewer.grid.shape = (CELL_LIMIT, len(CHANNELS)+1) # +1 because of the status layer.
 
     #TODO arrange these more neatly
     #TODO these dock widgets cause VERY strange behavior when trying to clear all layers / load more
@@ -1599,14 +1593,13 @@ def main(preprocess_class = None):
     # Pass pointer to widgets to function on button press
     note_button.pressed.connect(lambda: replace_note(note_cell_entry, note_text_entry))
 
-    next_cell_rb = QRadioButton("Next") ; next_cell_rb.setChecked(True)
-    previous_cell_rb = QRadioButton("Previous")
-    batch_group = QButtonGroup(); batch_group.addButton(next_cell_rb); batch_group.addButton(previous_cell_rb)
-    next_batch_amt = QSpinBox(); next_batch_amt.setRange(5,150); next_batch_amt.setValue(15)
-    next_batch_button = QPushButton("Go")
-    next_batch_button.pressed.connect(lambda: show_next_cell_group(next_cell_rb, previous_cell_rb, next_batch_amt))
+    page_combobox = QComboBox()
+    page_cell_entry = QLineEdit(); 
+    page_cell_entry.setPlaceholderText("Cell Id (optional)"); page_cell_entry.setFixedWidth(200)
+    next_page_button = QPushButton("Go")
+    next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry))
     notes_container = viewer.window.add_dock_widget([NOTES_WIDGET,note_text_entry, note_cell_entry, note_button], name = 'Take notes', area = 'right')
-    batch_container = viewer.window.add_dock_widget([next_cell_rb,previous_cell_rb, next_batch_amt, next_batch_button], name = 'Change Batch', area = 'right')
+    page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, next_page_button], name = 'Change Page', area = 'right')
 
     all_channels_rb = QRadioButton("Show All Channels")
     composite_only_rb = QRadioButton("Composite Mode"); composite_only_rb.setChecked(True) # Start in composite mode
@@ -1631,22 +1624,33 @@ def main(preprocess_class = None):
     # print(f'\n {dir()}') # prints out the namespace variables 
     ALL_CUSTOM_WIDGETS['notes label']=NOTES_WIDGET; ALL_CUSTOM_WIDGETS['notes text entry']=note_text_entry
     ALL_CUSTOM_WIDGETS['notes cell entry']= note_cell_entry;ALL_CUSTOM_WIDGETS['notes button']=note_button
-    ALL_CUSTOM_WIDGETS['next cell radio']=next_cell_rb;ALL_CUSTOM_WIDGETS['previous cell radio']=previous_cell_rb
-    ALL_CUSTOM_WIDGETS['next batch amount']=next_batch_amt;ALL_CUSTOM_WIDGETS['next batch button']=next_batch_button
+    ALL_CUSTOM_WIDGETS['next page button']=next_page_button
     ALL_CUSTOM_WIDGETS['channels mode radio']=all_channels_rb; ALL_CUSTOM_WIDGETS['composite mode radio']=composite_only_rb
     ALL_CUSTOM_WIDGETS['switch mode buton']=switch_mode_button; 
     ALL_CUSTOM_WIDGETS['show visibility radio']=visibility_show; ALL_CUSTOM_WIDGETS['hide visibility radio']=visibility_hide
+    ALL_CUSTOM_WIDGETS['page combobox']=page_combobox
     notes_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-    batch_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+    page_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
     mode_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
     vis_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
 
     # for widg in ALL_CUSTOM_WIDGETS.values():
     #     widg.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
 
-    # Get rid of the crap on the left sidebar for a cleaner screen
-    viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
-    viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
+        
+    RAW_PYRAMID=pyramid
+
+    tumor_cell_XYs = extract_phenotype_xldata(specific_cell=SPECIFIC_CELL)
+    status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
+    _update_status(status)
+
+    set_initial_adjustment_parameters() # set defaults: 1.0 gamma, 0 black in, 255 white in
+    add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
+        # Perform adjustments before exiting function
+    reuse_contrast_limits()
+    reuse_gamma() # might not need to do both of these... One is enough?
+    viewer.grid.enabled = True
+    viewer.grid.shape = (PAGE_SIZE, len(CHANNELS)+1) # +1 because of the status layer.
 
     print('Before')
     print(type(viewer.window))

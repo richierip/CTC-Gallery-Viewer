@@ -24,18 +24,18 @@ CHANNEL_ORDER = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", 
 
 class userPresets:
     def __init__(self, channels = copy.copy(CHANNELS_STR), cell_colors = [], qptiff = None, 
-                objectData = None, phenotype = None, imageSize = 100, cell_count = 25, 
-                channelOrder = CHANNEL_ORDER, cell_ID_start = 0):
+                objectData = None, phenotype = None, imageSize = 100, specific_cell = None, 
+                channelOrder = CHANNEL_ORDER, page_size = 20):
         self.qptiff = qptiff
         self.objectData = objectData
         self.imageSize = imageSize
         self.channels = channels
         self.cell_colors = cell_colors
         self.UI_color_display = copy.copy(CELL_COLORS) # keep track of user selected colors for fluors
-        self.cell_count = cell_count
+        self.specific_cell = specific_cell
         self.phenotype = phenotype
         self.channelOrder = channelOrder
-        self.cell_ID_start = cell_ID_start
+        self.page_size = page_size
 
         # for chnl in CHANNELS_STR:
         #     # this inserts colors into backend ordered array in the right place off the bat. 

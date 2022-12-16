@@ -156,12 +156,16 @@ class ViewerPresets(QDialog):
         self.userInfo.objectData = os.path.normpath(self.dataEntry.text().strip('"'))
     def savePhenotype(self):
         self.userInfo.phenotype = self.phenotypeToGrab.text()
-    def saveNumCells(self):
-        self.userInfo.cell_count = self.numCellsToRead.value()
+    def saveSpecificCell(self):
+        try:
+            self.userInfo.specific_cell = int(self.specificCellChoice.text())
+        except:
+            print('Bad input to "Specific Cell" widget. Saving as NoneType')
+            self.userInfo.specific_cell = None
     def saveImageSize(self):
         self.userInfo.imageSize = self.imageSize.value()
-    def saveCellOffset(self):
-        self.userInfo.cell_ID_start = self.cellOffset.value()
+    def savePageSize(self):
+        self.userInfo.page_size = self.page_size_widget.value()
 
     def saveChannel(self):
         for button in self.mycheckbuttons:
@@ -346,25 +350,28 @@ class ViewerPresets(QDialog):
         # phenotypeToGrab.set
      
         explanationLabel1 = QLabel("Cell image size in <b>pixels</b>")
-        explanationLabel2 = QLabel("Exclude cells with a <i>Cell ID</i> <b>&lt;</b> ")
-        explanationLabel3 = QLabel("Limit the display to the <b>first<b> ")
+        explanationLabel2 = QLabel("Load the page with this <b>Cell ID<b>")
+        explanationLabel3 = QLabel("Number of cells per page")
 
         self.imageSize = QSpinBox(self.topRightGroupBox)
         self.imageSize.setRange(50,200)
         self.imageSize.setValue(self.userInfo.imageSize) # Misbehaving?
         self.imageSize.editingFinished.connect(self.saveImageSize)
+        self.imageSize.setFixedWidth(100)
 
-        # explanationLabel2.setFixedWidth(20)
-        self.numCellsToRead = QSpinBox(self.topRightGroupBox)
-        self.numCellsToRead.setValue(self.userInfo.cell_count)
-        self.numCellsToRead.setRange(0,1000)
-        self.numCellsToRead.editingFinished.connect(self.saveNumCells)
-        # numCellsToRead.setFixedWidth(50)
+        self.specificCellChoice = QLineEdit(self.topRightGroupBox)
+        if self.userInfo.specific_cell is None:
+            self.specificCellChoice.setPlaceholderText('Leave blank for page 1')
+        else:
+            self.specificCellChoice.insert(str(self.userInfo.specific_cell))
+        self.specificCellChoice.setFixedWidth(220)
+        self.specificCellChoice.textEdited.connect(self.saveSpecificCell)
 
-        self.cellOffset = QSpinBox(self.topRightGroupBox)
-        self.cellOffset.setRange(0,10000000)
-        self.cellOffset.setValue(self.userInfo.cell_ID_start)
-        self.cellOffset.editingFinished.connect(self.saveCellOffset)
+        self.page_size_widget = QSpinBox(self.topRightGroupBox)
+        self.page_size_widget.setRange(5,150)
+        self.page_size_widget.setValue(self.userInfo.page_size)
+        self.page_size_widget.editingFinished.connect(self.savePageSize)
+        self.page_size_widget.setFixedWidth(100)
 
 
         layout = QGridLayout()
@@ -372,9 +379,9 @@ class ViewerPresets(QDialog):
         layout.addWidget(explanationLabel1,1,0)
         layout.addWidget(self.imageSize,1,1)
         layout.addWidget(explanationLabel2,2,0)
-        layout.addWidget(self.cellOffset,2,1)
+        layout.addWidget(self.specificCellChoice,2,1)
         layout.addWidget(explanationLabel3,3,0)
-        layout.addWidget(self.numCellsToRead,3,1)
+        layout.addWidget(self.page_size_widget,3,1)
 
         # layout.addWidget(self.findDataButton)
         layout.rowStretch(-100)
