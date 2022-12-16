@@ -166,6 +166,9 @@ class ViewerPresets(QDialog):
         self.userInfo.imageSize = self.imageSize.value()
     def savePageSize(self):
         self.userInfo.page_size = self.page_size_widget.value()
+    def saveGlobalSort(self):
+        print("Saving global sort")
+        self.userInfo.global_sort = self.global_sort_widget.currentText()
 
     def saveChannel(self):
         for button in self.mycheckbuttons:
@@ -351,7 +354,7 @@ class ViewerPresets(QDialog):
      
         explanationLabel1 = QLabel("Cell image size in <b>pixels</b>")
         explanationLabel2 = QLabel("Load the page with this <b>Cell ID<b>")
-        explanationLabel3 = QLabel("Number of cells per page")
+        explanationLabel3 = QLabel("Number of cells <b>per page<b>")
 
         self.imageSize = QSpinBox(self.topRightGroupBox)
         self.imageSize.setRange(50,200)
@@ -373,6 +376,13 @@ class ViewerPresets(QDialog):
         self.page_size_widget.editingFinished.connect(self.savePageSize)
         self.page_size_widget.setFixedWidth(100)
 
+        self.global_sort_widget = QComboBox(self.topRightGroupBox)
+        self.global_sort_widget.addItem("Sort object table by Cell Id")
+        print(f"setting widget to be {self.userInfo.global_sort}")
+        for i, chn in enumerate(CHANNELS_STR):
+            self.global_sort_widget.addItem(f"Sort object table by {chn} Intensity")
+        self.global_sort_widget.setCurrentText(self.userInfo.global_sort)
+        self.global_sort_widget.currentTextChanged.connect(self.saveGlobalSort)
 
         layout = QGridLayout()
         layout.addWidget(self.phenotypeToGrab,0,0,1,1)
@@ -382,6 +392,7 @@ class ViewerPresets(QDialog):
         layout.addWidget(self.specificCellChoice,2,1)
         layout.addWidget(explanationLabel3,3,0)
         layout.addWidget(self.page_size_widget,3,1)
+        layout.addWidget(self.global_sort_widget,4,0)
 
         # layout.addWidget(self.findDataButton)
         layout.rowStretch(-100)

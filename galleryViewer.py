@@ -52,6 +52,7 @@ PUNCHOUT_SIZE = 90 # microns or pixels? Probably pixels
 PAGE_SIZE = 15 # How many cells will be shown in next page
 SPECIFIC_CELL = None # Will be an int if the user wants to load the page with that cell
 PHENOTYPE = 'Tumor' #'CTC 488pos'
+GLOBAL_SORT = None
 DAPI = 0; OPAL480 = 3; OPAL520 = 6; OPAL570 = 1; OPAL620 = 4; OPAL690 = 2; OPAL780 = 5; AF=7; Composite = 8
 # CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
 CHANNELS_STR = ["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
@@ -580,7 +581,7 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
 #         "choices": [("Next", 'fwd'), ("Previous", 'bkwd')]},
 #         Amount={"widget_type": "SpinBox", "value":15,
 #         "max":1000,"min":5})
-def show_next_cell_group(page_cb_widget, single_cell_lineEdit):
+def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_widget):
     def _save_validation(VIEWER,numcells):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
@@ -625,6 +626,12 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit):
     page_number = int(page_cb_widget.currentText().split()[-1])
     cell_choice = single_cell_lineEdit.text()
     if cell_choice == '': cell_choice = None
+    print(f"CURRENT WIDG POSITION IS {intensity_sort_widget.currentIndex()} and type is {type(intensity_sort_widget.currentIndex())}")
+    if intensity_sort_widget.currentIndex() == 0:
+        sort_option = None
+    else:
+        sort_option = intensity_sort_widget.currentText().split()[3]
+
 
     # Save data to file from current set
     #TODO Fix amount field
@@ -640,7 +647,7 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit):
     VIEWER.grid.shape = (PAGE_SIZE, len(CHANNELS)+1)
     # Load into same mode as the current
     if COMPOSITE_MODE:
-        xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice)
+        xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
         if xydata is False:
             VIEWER.status="Can't load cells: out of bounds error."
         else:
@@ -648,7 +655,7 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit):
             add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_enabled=True)
             
     else:
-        xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice)
+        xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
         if xydata is False:
             VIEWER.status="Can't load cells: out of bounds error."
         else:
@@ -703,7 +710,7 @@ def set_notes_label(display_note_widget, ID):
         idcolor = '#ffa000'
     else:
         idcolor = '#ffffff'
-    prefix = f'{SAVED_NOTES["page"]}<br>CID: <font color="{idcolor}">{ID}</font>'
+    prefix = f'{SAVED_NOTES["page"]}<br><font color="{idcolor}">CID: {ID}</font>'
     if note == '-' or note == '' or note is None: 
         note = prefix
     else:
@@ -1361,11 +1368,14 @@ def fetch_notes(cell_set):
 
 '''Get object data from csv and parse.''' 
 def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1, 
-                            specific_cell = None, combobox_widget = None):
-    print('function start')
-    sort_by_intensity = None# 'OPAL520' # None means 'don't do it', while a channel name means 'put highest at the top'
-    if sort_by_intensity is not None:
+                            specific_cell = None, sort_by_intensity = None, combobox_widget = None):
+    
+    # 'OPAL520' # None means 'don't do it', while a channel name means 'put highest at the top'
+    if sort_by_intensity is None:
+        sort_by_intensity = "Object Id"
+    else:
         sort_by_intensity = sort_by_intensity.replace('OPAL','Opal ') + ' Cell Intensity'
+    print(f"SORTBYINTENSITY IS {sort_by_intensity}")
 
     # get defaults from global space
     if page_size is None: page_size=PAGE_SIZE # Number of cells to be shown
@@ -1397,6 +1407,15 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
     cols_to_keep = ["Object Id","Validation","Notes", "XMin","XMax","YMin", "YMax", phenotype] + all_possible_intensities
     cols_to_keep = halo_export.columns.intersection(cols_to_keep)
     halo_export = halo_export.loc[:, cols_to_keep]
+
+    global GLOBAL_SORT
+    if GLOBAL_SORT is not None:
+        try:
+            halo_export = halo_export.sort_values(by = GLOBAL_SORT, ascending = False, kind = 'mergesort')
+        except:
+            print('Global sort failed. Will Sort by Cell Id instead.')
+            GLOBAL_SORT = None
+            VIEWER.status = 'Global sort failed. Will Sort by Cell Id instead.'
     
     # #acquire 
     print('page code start')
@@ -1406,7 +1425,6 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
     print(f"last page is {last_page}")
     global ALL_CUSTOM_WIDGETS
     combobox_widget =  ALL_CUSTOM_WIDGETS['page combobox']
-    print(f"got widget. max is {combobox_widget.maxCount()} max visible is {combobox_widget.maxVisibleItems()}")
     # If page numbers haven't been added to the widget, do it now   
     if combobox_widget.currentIndex() == -1: # This means it's empty
         for i in range(1,last_page+1):
@@ -1432,11 +1450,15 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
     if page_number != last_page:
         cell_set = phen_only_df[(page_number-1)*page_size: page_number*page_size]
     else:
-        cell_set = phen_only_df[(page_number-1)*page_size:]
+        cell_set = phen_only_df[(page_number)*page_size:]
     
-
+    print(f"#$%#$% local sort is {sort_by_intensity}")
     if sort_by_intensity is not None:
-        cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = False, kind = 'mergesort')
+        if sort_by_intensity == 'Object Id': 
+            order = True
+        else: 
+            order = False
+        cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = order, kind = 'mergesort')
     fetch_notes(cell_set)
 
     tumor_cell_XYs = []
@@ -1471,7 +1493,7 @@ def replace_note(cell_widget, note_widget):
 def GUI_execute(preprocess_class):
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
     global cell_colors, qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER
-    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, SPECIFIC_CELL
+    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, SPECIFIC_CELL, GLOBAL_SORT
 
     cell_colors = userInfo.cell_colors
     qptiff = userInfo.qptiff
@@ -1493,6 +1515,11 @@ def GUI_execute(preprocess_class):
             exec(f"globals()['CHANNELS'].append({chn})")
     # print(f'GUI execute channels are {CHANNELS}')
     ADJUSTED = copy.copy(CHANNELS)
+    if userInfo.global_sort == "Sort object table by Cell Id":
+        GLOBAL_SORT = None
+    else:
+        chn = userInfo.global_sort.split()[4].replace("OPAL","Opal ")
+        GLOBAL_SORT = f"{chn} Cell Intensity"
 
     # fix_default_composite_adj()
 
@@ -1596,10 +1623,21 @@ def main(preprocess_class = None):
     page_combobox = QComboBox()
     page_cell_entry = QLineEdit(); 
     page_cell_entry.setPlaceholderText("Cell Id (optional)"); page_cell_entry.setFixedWidth(200)
+    intensity_sort_box = QComboBox()
+    intensity_sort_box.addItem("Sort page by Cell Id")
+    for i, chn in enumerate(CHANNELS_STR[:-1]):
+        intensity_sort_box.addItem(f"Sort page by {chn} Intensity")
+    local_sort = None
+    if GLOBAL_SORT is None:
+        intensity_sort_box.setCurrentIndex(0) # Set "sort by CID" to be the default
+    else:
+        local_sort = f"OPAL{GLOBAL_SORT.split()[1]}"
+        intensity_sort_box.setCurrentText(f"Sort page by {chn} Intensity")
+
     next_page_button = QPushButton("Go")
-    next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry))
+    next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry, intensity_sort_box))
     notes_container = viewer.window.add_dock_widget([NOTES_WIDGET,note_text_entry, note_cell_entry, note_button], name = 'Take notes', area = 'right')
-    page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, next_page_button], name = 'Change Page', area = 'right')
+    page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, intensity_sort_box, next_page_button], name = 'Change Page', area = 'right')
 
     all_channels_rb = QRadioButton("Show All Channels")
     composite_only_rb = QRadioButton("Composite Mode"); composite_only_rb.setChecked(True) # Start in composite mode
@@ -1640,7 +1678,7 @@ def main(preprocess_class = None):
         
     RAW_PYRAMID=pyramid
 
-    tumor_cell_XYs = extract_phenotype_xldata(specific_cell=SPECIFIC_CELL)
+    tumor_cell_XYs = extract_phenotype_xldata(specific_cell=SPECIFIC_CELL, sort_by_intensity=local_sort)
     status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
     _update_status(status)
 

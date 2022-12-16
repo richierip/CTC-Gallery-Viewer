@@ -25,7 +25,7 @@ CHANNEL_ORDER = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", 
 class userPresets:
     def __init__(self, channels = copy.copy(CHANNELS_STR), cell_colors = [], qptiff = None, 
                 objectData = None, phenotype = None, imageSize = 100, specific_cell = None, 
-                channelOrder = CHANNEL_ORDER, page_size = 20):
+                channelOrder = CHANNEL_ORDER, page_size = 20, global_sort = "Sort object table by Cell Id"):
         self.qptiff = qptiff
         self.objectData = objectData
         self.imageSize = imageSize
@@ -36,6 +36,7 @@ class userPresets:
         self.phenotype = phenotype
         self.channelOrder = channelOrder
         self.page_size = page_size
+        self.global_sort = global_sort
 
         # for chnl in CHANNELS_STR:
         #     # this inserts colors into backend ordered array in the right place off the bat. 
