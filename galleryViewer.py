@@ -28,6 +28,7 @@ import custom_maps
 # norm = plt.Normalize()
 import copy
 import time
+import store_and_load
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
@@ -54,8 +55,13 @@ SPECIFIC_CELL = None # Will be an int if the user wants to load the page with th
 PHENOTYPE = 'Tumor' #'CTC 488pos'
 GLOBAL_SORT = None
 DAPI = 0; OPAL480 = 3; OPAL520 = 6; OPAL570 = 1; OPAL620 = 4; OPAL690 = 2; OPAL780 = 5; AF=7; Composite = 8
+
+data = store_and_load.loadObject('data/presets')
 # CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
-CHANNELS_STR = ["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
+CHANNELS_STR = data.channelOrder #["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
+CHANNELS_STR.append("Composite") # Seems like this has to happen on a separate line
+print(f"$$$$$$$$$$$$$$$ {CHANNELS_STR}")
+
 # CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690,OPAL780,AF,Composite] # Default. Not really that useful info since channel order was added.
 CHANNELS = [DAPI, OPAL520,OPAL690, Composite] # for local execution / debugging
 ADJUSTED = copy.copy(CHANNELS)
@@ -134,7 +140,7 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
     # print(f'\n dumping adjustment needed: {need_gamma_adjustment}')
     for chn_pos in fluors_only:
         chn_str = CHANNEL_ORDER[chn_pos]
-        chn_str = chn_str.lstrip('OPAL') # OPAL is not in the name of the data key
+        chn_str = chn_str.replace('OPAL','') # OPAL is not in the name of the data key
         # gamma adjust
         
         # In this certain case, don't show anything for this channel
@@ -233,7 +239,7 @@ def adjust_composite_limits(layer):
     # print(f'\n dumping contrast adjustment needed: {need_contrast_adjustment}')
     for chn_pos in fluors_only:
         chn_str = CHANNEL_ORDER[chn_pos]
-        chn_str = chn_str.lstrip('OPAL') # OPAL is not in the name of the data key
+        chn_str = chn_str.replace('OPAL','') # OPAL is not in the name of the data key
         # gamma adjust
 
         # In this certain case, don't show anything for this channel
@@ -327,7 +333,7 @@ def adjust_gamma(viewer, gamma):
     # This allows the function to be called to reuse the same settings instead of updating them
     #   useful for keeping settings when loading next page or switching modes. 
     for fluor in ADJUSTED:
-        fluorname = CHANNEL_ORDER[fluor].lstrip('OPAL')
+        fluorname = CHANNEL_ORDER[fluor].replace('OPAL','')
         _update_dictionary(fluorname,gamma)
 
     for ctclayer in viewer.layers:
@@ -353,7 +359,7 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' white-in'] = val
     for fluor in ADJUSTED:
-        fluorname = CHANNEL_ORDER[fluor].lstrip('OPAL')
+        fluorname = CHANNEL_ORDER[fluor].replace('OPAL','')
         _update_dictionary(fluorname,white_in)
     
     for ctclayer in VIEWER.layers:
@@ -374,7 +380,7 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         ADJUSTMENT_SETTINGS[name+' black-in'] = val
     
     for fluor in ADJUSTED:
-        fluorname = CHANNEL_ORDER[fluor].lstrip('OPAL')
+        fluorname = CHANNEL_ORDER[fluor].replace('OPAL','')
         _update_dictionary(fluorname,black_in)
 
     for ctclayer in VIEWER.layers:
@@ -644,9 +650,10 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
     for widg in ALL_CUSTOM_WIDGETS.values():
         widg.setVisible(False)
 
-    VIEWER.grid.shape = (PAGE_SIZE, len(CHANNELS)+1)
+
     # Load into same mode as the current
     if COMPOSITE_MODE:
+        VIEWER.grid.shape = (PAGE_SIZE, 5)
         xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
         if xydata is False:
             VIEWER.status="Can't load cells: out of bounds error."
@@ -655,6 +662,7 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
             add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_enabled=True)
             
     else:
+        VIEWER.grid.shape = (PAGE_SIZE, len(CHANNELS)+1)
         xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
         if xydata is False:
             VIEWER.status="Can't load cells: out of bounds error."
@@ -1122,7 +1130,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 elif i==OPAL620: fluor='620' 
                 elif i==OPAL780: fluor='780'
                 elif i==OPAL520: fluor='520'
-                elif i==AF: continue #fluor='AF' 
+                elif i==AF: fluor='AF' 
                 cell_name = f'Cell {cell_id} {fluor}'
 
                 # Shortcut if we have seen the cell before and done the work
@@ -1354,7 +1362,7 @@ def chn_key_wrapper(viewer):
 
 def set_initial_adjustment_parameters():
     for fluor in CHANNELS_STR:
-        fluor = fluor.lstrip("OPAL")
+        fluor = fluor.replace("OPAL",'')
         ADJUSTMENT_SETTINGS[fluor+ ' black-in']=0
         ADJUSTMENT_SETTINGS[fluor+ ' white-in']=255
         ADJUSTMENT_SETTINGS[fluor+ ' gamma']= 1.0
@@ -1373,8 +1381,10 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
     # 'OPAL520' # None means 'don't do it', while a channel name means 'put highest at the top'
     if sort_by_intensity is None:
         sort_by_intensity = "Object Id"
-    else:
+    elif "opal" in sort_by_intensity.lower():
         sort_by_intensity = sort_by_intensity.replace('OPAL','Opal ') + ' Cell Intensity'
+    else:
+        sort_by_intensity = "Sample AF Cell Intensity"
     print(f"SORTBYINTENSITY IS {sort_by_intensity}")
 
     # get defaults from global space
@@ -1403,7 +1413,7 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
     # TODO make this conditional, and in a try except format
     all_possible_intensities = ['DAPI Cell Intensity', 'Opal 480 Cell Intensity','Opal 520 Cell Intensity',
             'Opal 570 Cell Intensity', 'Opal 620 Cell Intensity', 'Opal 690 Cell Intensity','Opal 780 Cell Intensity',
-            'AF Cell Intensity','Autofluorescence Cell Intensity'] # not sure what the correct nomenclature is here
+            'AF Cell Intensity','Autofluorescence Cell Intensity', "Sample AF Cell Intensity"] # not sure what the correct nomenclature is here
     cols_to_keep = ["Object Id","Validation","Notes", "XMin","XMax","YMin", "YMax", phenotype] + all_possible_intensities
     cols_to_keep = halo_export.columns.intersection(cols_to_keep)
     halo_export = halo_export.loc[:, cols_to_keep]
@@ -1412,10 +1422,12 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
     if GLOBAL_SORT is not None:
         try:
             halo_export = halo_export.sort_values(by = GLOBAL_SORT, ascending = False, kind = 'mergesort')
+            global_sort_status = True
         except:
-            print('Global sort failed. Will Sort by Cell Id instead.')
+            print('Global sort failed. Will sort by Cell Id instead.')
             GLOBAL_SORT = None
-            VIEWER.status = 'Global sort failed. Will Sort by Cell Id instead.'
+            global_sort_status = False
+            VIEWER.status = 'Global sort failed. Will sort by Cell Id instead.'
     
     # #acquire 
     print('page code start')
@@ -1458,7 +1470,14 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
             order = True
         else: 
             order = False
-        cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = order, kind = 'mergesort')
+        try:    
+            cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = order, kind = 'mergesort')
+        except:
+            if global_sort_status:
+                VIEWER.status = f"Unable to sort this page by '{sort_by_intensity}', will use ID instead. Check your data headers."
+            else:
+                VIEWER.status = f"Unable to sort everything by '{sort_by_intensity}', will use ID instead. Check your data headers."
+            cell_set = cell_set.sort_values(by = 'Object Id', ascending = True, kind = 'mergesort')
     fetch_notes(cell_set)
 
     tumor_cell_XYs = []
@@ -1502,7 +1521,7 @@ def GUI_execute(preprocess_class):
     PAGE_SIZE = userInfo.page_size
     SPECIFIC_CELL = userInfo.specific_cell
     OBJECT_DATA = userInfo.objectData
-    CHANNELS_STR = userInfo.channels
+    CHANNELS_STR = userInfo.channels # Update this so that only the checked fluors are present
     if "Composite" not in CHANNELS_STR: CHANNELS_STR.append("Composite")
     CHANNEL_ORDER = userInfo.channelOrder
     if "Composite" not in CHANNEL_ORDER: CHANNEL_ORDER.append("Composite")
@@ -1517,9 +1536,12 @@ def GUI_execute(preprocess_class):
     ADJUSTED = copy.copy(CHANNELS)
     if userInfo.global_sort == "Sort object table by Cell Id":
         GLOBAL_SORT = None
-    else:
+    elif "OPAL" in userInfo.global_sort:
         chn = userInfo.global_sort.split()[4].replace("OPAL","Opal ")
         GLOBAL_SORT = f"{chn} Cell Intensity"
+    else:
+        GLOBAL_SORT = f"Sample AF Cell Intensity"
+
 
     # fix_default_composite_adj()
 
@@ -1553,7 +1575,7 @@ def main(preprocess_class = None):
         to_remove = []
         for i,sds in enumerate(raw_subdata):
             # These are the IDS of the crap data.
-            if sds.lstrip('GTIFF_DIR:').startswith('50') or sds.lstrip('GTIFF_DIR:').startswith('51') or sds.lstrip('GTIFF_DIR:').startswith('9'):  
+            if sds.replace('GTIFF_DIR:','')[1].isdigit() or sds.replace('GTIFF_DIR:','').startswith('9'):  
                 to_remove.append(sds)  
         for sds in to_remove:
             raw_subdata.remove(sds)
@@ -1630,9 +1652,12 @@ def main(preprocess_class = None):
     local_sort = None
     if GLOBAL_SORT is None:
         intensity_sort_box.setCurrentIndex(0) # Set "sort by CID" to be the default
-    else:
+    elif "Opal" in GLOBAL_SORT:
         local_sort = f"OPAL{GLOBAL_SORT.split()[1]}"
         intensity_sort_box.setCurrentText(f"Sort page by {chn} Intensity")
+    else:
+        local_sort = "AF"
+        intensity_sort_box.setCurrentText(f"Sort page by Sample {chn} Intensity")
 
     next_page_button = QPushButton("Go")
     next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry, intensity_sort_box))
@@ -1688,13 +1713,14 @@ def main(preprocess_class = None):
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
     viewer.grid.enabled = True
-    viewer.grid.shape = (PAGE_SIZE, len(CHANNELS)+1) # +1 because of the status layer.
+    viewer.grid.shape = (PAGE_SIZE, 5) # +1 because of the status layer.
 
     print('Before')
     print(type(viewer.window))
 
     all_boxes = []
     for marker_function in CHANNELS_STR:
+        print(f"MY MARKER IS {marker_function}")
         # Only make visible the chosen markers
         all_boxes.append(globals()[f'{marker_function}_box'])
         # exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")

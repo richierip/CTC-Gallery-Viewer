@@ -15,7 +15,7 @@ import time
 import store_and_load
 from galleryViewer import GUI_execute
 import ctypes
-import threading # no longer needed in all likelihood
+# import threading # no longer needed in all likelihood
 import logging
 from datetime import datetime
 import os
@@ -70,7 +70,7 @@ class ViewerPresets(QDialog):
         cc_logo = QLabel()
         pixmap = QPixmap('data/mgh-mgb-cc-logo2 (Custom).png')
         cc_logo.setPixmap(pixmap)
-        titleLabel = QLabel(f"Pre-Release v"+VERSION_NUMBER)#{chr(8482)} TBD
+        titleLabel = QLabel(f"Pre-Release")# v"+VERSION_NUMBER)#{chr(8482)} TBD
         titleLabel.setAlignment(Qt.AlignCenter)
 
         self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
@@ -79,7 +79,7 @@ class ViewerPresets(QDialog):
         else:
             self.qptiffEntry.setPlaceholderText('Enter path to .qptiff')
 
-        self.qptiffEntry.setFixedWidth(600)
+        self.qptiffEntry.setFixedWidth(800)
         # qptiffEntry.setAlignment(Qt.AlignLeft)
         entryLabel = QLabel("Raw Image: ")
         entryLabel.setBuddy(self.qptiffEntry)
@@ -91,7 +91,7 @@ class ViewerPresets(QDialog):
             self.dataEntry.insert(self.userInfo.objectData)
         else:
             self.dataEntry.setPlaceholderText('Enter path to .csv')
-        self.dataEntry.setFixedWidth(600)
+        self.dataEntry.setFixedWidth(800)
         # dataEntry.setAlignment(Qt.AlignLeft)
         dataEntryLabel = QLabel("Object Data: ")
         dataEntryLabel.setBuddy(self.dataEntry)
@@ -174,12 +174,10 @@ class ViewerPresets(QDialog):
         for button in self.mycheckbuttons:
             channelName = button.objectName()
             # print(f"{channelName} and {self.userInfo.channels}")
-            if button.isChecked() and channelName not in self.userInfo.channels:
-                self.userInfo.channels.append(channelName)
-                self.userInfo.channels = list(set(self.userInfo.channels))
-            elif not button.isChecked() and channelName in self.userInfo.channels:
-                self.userInfo.channels.remove(channelName)
-                self.userInfo.channels = list(set(self.userInfo.channels))
+            if button.isChecked():
+                self.userInfo.attempt_channel_add(channelName)
+            elif not button.isChecked():
+                self.userInfo.attempt_channel_remove(channelName)
 
     def saveColors(self):
         for colorWidget in self.myColors:
@@ -351,7 +349,8 @@ class ViewerPresets(QDialog):
         self.phenotypeToGrab.setFixedWidth(220)
         self.phenotypeToGrab.textEdited.connect(self.savePhenotype)
         # phenotypeToGrab.set
-     
+
+        explanationLabel0 = QLabel("Custom object data <b>phenotype<b>")
         explanationLabel1 = QLabel("Cell image size in <b>pixels</b>")
         explanationLabel2 = QLabel("Load the page with this <b>Cell ID<b>")
         explanationLabel3 = QLabel("Number of cells <b>per page<b>")
@@ -385,7 +384,8 @@ class ViewerPresets(QDialog):
         self.global_sort_widget.currentTextChanged.connect(self.saveGlobalSort)
 
         layout = QGridLayout()
-        layout.addWidget(self.phenotypeToGrab,0,0,1,1)
+        layout.addWidget(explanationLabel0,0,0)
+        layout.addWidget(self.phenotypeToGrab,0,1)
         layout.addWidget(explanationLabel1,1,0)
         layout.addWidget(self.imageSize,1,1)
         layout.addWidget(explanationLabel2,2,0)
@@ -478,6 +478,8 @@ class ViewerPresets(QDialog):
             # time.sleep(5)
             # print("done")
         except Exception as e:
+            params = f"Image path: {self.userInfo.qptiff} \n Data path: {self.userInfo.objectData}\n"
+            params += f""
             logging.basicConfig(filename=logpath, encoding='utf-8', level=logging.DEBUG)
             logging.exception("Napari crashed after trying to load QPTiff with GUI load button. Error: %s", e)
 

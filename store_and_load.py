@@ -37,10 +37,26 @@ class userPresets:
         self.channelOrder = channelOrder
         self.page_size = page_size
         self.global_sort = global_sort
-
         # for chnl in CHANNELS_STR:
         #     # this inserts colors into backend ordered array in the right place off the bat. 
         #     self.cell_colors.append(CELL_COLORS[globals()[chnl]])
+
+    def attempt_channel_add(self, channelName):
+        if channelName not in self.channels:
+            self.channels.append(channelName)
+            self.channels = sorted(list(set(self.channels)))
+            if "AF" in self.channels:
+                self.channels.remove("AF")
+                self.channels.append("AF")
+
+    def attempt_channel_remove(self, channelName):
+        if channelName in self.channels:
+            self.channels.remove(channelName)
+            self.channels = sorted(list(set(self.channels)))
+            if "AF" in self.channels:
+                self.channels.remove("AF")
+                self.channels.append("AF")
+
 
     def _correct_color_order(self):
         self.cell_colors = []
