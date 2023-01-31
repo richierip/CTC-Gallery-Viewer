@@ -450,7 +450,6 @@ class ViewerPresets(QDialog):
         # t.start()
         # print(f'progress bar thread w/daemon should be started now...')
 
-        #TODO make this relative with the os package
         folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
         if not os.path.exists(folder):
             os.makedirs(folder)

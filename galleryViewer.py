@@ -559,6 +559,7 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     print(f"length is {len(XY_STORE)} and type is {type(XY_STORE)}")
     if Mode == 1: # change to Show All
         COMPOSITE_MODE = False
+        VIEWER.grid.shape = (PAGE_SIZE, len(CHANNELS)+1)
         print(f'\nAttempting to clear')
         VIEWER.layers.clear()
         # concurrent_clear(VIEWER)
@@ -566,6 +567,7 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
         add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_enabled=False, new_page=False)
     elif Mode ==2: # change to composite only
         COMPOSITE_MODE = True
+        VIEWER.grid.shape = (PAGE_SIZE, 5)
         print(f'\nAttempting to clear')
         VIEWER.layers.clear()
         # concurrent_clear(VIEWER)
@@ -1419,10 +1421,10 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
     halo_export = halo_export.loc[:, cols_to_keep]
 
     global GLOBAL_SORT
+    global_sort_status = True
     if GLOBAL_SORT is not None:
         try:
             halo_export = halo_export.sort_values(by = GLOBAL_SORT, ascending = False, kind = 'mergesort')
-            global_sort_status = True
         except:
             print('Global sort failed. Will sort by Cell Id instead.')
             GLOBAL_SORT = None
