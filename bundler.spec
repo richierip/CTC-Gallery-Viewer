@@ -6,12 +6,14 @@ Example command line usage:
     >pyinstaller --noconfirm --clean --log-level=DEBUG bundler.spec
 
 This spec file will omit the following critical folder from your /venv/Lib/site-packages folder:
-(or they might be only partially included, so replace them with the full folder)
+(if they are only partially included, delete those and copy over the folders from the venv package)
     /magicgui
     /napari
     /napari_console
     /napari_plugin_engine
     /napari_svg
+    /honestly anything related to napari
+    /rasterio 
 
 Modified from this: https://github.com/tlambert03/napari/blob/e9eee2edd29dc29db0fc011c31635ee2d713abf0/bundle/napari.spec
 '''
@@ -21,6 +23,7 @@ from os.path import abspath, join, dirname, pardir
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT, BUNDLE
 from PyInstaller.utils.hooks import collect_data_files
 import napari
+VERSION_NUMBER = "1.0.0"
 
 sys.modules['FixTk'] = None
 
@@ -116,7 +119,7 @@ def format(x):
 
 
 DATA_FILES = [format(f) for f in collect_data_files('napari') if keep(f[0])]
-NAME = 'gallery_test'
+NAME = f'GalleryViewer v{VERSION_NUMBER}'
 WINDOWED = True
 DEBUG = False
 UPX = False
@@ -128,7 +131,7 @@ a = Analysis(
     [r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\initial_UI.py"],
     # https://github.com/pypa/setuptools/issues/1963  # noqa
     hiddenimports=['pkg_resources.py2_warn', 'importlib', 'napari.conftest',
-                 'imagecodecs._shared', 'imagecodecs._imcd', 'magicgui'],
+                 'imagecodecs._shared', 'imagecodecs._imcd', 'magicgui', 'rasterio'],
     pathex=[BUNDLE_ROOT],
     datas=DATA_FILES + [(r'C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\*.PNG', 'data' ),
             (r"C:\Users\prich\Desktop\Projects\MGH\gallery_app\mghiconwhite.ico", 'data')],

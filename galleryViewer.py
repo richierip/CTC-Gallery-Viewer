@@ -9,26 +9,18 @@ import rasterio
 from rasterio.windows import Window
 import napari
 from napari.types import ImageData
-# from napari.qt.threading import thread_worker # Needed to add / remove a lot of layers without freezing
-from magicgui import magicgui, magic_factory
+from magicgui import magicgui #, magic_factory
 from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton, QRadioButton, QSpinBox, QButtonGroup, QSizePolicy, QComboBox
 from PyQt5.QtCore import Qt
 import numpy as np
 import pandas as pd
 import openpyxl # necessary, do not remove
-# import skimage.filters
-# import gc # might garbage collect later
-# import math
-# import vispy.color as vpc
-import matplotlib
-from matplotlib import cm
-from matplotlib import colors as mplcolors
-from matplotlib import pyplot as plt
-import custom_maps
-# norm = plt.Normalize()
+from matplotlib import cm # necessary, do not remove
+from matplotlib import colors as mplcolors # Necessary, do not remove
 import copy
 import time
 import store_and_load
+import custom_maps # Necessary, do not remove
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
@@ -45,7 +37,6 @@ for colormap in cell_colors:
 
 cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink', 'cyan'] # for local execution
 fluor_to_color = {}
-# qptiff = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\memmap_test.tif"
 qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\auto_test.tif"
 OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
 # OBJECT_DATA = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\PMR_test_Results.csv"
@@ -60,7 +51,6 @@ data = store_and_load.loadObject('data/presets')
 # CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
 CHANNELS_STR = data.channelOrder #["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
 CHANNELS_STR.append("Composite") # Seems like this has to happen on a separate line
-print(f"$$$$$$$$$$$$$$$ {CHANNELS_STR}")
 
 # CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690,OPAL780,AF,Composite] # Default. Not really that useful info since channel order was added.
 CHANNELS = [DAPI, OPAL520,OPAL690, Composite] # for local execution / debugging
@@ -345,10 +335,10 @@ def adjust_gamma(viewer, gamma):
             adjust_composite_gamma(ctclayer, gamma)
 
 @magicgui(auto_call=True,
-        gamma={"widget_type": "FloatSlider", "max":1.0, "min":0.01},
+        Gamma={"widget_type": "FloatSlider", "max":1.0, "min":0.01},
         layout = 'horizontal')
-def adjust_gamma_widget(gamma: float = 1.0) -> ImageData: 
-    adjust_gamma(VIEWER,gamma)
+def adjust_gamma_widget(Gamma: float = 1.0) -> ImageData: 
+    adjust_gamma(VIEWER,Gamma)
 adjust_gamma_widget.visible=False
 
 @magicgui(auto_call=True,
@@ -431,7 +421,7 @@ def checkbox_setup():
     all_boxes = []
     for checkbox_name in CHANNELS_STR:   
         #Turn off composite by default.
-        print(f'creating checkbox func for {checkbox_name}')
+        # print(f'creating checkbox func for {checkbox_name}')
         if False: #checkbox_name == 'Composite':
             ADJUSTMENT_SETTINGS[checkbox_name+' box'] = False
             exec(f"globals()[\'{checkbox_name+'_box'}\'] = globals()[\'dynamic_checkbox_creator\'](checkbox_name, setChecked=False)") # If doing this is wrong I don't want to be right
@@ -481,7 +471,7 @@ def concurrent_clear(viewer):
 ### --- 
 # @magicgui(call_button='Change Mode',
 #         Mode={"widget_type": "RadioButtons","orientation": "vertical",
-#         "choices": [("Show all channels", 1), ("Composite Only", 2)]})#,layout = 'horizontal')
+#         "choices": [("Multichannel Mode", 1), ("Composite Mode", 2)]})#,layout = 'horizontal')
 def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     def _save_validation(VIEWER, Mode):
         print(f'reading from {OBJECT_DATA}')
@@ -1663,22 +1653,22 @@ def main(preprocess_class = None):
 
     next_page_button = QPushButton("Go")
     next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry, intensity_sort_box))
-    notes_container = viewer.window.add_dock_widget([NOTES_WIDGET,note_text_entry, note_cell_entry, note_button], name = 'Take notes', area = 'right')
-    page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, intensity_sort_box, next_page_button], name = 'Change Page', area = 'right')
+    notes_container = viewer.window.add_dock_widget([NOTES_WIDGET,note_text_entry, note_cell_entry, note_button], name = 'Annotation', area = 'right')
+    page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, intensity_sort_box, next_page_button], name = 'Page selection', area = 'right')
 
-    all_channels_rb = QRadioButton("Show All Channels")
+    all_channels_rb = QRadioButton("Multichannel Mode")
     composite_only_rb = QRadioButton("Composite Mode"); composite_only_rb.setChecked(True) # Start in composite mode
     comp_group = QButtonGroup(); comp_group.addButton(composite_only_rb); comp_group.addButton(all_channels_rb)
     switch_mode_button = QPushButton("Change Mode")
     switch_mode_button.pressed.connect(lambda: toggle_composite_viewstatus(all_channels_rb,composite_only_rb))
-    mode_container = viewer.window.add_dock_widget([all_channels_rb,composite_only_rb,switch_mode_button],name ="Mode",area="right")
+    mode_container = viewer.window.add_dock_widget([all_channels_rb,composite_only_rb,switch_mode_button],name ="Mode selection",area="right")
     
     visibility_show = QRadioButton("Show label overlay"); visibility_show.setChecked(True)
     visibility_hide = QRadioButton("Hide label overlay"); visibility_hide.setChecked(False)
     vis_group = QButtonGroup(); vis_group.addButton(visibility_show);vis_group.addButton(visibility_hide)
     visibility_hide.toggled.connect(lambda: toggle_statusbar_visibility(visibility_show))
     visibility_show.toggled.connect(lambda: toggle_statusbar_visibility(visibility_show))
-    vis_container = viewer.window.add_dock_widget([visibility_show,visibility_hide],name ="Label Opacity",area="right")
+    vis_container = viewer.window.add_dock_widget([visibility_show,visibility_hide],name ="Toggle overlay",area="right")
 
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
@@ -1722,7 +1712,6 @@ def main(preprocess_class = None):
 
     all_boxes = []
     for marker_function in CHANNELS_STR:
-        print(f"MY MARKER IS {marker_function}")
         # Only make visible the chosen markers
         all_boxes.append(globals()[f'{marker_function}_box'])
         # exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")

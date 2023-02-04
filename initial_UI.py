@@ -1,8 +1,7 @@
 #############################################################################
 
-from PyQt5.QtCore import (QDateTime, Qt, QTimer, QThread, 
-        pyqtSignal, QObject, QRunnable, QThreadPool, pyqtSlot)
-from PyQt5.QtGui import QIcon, QPixmap,QColor
+from PyQt5.QtCore import QDateTime, Qt
+from PyQt5.QtGui import QIcon, QPixmap,QColor,QFont
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDateTimeEdit,
         QDial, QDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
         QProgressBar, QPushButton, QRadioButton, QScrollBar, QSizePolicy,
@@ -15,35 +14,18 @@ import time
 import store_and_load
 from galleryViewer import GUI_execute
 import ctypes
-# import threading # no longer needed in all likelihood
 import logging
 from datetime import datetime
 import os
 import warnings
 warnings.filterwarnings("ignore")
 
-VERSION_NUMBER = '1.0'
+VERSION_NUMBER = '1.0.0'
 FONT_SIZE = 12
 #DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
 CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
 AVAILABLE_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'pink', 'cyan']
 WIDGET_SELECTED = None
-
-# class ExternalCounter(QThread):
-#     """
-#     Runs a counter thread.
-#     """
-#     countChanged = pyqtSignal(int)
-#     def __init__(self, time_limit):
-#         super(ExternalCounter, self).__init__()
-#         self.time_limit = time_limit
-
-#     def run(self):
-#         count = 0
-#         while count < self.time_limit:
-#             count +=1
-#             time.sleep(1)
-#             self.countChanged.emit(count)
 
 class ViewerPresets(QDialog):
     def __init__(self, app, parent=None):
@@ -56,7 +38,6 @@ class ViewerPresets(QDialog):
         self.setWindowFlag(Qt.WindowTitleHint,False)
 
         self.userInfo = store_and_load.loadObject('data/presets')
-        self.checkUser()
 
         # For TESTING
         print(f'Initial test print for colors: {self.userInfo.UI_color_display}')
@@ -70,7 +51,11 @@ class ViewerPresets(QDialog):
         cc_logo = QLabel()
         pixmap = QPixmap('data/mgh-mgb-cc-logo2 (Custom).png')
         cc_logo.setPixmap(pixmap)
-        titleLabel = QLabel(f"Pre-Release")# v"+VERSION_NUMBER)#{chr(8482)} TBD
+        # f'<br><font color="{idcolor}">CID: {ID}</font>'
+        titleLabel = QLabel(f'Ting Lab <font color="#033b96">Gallery</font><font color="#009ca6">Viewer</font> v{VERSION_NUMBER}')
+        # custom_font = QFont(); custom_font.setFamily('Metropolis Black'); custom_font.setPointSize(39)
+        titleLabel.setStyleSheet('font-family: Metropolis ; font-size: 25pt')
+        # titleLabel.setFont(QFont('MS Gothic',38))
         titleLabel.setAlignment(Qt.AlignCenter)
 
         self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
@@ -81,7 +66,7 @@ class ViewerPresets(QDialog):
 
         self.qptiffEntry.setFixedWidth(800)
         # qptiffEntry.setAlignment(Qt.AlignLeft)
-        entryLabel = QLabel("Raw Image: ")
+        entryLabel = QLabel("Image: ")
         entryLabel.setBuddy(self.qptiffEntry)
         entryLabel.setAlignment(Qt.AlignCenter)
         entryLabel.setMaximumWidth(600)
@@ -141,14 +126,7 @@ class ViewerPresets(QDialog):
         self.mainLayout.setColumnStretch(1, 1)
         self.setLayout(self.mainLayout)
 
-        self.setWindowTitle("Pre-processing Info")
-
-    # If no data yet (first time running the viewer), load up defaults
-    def checkUser(self):
-        if self.userInfo == None:
-            self.userInfo = store_and_load.userPresets()
-        else:
-            pass
+        self.setWindowTitle(f"GalleryViewer v{VERSION_NUMBER}")
 
     def saveQptiff(self):
         self.userInfo.qptiff = os.path.normpath(self.qptiffEntry.text().strip('"'))
@@ -398,34 +376,6 @@ class ViewerPresets(QDialog):
         layout.rowStretch(-100)
         self.topRightGroupBox.setLayout(layout)
 
-    def createProgressBar(self):
-        size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
-        eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
-
-        self.progressBar = QProgressBar()
-        self.progressBar.setRange(0, eta)
-        self.progressBar.setValue(0)
-
-        # self.timer = ExternalCounter(time_limit=eta)
-        # self.timer.countChanged.connect(self.advanceProgressBar)
-        # self.timer.start()
-
-    #     # self.timer = ExternalCounter(time_limit=eta)
-    #     # self.timer.countChanged.connect(self.advanceProgressBar)
-    #     # self.timer.start()
-
-    # def startProgressBar(self):
-    #     size_of_image = os.path.getsize(self.userInfo.qptiff) / 100000000
-    #     eta = int(size_of_image * 5) # about 5s per gb? This is in # of 10 ms periods to be done
-    #     self.timer = ExternalCounter(time_limit = eta)
-    #     self.timer.countChanged.connect(self.advanceProgressBar)
-    #     self.timer.start()
-
-    # def advanceProgressBar(self, value):
-    #     self.progressBar.setValue(value)
-    #     # self.progressBar.setValue(int(curVal + 1))
-    #     QApplication.processEvents()
-
     def loadGallery(self):
         # self.status_label.setVisible(True)
         # self.app.processEvents()
@@ -478,10 +428,10 @@ class ViewerPresets(QDialog):
             # print("done")
         except Exception as e:
             params = f"Image path: {self.userInfo.qptiff} \nData path: {self.userInfo.objectData}\n"
-            params += f"Punchout size: {self.userInfo.imageSize} \nUser selected channels: {self.userInfo.channels}"
-            params += f"Color scheme: {self.userInfo.cell_colors} \nChosen phenotype: {self.userInfo.phenotype}"
-            params += f"Batch/page size: {self.userInfo.page_size} \nSort: {self.userInfo.global_sort}"
-            params += f"Specific cell chosen?: {self.userInfo.specific_cell} \Expected order of multichannel data: {self.userInfo.channelOrder}"
+            params += f"Punchout size: {self.userInfo.imageSize} \nUser selected channels: {self.userInfo.channels}\n"
+            params += f"Color scheme: {self.userInfo.cell_colors} \nChosen phenotype: {self.userInfo.phenotype}\n"
+            params += f"Batch/page size: {self.userInfo.page_size} \nSort: {self.userInfo.global_sort}\n"
+            params += f"Specific cell chosen?: {self.userInfo.specific_cell} \nExpected order of multichannel data: {self.userInfo.channelOrder}\n"
             logging.basicConfig(filename=logpath, encoding='utf-8', level=logging.DEBUG)
             logging.exception(f"{params}\n ------ Crash report autogenerated after trying to load from GUI------ \n{e}")
 
@@ -490,15 +440,19 @@ class ViewerPresets(QDialog):
 
 
 if __name__ == '__main__':
+    ''' This file is run directly to start the GUI. The main method here needs to initialize
+    the QApplication
+    '''
+
     # This gets python to tell Windows it is merely hosting another app
-    #   Therefore, the icon I've attached to the app before is displayed in the taskbar, instead of the python default icon. 
+    # Therefore, the icon I've attached to the app before is displayed in the taskbar, instead of the python default icon. 
     myappid = 'MGH.CellGalleryViewer.v'+VERSION_NUMBER # arbitrary string
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     app = QApplication([])
     customStyle = ""
     for elem in ["QLabel","QLineEdit","QPushButton","QCheckBox", "QSpinBox", "QGroupBox"]:
         if elem == "QGroupBox" or elem == "QPushButton":
-            exec(f'customStyle += "{elem}{{font-size: {FONT_SIZE+2}pt;}}"')
+            exec(f'customStyle += "{elem}{{font-size: {FONT_SIZE+2}pt;}} "')
         elif elem == QSpinBox:
             exec(f'customStyle += "{elem}{{font-size: {FONT_SIZE-2}pt;}}"')
         else:
