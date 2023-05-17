@@ -4,6 +4,7 @@ Started on 6/7/22
 Peter Richieri
 '''
 
+import IPython
 import tifffile
 import rasterio
 from rasterio.windows import Window
@@ -1384,7 +1385,9 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
     if phenotype is None: phenotype=PHENOTYPE # Name of phenotype of interest
     # print(f'ORDERING PARAMS: id start: {cell_id_start}, page size: {page_size}, direction: {direction}, change?: {change_startID}')
     halo_export = pd.read_csv(OBJECT_DATA)
-
+    
+    if phenotype not in list(halo_export.columns):
+        raise KeyError
     # Add columns w/defaults if they aren't there to avoid runtime issues
     try:
         halo_export.loc[2,"Validation"]
@@ -1553,7 +1556,6 @@ def main(preprocess_class = None):
     if preprocess_class is not None: preprocess_class.status_label.setVisible(True)
     status = "Loading image as raster..."
     _update_status(status)
-
     start_time = time.time()
 
     print(f'\nLoading pyramid from {qptiff}...\n')
@@ -1694,8 +1696,14 @@ def main(preprocess_class = None):
 
         
     RAW_PYRAMID=pyramid
-
-    tumor_cell_XYs = extract_phenotype_xldata(specific_cell=SPECIFIC_CELL, sort_by_intensity=local_sort)
+    try:
+        tumor_cell_XYs = extract_phenotype_xldata(specific_cell=SPECIFIC_CELL, sort_by_intensity=local_sort)
+    except KeyError:
+        # If the user has given bad input, the function will raise a KeyError. Fail gracefully and inform the user
+        status+='<font color="#f5551a">  Failed.<br> The phenotype entered does not exist in the object data!</font>'
+        _update_status(status)
+        viewer.close()
+        return None # allows the input GUI to continue running
     status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
     _update_status(status)
 
