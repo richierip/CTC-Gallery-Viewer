@@ -44,7 +44,7 @@ OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data
 # OBJECT_DATA = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\PMR_test_Results.csv"
 PUNCHOUT_SIZE = 90 # microns or pixels? Probably pixels
 PAGE_SIZE = 15 # How many cells will be shown in next page
-ROW_SIZE = 10
+ROW_SIZE = 8
 SPECIFIC_CELL = None # Will be an int if the user wants to load the page with that cell
 PHENOTYPE = 'Tumor' #'CTC 488pos'
 GLOBAL_SORT = None
@@ -666,8 +666,9 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
     
     single_cell_lineEdit.clear() # reset the widget
     # Perform adjustments before exiting function
-    reuse_contrast_limits()
-    reuse_gamma() # might not need to do both of these... One is enough?
+    #TODO
+    # reuse_contrast_limits()
+    # reuse_gamma() # might not need to do both of these... One is enough?
     set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
     for widg in ALL_CUSTOM_WIDGETS.values():
         widg.setVisible(True)
@@ -1103,10 +1104,19 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         exec(f'TEMP = cm.get_cmap("{colormap}")', globals())
         exec(f'rgb = TEMP(SC_DATA)', globals(), loc)
         return loc['rgb']
+    
+    def black_background(color_space):
+        if color_space == 'RGB':
+            return np.zeros((ceil(PAGE_SIZE/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE, 4))
+        elif color_space == 'Luminescence':
+            return np.zeros((ceil(PAGE_SIZE/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE))
 
+    IMAGE_DATA_ORIGINAL = {}
+    for chn in CHANNELS_STR:
+        IMAGE_DATA_ORIGINAL[chn] = black_background('Luminescence')
 
-    page_image = np.zeros((ceil(PAGE_SIZE/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE, 4))
-    page_status_layer = np.zeros((ceil(PAGE_SIZE/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE, 4))
+    page_image = black_background('RGB')
+    page_status_layer = black_background('RGB')
     print(f'Adding {len(cells)} cells to viewer... Channels are {CHANNELS} // {CHANNELS_STR}')
     col = 0
     row = 0
@@ -1159,7 +1169,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
 
                 if not composite_enabled: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
                     # add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
-                    page_image[(row-1)*PUNCHOUT_SIZE:row*PUNCHOUT_SIZE, (col-1)*PUNCHOUT_SIZE:col*PUNCHOUT_SIZE] = cell_punchout_raw
+                    page_image[(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
+                                (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout_raw
                 
                 # normalize to 1.0
 
@@ -1181,7 +1192,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 #   can be properly applied. Need to copy that code again somewhere I guess
 
                 cp_save = cell_punchout_raw 
-                IMAGE_DATA_ORIGINAL[cell_name] = cp_save; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
+                ido_key = fluor
+                if ido_key not in ["DAPI","Composite"]:
+                    ido_key = 'OPAL'+ ido_key
+                IMAGE_DATA_ORIGINAL[ido_key][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
+                                                  (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cp_save #; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
 
                 # #TODO Gamma correct right here since there's a bug that doesn't allow passing to the viewer
                 # cell_punchout_raw = np.asarray([x**0.5 for x in cell_punchout_raw])
@@ -1264,8 +1279,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         IMAGE_DATA_ADJUSTED[cell_name] = composite.astype('int')
         # add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
         # add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
-        print(f"PAGEIMAGE is {type(page_image)} and shape {page_image.shape} and dtype {page_image.dtype}")
-        print(f"COMPOSITE is {type(composite)} and shape {composite.shape} and dtype {composite.dtype}")
+        # print(f"PAGEIMAGE is {type(page_image)} and shape {page_image.shape} and dtype {page_image.dtype}")
+        # print(f"COMPOSITE is {type(composite)} and shape {composite.shape} and dtype {composite.dtype}")
         GRID_TO_ID[f'{row},{col}'] = cell_id
         page_image[(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = composite
         # box = generate_status_box(status_colors[cell_status])
@@ -1311,7 +1326,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         if len(val) > 1: val = val[:-1]
         x = coords[1] - (PUNCHOUT_SIZE+2)*(col-1)
         y = coords[0] - (PUNCHOUT_SIZE+2)*(row-1)
-        return str(image_name)+f'_{row},{col}_{coords[0]}_{coords[1]}', (x,y), val
+        return str(image_name), (x,y), val
 
     @viewer.mouse_move_callbacks.append
     def display_intensity(image_layer, event):
@@ -1321,10 +1336,38 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         set_notes_label(NOTES_WIDGET, image_name)
         if val is None:
             # print('none')
-            VIEWER.status = f'Out of bounds'
+            VIEWER.status = 'Out of bounds'
         else:
             # print('else')
             VIEWER.status = f'{image_name} intensity at {coords}: {val[0]}R {val[1]}G {val[2]}B'
+
+    @status_layer.bind_key('Space')
+    def toggle_status(image_layer):
+        
+        data_coordinates = image_layer.world_to_data(viewer.cursor.position)
+        coords = np.round(data_coordinates).astype(int)
+        row,col = pixel_coord_to_grid(coords)
+        try:
+           cell_num = GRID_TO_ID[f'{row},{col}']
+        except KeyError as e:
+            return None
+
+        print(f"SPACE PRESSED: detected coords{coords}, row {row}, col{col}, || cell num: {cell_num}")
+
+        cur_status = STATUS_LIST[int(cell_num)]
+        cur_index = list(status_colors.keys()).index(cur_status)
+        next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
+        print(f'next status (shape_layer) is {next_status}')
+        STATUS_LIST[int(cell_num)] = next_status
+        if COMPOSITE_MODE: 
+            box = generate_status_box(status_colors[next_status])
+            print(f'New box shape will be {box.shape}')
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status])
+            image_layer.data = page_status_layer.astype('int')
+        else:
+            status_layer.colormap = status_colors[next_status]
+
 
     #TODO make a page label... 
     # add polygon (just for text label)
@@ -1785,10 +1828,10 @@ def main(preprocess_class = None):
     set_initial_adjustment_parameters() # set defaults: 1.0 gamma, 0 black in, 255 white in
     add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
         # Perform adjustments before exiting function
-    reuse_contrast_limits()
-    reuse_gamma() # might not need to do both of these... One is enough?
-    # viewer.grid.enabled = True
-    # viewer.grid.shape = (PAGE_SIZE, 5) # +1 because of the status layer.
+
+    #TODO
+    # reuse_contrast_limits()
+    # reuse_gamma() # might not need to do both of these... One is enough?
 
     print('Before')
     print(type(viewer.window))
