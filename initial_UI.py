@@ -20,7 +20,7 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 
-VERSION_NUMBER = '1.0.0'
+VERSION_NUMBER = '1.1.0'
 FONT_SIZE = 12
 #DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
 CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
@@ -52,7 +52,7 @@ class ViewerPresets(QDialog):
         pixmap = QPixmap('data/mgh-mgb-cc-logo2 (Custom).png')
         cc_logo.setPixmap(pixmap)
         # f'<br><font color="{idcolor}">CID: {ID}</font>'
-        titleLabel = QLabel(f'Ting Lab <font color="#033b96">Gallery</font><font color="#009ca6">Viewer</font> v{VERSION_NUMBER}')
+        titleLabel = QLabel(f'TCC Imaging Core <font color="#033b96">Gallery</font><font color="#009ca6">Viewer</font> <font size=12pt>v{VERSION_NUMBER}</font>')
         # custom_font = QFont(); custom_font.setFamily('Metropolis Black'); custom_font.setPointSize(39)
         titleLabel.setStyleSheet('font-family: Metropolis ; font-size: 25pt')
         # titleLabel.setFont(QFont('MS Gothic',38))
@@ -348,7 +348,7 @@ class ViewerPresets(QDialog):
         self.specificCellChoice.textEdited.connect(self.saveSpecificCell)
 
         self.page_size_widget = QSpinBox(self.topRightGroupBox)
-        self.page_size_widget.setRange(5,150)
+        self.page_size_widget.setRange(5,4000)
         self.page_size_widget.setValue(self.userInfo.page_size)
         self.page_size_widget.editingFinished.connect(self.savePageSize)
         self.page_size_widget.setFixedWidth(100)

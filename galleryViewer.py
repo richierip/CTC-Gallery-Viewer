@@ -22,6 +22,7 @@ import copy
 import time
 import store_and_load
 import custom_maps # Necessary, do not remove
+from math import ceil
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
@@ -38,11 +39,12 @@ for colormap in cell_colors:
 
 cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink', 'cyan'] # for local execution
 fluor_to_color = {}
-qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\auto_test.tif"
+qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
 OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
 # OBJECT_DATA = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\PMR_test_Results.csv"
 PUNCHOUT_SIZE = 90 # microns or pixels? Probably pixels
 PAGE_SIZE = 15 # How many cells will be shown in next page
+ROW_SIZE = 10
 SPECIFIC_CELL = None # Will be an int if the user wants to load the page with that cell
 PHENOTYPE = 'Tumor' #'CTC 488pos'
 GLOBAL_SORT = None
@@ -66,6 +68,7 @@ RAW_PYRAMID=None
 NOTES_WIDGET = None; ALL_CUSTOM_WIDGETS = {}
 COMPOSITE_MODE = True # Start in composite mode
 RASTERS = None
+GRID_TO_ID = {}
 
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
@@ -646,7 +649,6 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
 
     # Load into same mode as the current
     if COMPOSITE_MODE:
-        VIEWER.grid.shape = (PAGE_SIZE, 5)
         xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
         if xydata is False:
             VIEWER.status="Can't load cells: out of bounds error."
@@ -655,7 +657,6 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
             add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_enabled=True)
             
     else:
-        VIEWER.grid.shape = (PAGE_SIZE, len(CHANNELS)+1)
         xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
         if xydata is False:
             VIEWER.status="Can't load cells: out of bounds error."
@@ -682,13 +683,12 @@ def toggle_statusbar_visibility(show_widget):
     # Find status layers and toggle visibility
     if Status_Bar_Visibility==1:
         for layer in VIEWER.layers:
-            layername = layer.name
-            if 'status' in layername:
+            if layer.name == 'Status Layer':
                 layer.visible = True
     elif Status_Bar_Visibility==2:
         for layer in VIEWER.layers:
             layername = layer.name
-            if 'status' in layername:
+            if layer.name == 'Status Layer':
                 layer.visible = False
     else:
         raise Exception(f"Invalid parameter passed to toggle_statusbar_visibility: {Status_Bar_Visibility}. Must be 1 or 2.")
@@ -731,10 +731,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
     status_colors = {"unseen":"gray", "needs review":"bop orange", "confirmed":"green", "rejected":"red" }
 
     # Choice depends on whether we want to be in composite only mode or not
-    if not composite_enabled:
-        viewer.grid.stride = 1
-    else:
-        viewer.grid.stride = 2
+    # if not composite_enabled:
+    #     viewer.grid.stride = 1
+    # else:
+    #     viewer.grid.stride = 2
 
     def retrieve_status(cell_id, cell):
         ''' Kind of an anachronistic function at this point.'''
@@ -769,155 +769,158 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         else: # assume 'gray'
             color_tuple = (150,150,150,255)
 
-        corner_box_size = 8
+        corner_box_size = 16
+        edge_width = 1
 
-        top_or_bottom = [color_tuple, ] *(PUNCHOUT_SIZE+1)
+        top_or_bottom = [color_tuple, ] *(PUNCHOUT_SIZE+(edge_width*2))
+        # top_or_bottom = np.append([top_or_bottom],[top_or_bottom],axis = 0)
         x = np.array([[color_tuple, (0,0,0,0), color_tuple]])
-        y = np.repeat(x,[1,PUNCHOUT_SIZE-1,1],axis=1)
-        mid = np.repeat(y,PUNCHOUT_SIZE-(corner_box_size), axis=0)
+        y = np.repeat(x,[edge_width,PUNCHOUT_SIZE,edge_width],axis=1)
+        mid = np.repeat(y,PUNCHOUT_SIZE+edge_width-(corner_box_size), axis=0)
 
-        z = np.repeat(x,[corner_box_size,PUNCHOUT_SIZE-(corner_box_size),1],axis=1)
-        above_mid = np.repeat(z,corner_box_size-1, axis=0)
+        z = np.repeat(x,[corner_box_size,PUNCHOUT_SIZE+edge_width-(corner_box_size),edge_width],axis=1)
+        above_mid = np.repeat(z,corner_box_size-edge_width, axis=0)
+        # top = np.append([top_or_bottom],above_mid,axis=0)
         top = np.append([top_or_bottom],above_mid,axis=0)
-        # z = np.repeat([np.repeat([0],12)],2,axis=0)
+        # z = np.repeat([np.repeat([0],12)],2,axis=0)z
         xy = np.append(top,mid, axis=0)
         return np.append(xy,[top_or_bottom],axis=0)
 
-    def add_status_bar(viewer, name, status = 'unseen'):
-        if not composite_enabled:
-            # Make a strip - will display at the left of each row of channels (one row per cell)
-            x = np.array([[0,255,0]])
-            y = np.repeat(x,[PUNCHOUT_SIZE-8,7,1],axis=1)
-            overlay = np.repeat(y,PUNCHOUT_SIZE,axis=0)
-            status_layer = viewer.add_image(overlay, name = f'{name}_{status}', colormap = status_colors[status])
-        else:
-            # Create a small box - will display in the top left corner above each composite image
-            overlay = generate_status_box(status_colors[status])
-            status_layer = viewer.add_image(overlay, name = f'{name}_{status}')#, colormap = status_colors[status])
+    # def add_status_bar(viewer, name, status = 'unseen'):
+    #     if not composite_enabled:
+    #         # Make a strip - will display at the left of each row of channels (one row per cell)
+    #         x = np.array([[0,255,0]])
+    #         y = np.repeat(x,[PUNCHOUT_SIZE-8,7,1],axis=1)
+    #         overlay = np.repeat(y,PUNCHOUT_SIZE,axis=0)
+    #         status_layer = viewer.add_image(overlay, name = f'{name}_{status}', colormap = status_colors[status])
+    #     else:
+    #         # Create a small box - will display in the top left corner above each composite image
+    #         overlay = generate_status_box(status_colors[status])
+    #         status_layer = viewer.add_image(overlay, name = f'{name}_{status}')#, colormap = status_colors[status])
 
-        def find_mouse(shape_layer, pos):
-            data_coordinates = shape_layer.world_to_data(pos)
-            coords = np.round(data_coordinates).astype(int)
-            val = None
-            for img in VIEWER.layers:
-                if img.name == 'Page Name': continue
-                data_coordinates = img.world_to_data(pos)
-                val = img.get_value(data_coordinates)
-                if val is not None:
-                    shape_layer = img
-                    break
-            # val = shape_layer.get_value(data_coordinates)
-            # print(f'val is {val} and type is {type(val)}')
-            coords = np.round(data_coordinates).astype(int)
-            return shape_layer, coords, val
+    #     def find_mouse(shape_layer, pos):
+    #         data_coordinates = shape_layer.world_to_data(pos)
+    #         coords = np.round(data_coordinates).astype(int)
+    #         val = None
+    #         for img in VIEWER.layers:
+    #             if img.name == 'Page Name': continue
+    #             data_coordinates = img.world_to_data(pos)
+    #             val = img.get_value(data_coordinates)
+    #             if val is not None:
+    #                 shape_layer = img
+    #                 break
+    #         # val = shape_layer.get_value(data_coordinates)
+    #         # print(f'val is {val} and type is {type(val)}')
+    #         coords = np.round(data_coordinates).astype(int)
+    #         return shape_layer, coords, val
 
-        @status_layer.mouse_move_callbacks.append
-        def display_intensity(shape_layer, event):
+    #     @status_layer.mouse_move_callbacks.append
+    #     def display_intensity(shape_layer, event):
             
-            shape_layer,coords,val = find_mouse(shape_layer, event.position) 
-            set_notes_label(NOTES_WIDGET, shape_layer.name.split()[1])
-            if val is None:
-                # print('none')
-                VIEWER.status = f'{shape_layer.name} intensity at {coords}: N/A'
-            else:
-                # print('else')
-                VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
+    #         shape_layer,coords,val = find_mouse(shape_layer, event.position) 
+    #         set_notes_label(NOTES_WIDGET, shape_layer.name.split()[1])
+    #         if val is None:
+    #             # print('none')
+    #             VIEWER.status = f'{shape_layer.name} intensity at {coords}: N/A'
+    #         else:
+    #             # print('else')
+    #             VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
 
-        def get_layer_name(shape_layer):
-            # Find details for the layer under the mouse
-            status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
-            # Find this layers corresponding status layer
-            for candidate in VIEWER.layers:
-                if candidate.name == 'Page Name': continue
-                cellnum = candidate.name.split()[1]
-                if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
-                    status_layer = candidate
-                    break
-                else:
-                    continue
-            return status_layer.name,status_layer
+    #     def get_layer_name(shape_layer):
+    #         # Find details for the layer under the mouse
+    #         status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
+    #         # Find this layers corresponding status layer
+    #         for candidate in VIEWER.layers:
+    #             if candidate.name == 'Page Name': continue
+    #             cellnum = candidate.name.split()[1]
+    #             if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
+    #                 status_layer = candidate
+    #                 break
+    #             else:
+    #                 continue
+    #         return status_layer.name,status_layer
             
-        @status_layer.bind_key('Space')
-        def toggle_status(shape_layer):
-            name,status_layer = get_layer_name(shape_layer)
-            # Rename the status layer and change the color
-            if 'status' in name:
-                cur_status = name.split('_')[1] 
-                cur_index = list(status_colors.keys()).index(cur_status)
-                next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
-                print(f'next status (shape_layer) is {next_status}')
-                status_layer.name = name.split('_')[0] +'_'+next_status
-                STATUS_LIST[int(name.split()[1])] = next_status
-                if COMPOSITE_MODE: 
-                    status_layer.data = generate_status_box(status_colors[next_status])
-                else:
-                    status_layer.colormap = status_colors[next_status]
+    #     @status_layer.bind_key('Space')
+    #     def toggle_status(shape_layer):
+    #         name,status_layer = get_layer_name(shape_layer)
+    #         # Rename the status layer and change the color
+    #         if 'status' in name:
+    #             cur_status = name.split('_')[1] 
+    #             cur_index = list(status_colors.keys()).index(cur_status)
+    #             next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
+    #             print(f'next status (shape_layer) is {next_status}')
+    #             status_layer.name = name.split('_')[0] +'_'+next_status
+    #             STATUS_LIST[int(name.split()[1])] = next_status
+    #             if COMPOSITE_MODE: 
+    #                 status_layer.data = generate_status_box(status_colors[next_status])
+    #             else:
+    #                 status_layer.colormap = status_colors[next_status]
 
-            else:
-                pass
+    #         else:
+    #             pass
         
-        @status_layer.bind_key('c')
-        def set_unseen(shape_layer):
-            next_status = 'unseen'
+    #     @status_layer.bind_key('c')
+    #     def set_unseen(shape_layer):
+    #         next_status = 'unseen'
 
-            name,status_layer = get_layer_name(shape_layer)
-            # Rename the status layer and change the color
-            if 'status' in name:
-                status_layer.name = name.split('_')[0] +'_'+next_status
-                STATUS_LIST[int(name.split()[1])] = next_status
-                if COMPOSITE_MODE: 
-                    status_layer.data = generate_status_box(status_colors[next_status])
-                else:
-                    status_layer.colormap = status_colors[next_status] 
-            else:
-                pass
+    #         name,status_layer = get_layer_name(shape_layer)
+    #         # Rename the status layer and change the color
+    #         if 'status' in name:
+    #             status_layer.name = name.split('_')[0] +'_'+next_status
+    #             STATUS_LIST[int(name.split()[1])] = next_status
+    #             if COMPOSITE_MODE: 
+    #                 status_layer.data = generate_status_box(status_colors[next_status])
+    #             else:
+    #                 status_layer.colormap = status_colors[next_status] 
+    #         else:
+    #             pass
 
-        @status_layer.bind_key('v')
-        def set_nr(shape_layer):
-            next_status = 'needs review'
+    #     @status_layer.bind_key('v')
+    #     def set_nr(shape_layer):
+    #         next_status = 'needs review'
 
-            name,status_layer = get_layer_name(shape_layer)
-            # Rename the status layer and change the color
-            if 'status' in name:
-                status_layer.name = name.split('_')[0] +'_'+next_status 
-                STATUS_LIST[int(name.split()[1])] = next_status
-                if COMPOSITE_MODE: 
-                    status_layer.data = generate_status_box(status_colors[next_status])
-                else:
-                    status_layer.colormap = status_colors[next_status]
-            else:
-                pass
-        @status_layer.bind_key('b')
-        def set_confirmed(shape_layer):
-            next_status = 'confirmed'
+    #         name,status_layer = get_layer_name(shape_layer)
+    #         # Rename the status layer and change the color
+    #         if 'status' in name:
+    #             status_layer.name = name.split('_')[0] +'_'+next_status 
+    #             STATUS_LIST[int(name.split()[1])] = next_status
+    #             if COMPOSITE_MODE: 
+    #                 status_layer.data = generate_status_box(status_colors[next_status])
+    #             else:
+    #                 status_layer.colormap = status_colors[next_status]
+    #         else:
+    #             pass
+    #     @status_layer.bind_key('b')
+    #     def set_confirmed(shape_layer):
+    #         next_status = 'confirmed'
 
-            name,status_layer = get_layer_name(shape_layer)
-            # Rename the status layer and change the color
-            if 'status' in name:
-                status_layer.name = name.split('_')[0] +'_'+next_status
-                STATUS_LIST[int(name.split()[1])] = next_status
-                if COMPOSITE_MODE: 
-                    status_layer.data = generate_status_box(status_colors[next_status])
-                else:
-                    status_layer.colormap = status_colors[next_status]
-            else:
-                pass
+    #         name,status_layer = get_layer_name(shape_layer)
+    #         # Rename the status layer and change the color
+    #         if 'status' in name:
+    #             status_layer.name = name.split('_')[0] +'_'+next_status
+    #             STATUS_LIST[int(name.split()[1])] = next_status
+    #             if COMPOSITE_MODE: 
+    #                 status_layer.data = generate_status_box(status_colors[next_status])
+    #             else:
+    #                 status_layer.colormap = status_colors[next_status]
+    #         else:
+    #             pass
 
-        @status_layer.bind_key('n')
-        def set_rejected(shape_layer):
-            next_status = 'rejected'
+    #     @status_layer.bind_key('n')
+    #     def set_rejected(shape_layer):
+    #         next_status = 'rejected'
 
-            name,status_layer = get_layer_name(shape_layer)
-            # Rename the status layer and change the color
-            if 'status' in name:
-                status_layer.name = name.split('_')[0] +'_'+next_status 
-                STATUS_LIST[int(name.split()[1])] = next_status
-                if COMPOSITE_MODE: 
-                    status_layer.data = generate_status_box(status_colors[next_status])
-                else:
-                    status_layer.colormap = status_colors[next_status]
-            else:
-                pass
+    #         name,status_layer = get_layer_name(shape_layer)
+    #         # Rename the status layer and change the color
+    #         if 'status' in name:
+    #             status_layer.name = name.split('_')[0] +'_'+next_status 
+    #             STATUS_LIST[int(name.split()[1])] = next_status
+    #             if COMPOSITE_MODE: 
+    #                 status_layer.data = generate_status_box(status_colors[next_status])
+    #             else:
+    #                 status_layer.colormap = status_colors[next_status]
+    #         else:
+    #             pass
 
     def add_layer(viewer, layer, name, colormap = None, contr = [0,255] ):
 
@@ -958,130 +961,130 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             print(f'\n ~~~ Adding RGB Image auto contrast limit ~~~ \n')
             shape_layer = viewer.add_image(layer, name = name, gamma = 0.5)
 
-        def find_mouse(shape_layer, pos):
-            data_coordinates = shape_layer.world_to_data(pos)
-            coords = np.round(data_coordinates).astype(int)
-            val = None
-            for img in VIEWER.layers:
-                if img.name == 'Page Name': continue
+        # def find_mouse(shape_layer, pos):
+        #     data_coordinates = shape_layer.world_to_data(pos)
+        #     coords = np.round(data_coordinates).astype(int)
+        #     val = None
+        #     for img in VIEWER.layers:
+        #         if img.name == 'Page Name': continue
 
-                data_coordinates = img.world_to_data(pos)
-                val = img.get_value(data_coordinates)
-                if val is not None:
-                    shape_layer = img
-                    break
-            # val = shape_layer.get_value(data_coordinates)
-            # print(f'val is {val} and type is {type(val)}')
-            coords = np.round(data_coordinates).astype(int)
-            return shape_layer, coords, val
+        #         data_coordinates = img.world_to_data(pos)
+        #         val = img.get_value(data_coordinates)
+        #         if val is not None:
+        #             shape_layer = img
+        #             break
+        #     # val = shape_layer.get_value(data_coordinates)
+        #     # print(f'val is {val} and type is {type(val)}')
+        #     coords = np.round(data_coordinates).astype(int)
+        #     return shape_layer, coords, val
 
-        @shape_layer.mouse_move_callbacks.append
-        def display_intensity(shape_layer, event):
+        # @shape_layer.mouse_move_callbacks.append
+        # def display_intensity(shape_layer, event):
             
-            shape_layer,coords,val = find_mouse(shape_layer, event.position) 
-            set_notes_label(NOTES_WIDGET, shape_layer.name.split()[1])
-            if val is None:
-                # print('none')
-                VIEWER.status = f'{shape_layer.name} intensity at {coords}: N/A'
-            else:
-                # print('else')
-                VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
+        #     shape_layer,coords,val = find_mouse(shape_layer, event.position) 
+        #     set_notes_label(NOTES_WIDGET, shape_layer.name.split()[1])
+        #     if val is None:
+        #         # print('none')
+        #         VIEWER.status = f'{shape_layer.name} intensity at {coords}: N/A'
+        #     else:
+        #         # print('else')
+        #         VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
 
-        def get_layer_name(shape_layer):
-            # Find details for the layer under the mouse
-            status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
-            # Find this layers corresponding status layer
-            for candidate in VIEWER.layers:
-                if candidate.name == 'Page Name': continue
+        # def get_layer_name(shape_layer):
+        #     # Find details for the layer under the mouse
+        #     status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
+        #     # Find this layers corresponding status layer
+        #     for candidate in VIEWER.layers:
+        #         if candidate.name == 'Page Name': continue
 
-                cellnum = candidate.name.split()[1]
-                if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
-                    status_layer = candidate
-                    break
-                else:
-                    continue
-            return status_layer.name,status_layer
+        #         cellnum = candidate.name.split()[1]
+        #         if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
+        #             status_layer = candidate
+        #             break
+        #         else:
+        #             continue
+        #     return status_layer.name,status_layer
             
-        @shape_layer.bind_key('Space')
-        def toggle_status(shape_layer):
-            name,status_layer = get_layer_name(shape_layer)
-            # Rename the status layer and change the color
-            if 'status' in name:
-                cur_status = name.split('_')[1] 
-                cur_index = list(status_colors.keys()).index(cur_status)
-                next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
-                print(f'next status (shape_layer) is {next_status}')
-                status_layer.name = name.split('_')[0] +'_'+next_status 
-                STATUS_LIST[int(name.split()[1])] = next_status
-                if COMPOSITE_MODE: 
-                    status_layer.data = generate_status_box(status_colors[next_status])
-                else:
-                    status_layer.colormap = status_colors[next_status]
-            else:
-                pass
+        # @shape_layer.bind_key('Space')
+        # def toggle_status(shape_layer):
+        #     name,status_layer = get_layer_name(shape_layer)
+        #     # Rename the status layer and change the color
+        #     if 'status' in name:
+        #         cur_status = name.split('_')[1] 
+        #         cur_index = list(status_colors.keys()).index(cur_status)
+        #         next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
+        #         print(f'next status (shape_layer) is {next_status}')
+        #         status_layer.name = name.split('_')[0] +'_'+next_status 
+        #         STATUS_LIST[int(name.split()[1])] = next_status
+        #         if COMPOSITE_MODE: 
+        #             status_layer.data = generate_status_box(status_colors[next_status])
+        #         else:
+        #             status_layer.colormap = status_colors[next_status]
+        #     else:
+        #         pass
         
-        @shape_layer.bind_key('c')
-        def set_unseen(shape_layer):
-            next_status = 'unseen'
+        # @shape_layer.bind_key('c')
+        # def set_unseen(shape_layer):
+        #     next_status = 'unseen'
 
-            name,status_layer = get_layer_name(shape_layer)
-            # Rename the status layer and change the color
-            if 'status' in name:
-                status_layer.name = name.split('_')[0] +'_'+next_status 
-                STATUS_LIST[int(name.split()[1])] = next_status
-                if COMPOSITE_MODE: 
-                    status_layer.data = generate_status_box(status_colors[next_status])
-                else:
-                    status_layer.colormap = status_colors[next_status]
-            else:
-                pass
+        #     name,status_layer = get_layer_name(shape_layer)
+        #     # Rename the status layer and change the color
+        #     if 'status' in name:
+        #         status_layer.name = name.split('_')[0] +'_'+next_status 
+        #         STATUS_LIST[int(name.split()[1])] = next_status
+        #         if COMPOSITE_MODE: 
+        #             status_layer.data = generate_status_box(status_colors[next_status])
+        #         else:
+        #             status_layer.colormap = status_colors[next_status]
+        #     else:
+        #         pass
 
-        @shape_layer.bind_key('v')
-        def set_nr(shape_layer):
-            next_status = 'needs review'
+        # @shape_layer.bind_key('v')
+        # def set_nr(shape_layer):
+        #     next_status = 'needs review'
 
-            name,status_layer = get_layer_name(shape_layer)
-            # Rename the status layer and change the color
-            if 'status' in name:
-                status_layer.name = name.split('_')[0] +'_'+next_status 
-                STATUS_LIST[int(name.split()[1])] = next_status
-                if COMPOSITE_MODE: 
-                    status_layer.data = generate_status_box(status_colors[next_status])
-                else:
-                    status_layer.colormap = status_colors[next_status]
-            else:
-                pass
-        @shape_layer.bind_key('b')
-        def set_confirmed(shape_layer):
-            next_status = 'confirmed'
+        #     name,status_layer = get_layer_name(shape_layer)
+        #     # Rename the status layer and change the color
+        #     if 'status' in name:
+        #         status_layer.name = name.split('_')[0] +'_'+next_status 
+        #         STATUS_LIST[int(name.split()[1])] = next_status
+        #         if COMPOSITE_MODE: 
+        #             status_layer.data = generate_status_box(status_colors[next_status])
+        #         else:
+        #             status_layer.colormap = status_colors[next_status]
+        #     else:
+        #         pass
+        # @shape_layer.bind_key('b')
+        # def set_confirmed(shape_layer):
+        #     next_status = 'confirmed'
 
-            name,status_layer = get_layer_name(shape_layer)
-            # Rename the status layer and change the color
-            if 'status' in name:
-                status_layer.name = name.split('_')[0] +'_'+next_status 
-                STATUS_LIST[int(name.split()[1])] = next_status
-                if COMPOSITE_MODE: 
-                    status_layer.data = generate_status_box(status_colors[next_status])
-                else:
-                    status_layer.colormap = status_colors[next_status]
-            else:
-                pass
+        #     name,status_layer = get_layer_name(shape_layer)
+        #     # Rename the status layer and change the color
+        #     if 'status' in name:
+        #         status_layer.name = name.split('_')[0] +'_'+next_status 
+        #         STATUS_LIST[int(name.split()[1])] = next_status
+        #         if COMPOSITE_MODE: 
+        #             status_layer.data = generate_status_box(status_colors[next_status])
+        #         else:
+        #             status_layer.colormap = status_colors[next_status]
+        #     else:
+        #         pass
 
-        @shape_layer.bind_key('n')
-        def set_rejected(shape_layer):
-            next_status = 'rejected'
+        # @shape_layer.bind_key('n')
+        # def set_rejected(shape_layer):
+        #     next_status = 'rejected'
 
-            name,status_layer = get_layer_name(shape_layer)
-            # Rename the status layer and change the color
-            if 'status' in name:
-                status_layer.name = name.split('_')[0] +'_'+next_status 
-                STATUS_LIST[int(name.split()[1])] = next_status
-                if COMPOSITE_MODE: 
-                    status_layer.data = generate_status_box(status_colors[next_status])
-                else:
-                    status_layer.colormap = status_colors[next_status]
-            else:
-                pass
+        #     name,status_layer = get_layer_name(shape_layer)
+        #     # Rename the status layer and change the color
+        #     if 'status' in name:
+        #         status_layer.name = name.split('_')[0] +'_'+next_status 
+        #         STATUS_LIST[int(name.split()[1])] = next_status
+        #         if COMPOSITE_MODE: 
+        #             status_layer.data = generate_status_box(status_colors[next_status])
+        #         else:
+        #             status_layer.colormap = status_colors[next_status]
+        #     else:
+        #         pass
 
         return True
     # def add_layer_rgb(viewer, layer, name):
@@ -1100,10 +1103,17 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         exec(f'TEMP = cm.get_cmap("{colormap}")', globals())
         exec(f'rgb = TEMP(SC_DATA)', globals(), loc)
         return loc['rgb']
-    
+
+
+    page_image = np.zeros((ceil(PAGE_SIZE/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE, 4))
+    page_status_layer = np.zeros((ceil(PAGE_SIZE/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE, 4))
     print(f'Adding {len(cells)} cells to viewer... Channels are {CHANNELS} // {CHANNELS_STR}')
+    col = 0
+    row = 0
     while bool(cells): # coords left
-        print(f'Next round of while. Still {len(cells)} cells left')
+        col = (col%ROW_SIZE)+1
+        if col ==1: row+=1 
+        print(f'Next round of while. Still {len(cells)} cells left. Row {row}, Col {col}')
         cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; cell_status = retrieve_status(cell_id,cell)
         composite = []
         # add the rest of the layers to the viewer
@@ -1143,11 +1153,13 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                     with rasterio.open(RASTERS[i]) as channel:
                         cell_punchout_raw = channel.read(1,window=Window(cell_x-offset,cell_y-offset, offset*2,offset*2)).astype('float64')
                 else:
+                    # rasterio reading didn't work, so entire image should be in memory as np array
                     cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
                 print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}')
 
                 if not composite_enabled: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
-                    add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
+                    # add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
+                    page_image[(row-1)*PUNCHOUT_SIZE:row*PUNCHOUT_SIZE, (col-1)*PUNCHOUT_SIZE:col*PUNCHOUT_SIZE] = cell_punchout_raw
                 
                 # normalize to 1.0
 
@@ -1197,10 +1209,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 # print(f'For cell number {cell_id}, channel {i}, the max value is {mymax}')
         # add composite
         cell_name = f'Cell {cell_id} Composite'
-        if cell_name in IMAGE_DATA_ADJUSTED:
-            add_layer(viewer, IMAGE_DATA_ADJUSTED[cell_name], cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
-            add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
-            continue
+        # This will add the cell to the viewer if it has been calculated already
+        # if cell_name in IMAGE_DATA_ADJUSTED:
+        #     add_layer(viewer, IMAGE_DATA_ADJUSTED[cell_name], cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
+        #     add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
+        #     continue
         composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
         # print(f'shape before summing is {composite.shape}')
         # print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
@@ -1249,11 +1262,70 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         # print(f'also the shape is {composite.shape}') # (100,100,4)
         
         IMAGE_DATA_ADJUSTED[cell_name] = composite.astype('int')
-        add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
-        add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
-        # if len(cells) == 5:
-        #     np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\composite.txt", composite[:,:,0])
+        # add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
+        # add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
+        print(f"PAGEIMAGE is {type(page_image)} and shape {page_image.shape} and dtype {page_image.dtype}")
+        print(f"COMPOSITE is {type(composite)} and shape {composite.shape} and dtype {composite.dtype}")
+        GRID_TO_ID[f'{row},{col}'] = cell_id
+        page_image[(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = composite
+        # box = generate_status_box(status_colors[cell_status])
+        # print(f'\n {box.shape}')
+        # exit(0)
+        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[cell_status])
     
+    composite_layer = viewer.add_image(page_image.astype('int'), name = "Composite", gamma = 0.5)
+    status_layer = viewer.add_image(page_status_layer.astype('int'), name='Status Layer')
+    composite_layer.mouse_move_callbacks = []
+    '''Take a pixel coordinate (y,x) and return an (x,y) position for the image that contains the pixel in the image grid'''
+    def pixel_coord_to_grid(coords):
+        x = coords[0]; y = coords[1]
+        # Cannot return 0 this way, since there is no 0 row or col
+        row_num = max(ceil((x+1)/(PUNCHOUT_SIZE+2)),1)
+        col_num = max(ceil((y+1)/(PUNCHOUT_SIZE+2)),1)
+        return row_num, col_num
+    
+
+    def find_mouse(image_layer, pos):
+        # data_coordinates = image_layer.world_to_data(pos)
+        # coords = np.round(data_coordinates).astype(int)
+        # val = image_layer.get_value(data_coordinates)
+        for img in VIEWER.layers:
+            if img.name != 'Composite': continue
+
+            data_coordinates = img.world_to_data(pos)
+            val = img.get_value(data_coordinates)
+            if val is not None:
+                image_layer = img
+                break
+        # # val = image_layer.get_value(data_coordinates)
+        # # print(f'val is {val} and type is {type(val)}')
+        if val is None:
+            return "None" , None, None
+        coords = np.round(data_coordinates).astype(int)
+        row,col = pixel_coord_to_grid(coords)
+        try:
+            image_name = GRID_TO_ID[f'{row},{col}']
+        except KeyError as e:
+            return "None" , None, None
+        # adjust output to local coords + RGB without alpha
+        if len(val) > 1: val = val[:-1]
+        x = coords[1] - (PUNCHOUT_SIZE+2)*(col-1)
+        y = coords[0] - (PUNCHOUT_SIZE+2)*(row-1)
+        return str(image_name)+f'_{row},{col}_{coords[0]}_{coords[1]}', (x,y), val
+
+    @viewer.mouse_move_callbacks.append
+    def display_intensity(image_layer, event):
+        
+        cell_num,coords,val = find_mouse(image_layer, event.position) 
+        image_name = f'Cell {cell_num}'
+        set_notes_label(NOTES_WIDGET, image_name)
+        if val is None:
+            # print('none')
+            VIEWER.status = f'Out of bounds'
+        else:
+            # print('else')
+            VIEWER.status = f'{image_name} intensity at {coords}: {val[0]}R {val[1]}G {val[2]}B'
+
     #TODO make a page label... 
     # add polygon (just for text label)
     # text = {'string': 'Page name goes here', 'anchor': 'center', 'size': 8,'color': 'white'}
@@ -1460,19 +1532,16 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
         cell_set = phen_only_df[(page_number)*page_size:]
     
     print(f"#$%#$% local sort is {sort_by_intensity}")
+
     if sort_by_intensity is not None:
-        if sort_by_intensity == 'Object Id': 
-            order = True
-        else: 
-            order = False
         try:    
-            cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = order, kind = 'mergesort')
+            cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = False, kind = 'mergesort')
         except:
             if global_sort_status:
                 VIEWER.status = f"Unable to sort this page by '{sort_by_intensity}', will use ID instead. Check your data headers."
             else:
                 VIEWER.status = f"Unable to sort everything by '{sort_by_intensity}', will use ID instead. Check your data headers."
-            cell_set = cell_set.sort_values(by = 'Object Id', ascending = True, kind = 'mergesort')
+            cell_set = cell_set.sort_values(by = 'Object Id', ascending = False, kind = 'mergesort')
     fetch_notes(cell_set)
 
     tumor_cell_XYs = []
@@ -1616,6 +1685,12 @@ def main(preprocess_class = None):
     # #       Literally  ~ 10GB difference
     
     viewer = napari.Viewer(title='CTC Gallery')
+    # viewer._update_status_bar_from_cursor
+    # try:
+    #     viewer
+    # except Exception as e:
+    #     print(e)
+    #     exit()
     VIEWER = viewer
     # Get rid of the crap on the left sidebar for a cleaner screen
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
@@ -1700,7 +1775,7 @@ def main(preprocess_class = None):
         tumor_cell_XYs = extract_phenotype_xldata(specific_cell=SPECIFIC_CELL, sort_by_intensity=local_sort)
     except KeyError:
         # If the user has given bad input, the function will raise a KeyError. Fail gracefully and inform the user
-        status+='<font color="#f5551a">  Failed.<br> The phenotype entered does not exist in the object data!</font>'
+        status+=f'<font color="#f5551a">  Failed.<br> The phenotype "{PHENOTYPE}" does not exist in the object data!</font>'
         _update_status(status)
         viewer.close()
         return None # allows the input GUI to continue running
@@ -1712,8 +1787,8 @@ def main(preprocess_class = None):
         # Perform adjustments before exiting function
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
-    viewer.grid.enabled = True
-    viewer.grid.shape = (PAGE_SIZE, 5) # +1 because of the status layer.
+    # viewer.grid.enabled = True
+    # viewer.grid.shape = (PAGE_SIZE, 5) # +1 because of the status layer.
 
     print('Before')
     print(type(viewer.window))
@@ -1730,7 +1805,7 @@ def main(preprocess_class = None):
     chn_key_wrapper(viewer)
     print('After')
     print(type(viewer.window))
-    viewer.grid.stride = 2 # start in composite mode
+    # viewer.grid.stride = 2 # start in composite mode
     set_viewer_to_neutral_zoom(viewer) # Fix zoomed out issue
 
     viewer.window.add_dock_widget(all_boxes,area='bottom')
