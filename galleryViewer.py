@@ -490,27 +490,22 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
         except KeyError:
             hdata.insert(5,"Notes","-")
             hdata.fillna("")
-
-        for layer in VIEWER.layers:
-            if 'status' in layer.name:
-                status = layer.name.split('_')[1]
-                cell_id = layer.name.split()[1]
-            else:
-                continue
+        global XY_STORE, STATUS_LIST
+        for cell_id in STATUS_LIST.keys:
+            status = STATUS_LIST[cell_id]
             
-            print(f"LName: {layer.name} , status {status}, cid {cell_id}")
+            print(f"Save status {status}, cid {cell_id}")
             try:
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
-                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[cell_id]
+                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
             # Now do it for the saved cache
             try:
-                global XY_STORE, STATUS_LIST
                 for i,row in enumerate(XY_STORE):
                     if str(row[2]) == cell_id: 
                         XY_STORE[i][3] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
-                        STATUS_LIST[int(cell_id)] = status
+                        STATUS_LIST[str(cell_id)] = status
             except:
                 print("XY_Store saving issue.")
         try:
@@ -598,17 +593,12 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
             hdata.insert(5,"Notes","-")
             hdata.fillna("")
 
-        for layer in VIEWER.layers:
-            if 'status' in layer.name:
-                status = layer.name.split('_')[1]
-                cell_id = layer.name.split()[1]
-            else:
-                continue
-            
-            print(f"LName: {layer.name} , status {status}, cid {cell_id}")
+        for cell_id in STATUS_LIST.keys():
+            status = STATUS_LIST[cell_id]
+            print(f"Save status {status}, cid {cell_id}")
             try:
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
-                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[cell_id]
+                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
         try:
@@ -703,7 +693,7 @@ def set_notes_label(display_note_widget, ID):
         note = str(SAVED_NOTES[ID])
     except KeyError: # in case the name was off
         return False
-    status = STATUS_LIST[int(ID)]
+    status = STATUS_LIST[str(ID)]
     if status == 'confirmed':
         idcolor = '#00ff00'
     elif status == 'rejected':
@@ -751,12 +741,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             if type(status) is not str or status not in status_colors.keys():
                 status = "unseen"
             # Save to dict to make next retrieval faster
-            STATUS_LIST[cell_id] = status
+            STATUS_LIST[str(cell_id)] = status
             return status
         else:
             # Just grab it because it's there already
             try:
-                return STATUS_LIST[cell_id]
+                return STATUS_LIST[str(cell_id)]
             except:
                 raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {STATUS_LIST}")
                 
@@ -1333,7 +1323,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         
         cell_num,coords,val = find_mouse(image_layer, event.position) 
         image_name = f'Cell {cell_num}'
-        set_notes_label(NOTES_WIDGET, image_name)
+        set_notes_label(NOTES_WIDGET, str(cell_num))
         if val is None:
             # print('none')
             VIEWER.status = 'Out of bounds'
@@ -1352,22 +1342,88 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         except KeyError as e:
             return None
 
-        print(f"SPACE PRESSED: detected coords{coords}, row {row}, col{col}, || cell num: {cell_num}")
-
-        cur_status = STATUS_LIST[int(cell_num)]
+        cur_status = STATUS_LIST[str(cell_num)]
         cur_index = list(status_colors.keys()).index(cur_status)
         next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
-        print(f'next status (shape_layer) is {next_status}')
-        STATUS_LIST[int(cell_num)] = next_status
+        STATUS_LIST[str(cell_num)] = next_status
         if COMPOSITE_MODE: 
-            box = generate_status_box(status_colors[next_status])
-            print(f'New box shape will be {box.shape}')
             page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
                               (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status])
             image_layer.data = page_status_layer.astype('int')
         else:
             status_layer.colormap = status_colors[next_status]
 
+    @status_layer.bind_key('c')
+    def set_unseen(image_layer):
+        next_status = 'unseen'
+        data_coordinates = image_layer.world_to_data(viewer.cursor.position)
+        coords = np.round(data_coordinates).astype(int)
+        row,col = pixel_coord_to_grid(coords)
+        try:
+           cell_num = GRID_TO_ID[f'{row},{col}']
+        except KeyError as e:
+            return None
+        STATUS_LIST[str(cell_num)] = next_status
+        if COMPOSITE_MODE: 
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status])
+            image_layer.data = page_status_layer.astype('int')
+        else:
+            status_layer.colormap = status_colors[next_status]
+
+    @status_layer.bind_key('v')
+    def set_nr(image_layer):
+        next_status = 'needs review'
+        data_coordinates = image_layer.world_to_data(viewer.cursor.position)
+        coords = np.round(data_coordinates).astype(int)
+        row,col = pixel_coord_to_grid(coords)
+        try:
+           cell_num = GRID_TO_ID[f'{row},{col}']
+        except KeyError as e:
+            return None
+        STATUS_LIST[str(cell_num)] = next_status
+        if COMPOSITE_MODE: 
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status])
+            image_layer.data = page_status_layer.astype('int')
+        else:
+            status_layer.colormap = status_colors[next_status]
+
+    @status_layer.bind_key('b')
+    def set_confirmed(image_layer):
+        next_status = 'confirmed'
+        data_coordinates = image_layer.world_to_data(viewer.cursor.position)
+        coords = np.round(data_coordinates).astype(int)
+        row,col = pixel_coord_to_grid(coords)
+        try:
+           cell_num = GRID_TO_ID[f'{row},{col}']
+        except KeyError as e:
+            return None
+        STATUS_LIST[str(cell_num)] = next_status
+        if COMPOSITE_MODE: 
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status])
+            image_layer.data = page_status_layer.astype('int')
+        else:
+            status_layer.colormap = status_colors[next_status]
+    
+    @status_layer.bind_key('n')
+    def set_rejected(image_layer):
+        next_status = 'rejected'
+        data_coordinates = image_layer.world_to_data(viewer.cursor.position)
+        coords = np.round(data_coordinates).astype(int)
+        row,col = pixel_coord_to_grid(coords)
+        try:
+           cell_num = GRID_TO_ID[f'{row},{col}']
+        except KeyError as e:
+            return None
+        STATUS_LIST[str(cell_num)] = next_status
+        if COMPOSITE_MODE: 
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status])
+            image_layer.data = page_status_layer.astype('int')
+        else:
+            status_layer.colormap = status_colors[next_status]
 
     #TODO make a page label... 
     # add polygon (just for text label)
@@ -1401,7 +1457,6 @@ def sv_wrapper(viewer):
         print(f'reading from {OBJECT_DATA}')
         viewer.status = 'Saving ...'
         hdata = pd.read_csv(OBJECT_DATA)
-
         try:
             hdata.loc[2,"Validation"]
         except KeyError:
@@ -1413,17 +1468,12 @@ def sv_wrapper(viewer):
             hdata.insert(5,"Notes","-")
             hdata.fillna("")
 
-        for layer in viewer.layers:
-            if 'status' in layer.name:
-                status = layer.name.split('_')[1]
-                cell_id = layer.name.split()[1]
-            else:
-                continue
-            
-            print(f"LName: {layer.name} , status {status}, cid {cell_id}")
+        for cell_id in STATUS_LIST.keys():
+            status = STATUS_LIST[cell_id]
+            print(f"\nSave status {status}, cid {cell_id}")
             try:
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
-                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[cell_id]
+                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
         try:
