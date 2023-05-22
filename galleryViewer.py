@@ -74,23 +74,22 @@ GRID_TO_ID = {}
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
 #TODO merge some of the GUI elements into the same container to prevent strange spacing issues
 
-def validate_adjustment(layer):
-    layer_name = layer.name.split()[2] # grab last part of label
-    if layer_name == 'DAPI' and DAPI in ADJUSTED:
+def validate_adjustment(chn): # grab last part of label
+    if chn == 'DAPI' and DAPI in ADJUSTED:
         return True
-    elif layer_name == '480' and OPAL480 in ADJUSTED:
+    elif chn == 'OPAL480' and OPAL480 in ADJUSTED:
         return True
-    elif layer_name == '520'and OPAL520 in ADJUSTED:
+    elif chn == 'OPAL520'and OPAL520 in ADJUSTED:
         return True
-    elif layer_name == '570' and OPAL570 in ADJUSTED:
+    elif chn == 'OPAL570' and OPAL570 in ADJUSTED:
         return True
-    elif layer_name == '620'and OPAL620 in ADJUSTED:
+    elif chn == 'OPAL620'and OPAL620 in ADJUSTED:
         return True
-    elif layer_name == '690'and OPAL690 in ADJUSTED:
+    elif chn == 'OPAL690'and OPAL690 in ADJUSTED:
         return True
-    elif layer_name == '780'and OPAL780 in ADJUSTED:
+    elif chn == 'OPAL780'and OPAL780 in ADJUSTED:
         return True
-    elif layer_name == 'AF'and AF in ADJUSTED:
+    elif chn == 'AF'and AF in ADJUSTED:
         return True
     else:
         return False
@@ -134,13 +133,13 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
     # print(f'\n dumping adjustment needed: {need_gamma_adjustment}')
     for chn_pos in fluors_only:
         chn_str = CHANNEL_ORDER[chn_pos]
-        chn_str = chn_str.replace('OPAL','') # OPAL is not in the name of the data key
+        # chn_str = chn_str.replace('OPAL','') # OPAL is not in the name of the data key
         # gamma adjust
         
         # In this certain case, don't show anything for this channel
         if Composite not in ADJUSTED and chn_pos not in need_gamma_adjustment:
             # print(f'Conditions satisfied!\n')
-            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
+            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[chn_str])
             chn_data.fill(0)
             chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)
             composite.append([chn_data])
@@ -148,7 +147,7 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
 
         if chn_pos in need_gamma_adjustment:
             # print(f'Will gamma adjust {chn_str}')
-            chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
+            chn_data = copy.copy(IMAGE_DATA_ORIGINAL[chn_str])
 
             low = ADJUSTMENT_SETTINGS[chn_str+' black-in'] / 255.0
             high = ADJUSTMENT_SETTINGS[chn_str+' white-in'] / 255.0
@@ -164,9 +163,9 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
                 gamma_correct = np.vectorize(lambda x:x**gamma)
             chn_data = gamma_correct(chn_data)
             # print(f'Checking dimensions of chn_data: {np.asarray(chn_data).shape}')
-            IMAGE_DATA_ADJUSTED[stripped_name+chn_str] = chn_data # store adjustments
+            IMAGE_DATA_ADJUSTED[chn_str] = chn_data # store adjustments
         else:
-            chn_data = np.asarray(copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str]))
+            chn_data = np.asarray(copy.copy(IMAGE_DATA_ADJUSTED[chn_str]))
         chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
         composite.append([chn_data])
 
@@ -195,7 +194,7 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
         composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
         composite[:,:,i] = composite[:,:,i] * 255.0
 
-    IMAGE_DATA_ADJUSTED[layer.name] = composite.astype('int')
+    IMAGE_DATA_ADJUSTED['Composite'] = composite.astype('int')
     # print(f'Final check of dimensions of composite before setting data: {np.asarray(composite).shape}')
     layer.data = composite.astype('int') # casting is crucial
 
@@ -233,12 +232,12 @@ def adjust_composite_limits(layer):
     # print(f'\n dumping contrast adjustment needed: {need_contrast_adjustment}')
     for chn_pos in fluors_only:
         chn_str = CHANNEL_ORDER[chn_pos]
-        chn_str = chn_str.replace('OPAL','') # OPAL is not in the name of the data key
+        # chn_str = chn_str.replace('OPAL','') # OPAL is not in the name of the data key
         # gamma adjust
 
         # In this certain case, don't show anything for this channel
         if Composite not in ADJUSTED and chn_pos not in need_contrast_adjustment:
-            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
+            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[chn_str])
             chn_data.fill(0)
             chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)
             composite.append([chn_data])
@@ -246,7 +245,7 @@ def adjust_composite_limits(layer):
 
         if chn_pos in need_contrast_adjustment:
             # print(f'Will contrast adjust {chn_str}')
-            chn_data = copy.copy(IMAGE_DATA_ORIGINAL[stripped_name+chn_str])
+            chn_data = copy.copy(IMAGE_DATA_ORIGINAL[chn_str])
 
             low = ADJUSTMENT_SETTINGS[chn_str+' black-in'] / 255.0
             high = ADJUSTMENT_SETTINGS[chn_str+' white-in'] / 255.0
@@ -258,10 +257,10 @@ def adjust_composite_limits(layer):
             chn_data = gamma_correct(chn_data)
             # chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1) # can do this at the end?
             # print(f'Checking dimensions of chn_data: {np.asarray(chn_data).shape}')
-            IMAGE_DATA_ADJUSTED[stripped_name+chn_str] = chn_data # store adjustments
+            IMAGE_DATA_ADJUSTED[chn_str] = chn_data # store adjustments
         else:
             print(f'Just fetching {chn_str} data...')
-            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[stripped_name+chn_str])
+            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[chn_str])
         # print(f'Converting back to rgb, using the {fluor_to_color[chn_str]} palette ...')
         chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
         composite.append([chn_data])
@@ -297,26 +296,14 @@ def reuse_gamma():
     # print(f'\nDumping adjustment dict... \n {ADJUSTMENT_SETTINGS}\n')
     # print(f'ADJUSTED is {ADJUSTED}')
     for ctclayer in VIEWER.layers:
-        if ctclayer.name == 'Page Name': continue
-        # print(f'layername is {ctclayer}')
-        # no longer elif: want to do composite and all checked channels at the same time
-        if validate_adjustment(ctclayer):
-            # print(f"Validated! Searching dict for {ctclayer.name.split()[2]+' gamma'}")
-            # print(f"Result is {ADJUSTMENT_SETTINGS[ctclayer.name.split()[2]+' gamma']}")
-            # print(f"Result type is {type(ADJUSTMENT_SETTINGS[ctclayer.name.split()[2]+' gamma'])}")
-            ctclayer.gamma = ADJUSTMENT_SETTINGS[ctclayer.name.split()[2]+' gamma']
-        elif ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
+        if ctclayer.name != 'Status Layer' and len(ADJUSTED)>0:
             # this gamma doesn't matter since it won't be considered - The final parameter
             #   tells the function to skip it
             adjust_composite_gamma(ctclayer,gamma = 1.0, keepSettingsTheSame=True)
 
 def reuse_contrast_limits():
     for layer in VIEWER.layers:
-        if layer.name == 'Page Name': continue
-        if validate_adjustment(layer):
-            name = layer.name.split()[2]
-            layer.contrast_limits = (ADJUSTMENT_SETTINGS[name+' black-in'], ADJUSTMENT_SETTINGS[name+' white-in'])
-        elif layer.name.split()[2] == 'Composite' and len(ADJUSTED)>0: 
+        if layer.name != 'Status Layer' and len(ADJUSTED)>0: 
             adjust_composite_limits(layer)
 
 ## --- Bottom bar functions and GUI elements 
@@ -327,15 +314,11 @@ def adjust_gamma(viewer, gamma):
     # This allows the function to be called to reuse the same settings instead of updating them
     #   useful for keeping settings when loading next page or switching modes. 
     for fluor in ADJUSTED:
-        fluorname = CHANNEL_ORDER[fluor].replace('OPAL','')
+        fluorname = CHANNEL_ORDER[fluor]
         _update_dictionary(fluorname,gamma)
 
-    for ctclayer in viewer.layers:
-        if ctclayer.name == 'Page Name': continue
-        # no longer elif: want to do composite and all checked channels at the same time
-        if validate_adjustment(ctclayer):
-            ctclayer.gamma = gamma
-        elif ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
+    for ctclayer in VIEWER.layers:
+        if ctclayer.name != 'Status Layer' and len(ADJUSTED)>0:
             adjust_composite_gamma(ctclayer, gamma)
 
 @magicgui(auto_call=True,
@@ -353,15 +336,11 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' white-in'] = val
     for fluor in ADJUSTED:
-        fluorname = CHANNEL_ORDER[fluor].replace('OPAL','')
+        fluorname = CHANNEL_ORDER[fluor]
         _update_dictionary(fluorname,white_in)
     
     for ctclayer in VIEWER.layers:
-        if ctclayer.name == 'Page Name': continue
-        # no longer elif: want to do composite and all checked channels at the same time
-        if validate_adjustment(ctclayer):
-            ctclayer.contrast_limits = (ctclayer.contrast_limits[0], white_in)
-        elif ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
+        if ctclayer.name != 'Status Layer' and len(ADJUSTED)>0:
             # Works in both cases
             adjust_composite_limits(ctclayer)
 
@@ -374,15 +353,11 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         ADJUSTMENT_SETTINGS[name+' black-in'] = val
     
     for fluor in ADJUSTED:
-        fluorname = CHANNEL_ORDER[fluor].replace('OPAL','')
+        fluorname = CHANNEL_ORDER[fluor]
         _update_dictionary(fluorname,black_in)
 
     for ctclayer in VIEWER.layers:
-        if ctclayer.name == 'Page Name': continue
-        # no longer elif: want to do composite and all checked channels at the same time
-        if validate_adjustment(ctclayer):
-            ctclayer.contrast_limits = (black_in, ctclayer.contrast_limits[1])
-        elif ctclayer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
+        if ctclayer.name != 'Status Layer' and len(ADJUSTED)>0:
             adjust_composite_limits(ctclayer)
 
 # Called in a loop to create as many GUI elements as needed
@@ -414,8 +389,8 @@ def dynamic_checkbox_creator(checkbox_name, setChecked = True):
         
         # This will show/hide the appropriate layers in the composite image when checking the box
         for layer in VIEWER.layers:
-            if layer.name == 'Page Name': continue
-            if layer.name.split()[2] == 'Composite' and len(ADJUSTED)>0:
+            if layer.name == 'Status Layer': continue
+            else: # modifying "Composite Layer"
                 adjust_composite_gamma(layer, gamma=0.5, keepSettingsTheSame = True)
             
     return myfunc
@@ -445,32 +420,6 @@ def fix_default_composite_adj():
     ADJUSTED = list(filter(lambda a: a != globals()["Composite"], ADJUSTED))
 
 ## --- Side bar functions and GUI elements 
-
-### --- The following attempts at removing layers with a separate thread are deprecated
-def threading_remove_layer(layer):
-    try:
-        VIEWER.layers.remove(layer)
-    except KeyError:
-        # Just in case something goes wrong here.
-        pass
-
-def threading_add_layer(layer):
-    try:
-        VIEWER.add_image(layer)
-    except KeyError:
-        # Just in case something goes wrong here.
-        pass
-
-def one_by_one_layers(viewer):
-    for layer in list(viewer.layers):
-        # time.sleep(0.5) # wtf
-        yield layer
-# @thread_worker(connect={'yielded': threading_remove_layer})
-def concurrent_clear(viewer):
-    layers = one_by_one_layers(viewer)
-    for layer in layers:
-        # viewer.processEvents()
-        viewer.layers.remove(layer)
 
 ### --- 
 # @magicgui(call_button='Change Mode',
@@ -789,130 +738,6 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
     #         overlay = generate_status_box(status_colors[status])
     #         status_layer = viewer.add_image(overlay, name = f'{name}_{status}')#, colormap = status_colors[status])
 
-    #     def find_mouse(shape_layer, pos):
-    #         data_coordinates = shape_layer.world_to_data(pos)
-    #         coords = np.round(data_coordinates).astype(int)
-    #         val = None
-    #         for img in VIEWER.layers:
-    #             if img.name == 'Page Name': continue
-    #             data_coordinates = img.world_to_data(pos)
-    #             val = img.get_value(data_coordinates)
-    #             if val is not None:
-    #                 shape_layer = img
-    #                 break
-    #         # val = shape_layer.get_value(data_coordinates)
-    #         # print(f'val is {val} and type is {type(val)}')
-    #         coords = np.round(data_coordinates).astype(int)
-    #         return shape_layer, coords, val
-
-    #     @status_layer.mouse_move_callbacks.append
-    #     def display_intensity(shape_layer, event):
-            
-    #         shape_layer,coords,val = find_mouse(shape_layer, event.position) 
-    #         set_notes_label(NOTES_WIDGET, shape_layer.name.split()[1])
-    #         if val is None:
-    #             # print('none')
-    #             VIEWER.status = f'{shape_layer.name} intensity at {coords}: N/A'
-    #         else:
-    #             # print('else')
-    #             VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
-
-    #     def get_layer_name(shape_layer):
-    #         # Find details for the layer under the mouse
-    #         status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
-    #         # Find this layers corresponding status layer
-    #         for candidate in VIEWER.layers:
-    #             if candidate.name == 'Page Name': continue
-    #             cellnum = candidate.name.split()[1]
-    #             if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
-    #                 status_layer = candidate
-    #                 break
-    #             else:
-    #                 continue
-    #         return status_layer.name,status_layer
-            
-    #     @status_layer.bind_key('Space')
-    #     def toggle_status(shape_layer):
-    #         name,status_layer = get_layer_name(shape_layer)
-    #         # Rename the status layer and change the color
-    #         if 'status' in name:
-    #             cur_status = name.split('_')[1] 
-    #             cur_index = list(status_colors.keys()).index(cur_status)
-    #             next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
-    #             print(f'next status (shape_layer) is {next_status}')
-    #             status_layer.name = name.split('_')[0] +'_'+next_status
-    #             STATUS_LIST[int(name.split()[1])] = next_status
-    #             if COMPOSITE_MODE: 
-    #                 status_layer.data = generate_status_box(status_colors[next_status])
-    #             else:
-    #                 status_layer.colormap = status_colors[next_status]
-
-    #         else:
-    #             pass
-        
-    #     @status_layer.bind_key('c')
-    #     def set_unseen(shape_layer):
-    #         next_status = 'unseen'
-
-    #         name,status_layer = get_layer_name(shape_layer)
-    #         # Rename the status layer and change the color
-    #         if 'status' in name:
-    #             status_layer.name = name.split('_')[0] +'_'+next_status
-    #             STATUS_LIST[int(name.split()[1])] = next_status
-    #             if COMPOSITE_MODE: 
-    #                 status_layer.data = generate_status_box(status_colors[next_status])
-    #             else:
-    #                 status_layer.colormap = status_colors[next_status] 
-    #         else:
-    #             pass
-
-    #     @status_layer.bind_key('v')
-    #     def set_nr(shape_layer):
-    #         next_status = 'needs review'
-
-    #         name,status_layer = get_layer_name(shape_layer)
-    #         # Rename the status layer and change the color
-    #         if 'status' in name:
-    #             status_layer.name = name.split('_')[0] +'_'+next_status 
-    #             STATUS_LIST[int(name.split()[1])] = next_status
-    #             if COMPOSITE_MODE: 
-    #                 status_layer.data = generate_status_box(status_colors[next_status])
-    #             else:
-    #                 status_layer.colormap = status_colors[next_status]
-    #         else:
-    #             pass
-    #     @status_layer.bind_key('b')
-    #     def set_confirmed(shape_layer):
-    #         next_status = 'confirmed'
-
-    #         name,status_layer = get_layer_name(shape_layer)
-    #         # Rename the status layer and change the color
-    #         if 'status' in name:
-    #             status_layer.name = name.split('_')[0] +'_'+next_status
-    #             STATUS_LIST[int(name.split()[1])] = next_status
-    #             if COMPOSITE_MODE: 
-    #                 status_layer.data = generate_status_box(status_colors[next_status])
-    #             else:
-    #                 status_layer.colormap = status_colors[next_status]
-    #         else:
-    #             pass
-
-    #     @status_layer.bind_key('n')
-    #     def set_rejected(shape_layer):
-    #         next_status = 'rejected'
-
-    #         name,status_layer = get_layer_name(shape_layer)
-    #         # Rename the status layer and change the color
-    #         if 'status' in name:
-    #             status_layer.name = name.split('_')[0] +'_'+next_status 
-    #             STATUS_LIST[int(name.split()[1])] = next_status
-    #             if COMPOSITE_MODE: 
-    #                 status_layer.data = generate_status_box(status_colors[next_status])
-    #             else:
-    #                 status_layer.colormap = status_colors[next_status]
-    #         else:
-    #             pass
-
     def add_layer(viewer, layer, name, colormap = None, contr = [0,255] ):
 
         #TODO Decide: here or later (After RGB color mapping?)
@@ -952,130 +777,6 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
             print(f'\n ~~~ Adding RGB Image auto contrast limit ~~~ \n')
             shape_layer = viewer.add_image(layer, name = name, gamma = 0.5)
 
-        # def find_mouse(shape_layer, pos):
-        #     data_coordinates = shape_layer.world_to_data(pos)
-        #     coords = np.round(data_coordinates).astype(int)
-        #     val = None
-        #     for img in VIEWER.layers:
-        #         if img.name == 'Page Name': continue
-
-        #         data_coordinates = img.world_to_data(pos)
-        #         val = img.get_value(data_coordinates)
-        #         if val is not None:
-        #             shape_layer = img
-        #             break
-        #     # val = shape_layer.get_value(data_coordinates)
-        #     # print(f'val is {val} and type is {type(val)}')
-        #     coords = np.round(data_coordinates).astype(int)
-        #     return shape_layer, coords, val
-
-        # @shape_layer.mouse_move_callbacks.append
-        # def display_intensity(shape_layer, event):
-            
-        #     shape_layer,coords,val = find_mouse(shape_layer, event.position) 
-        #     set_notes_label(NOTES_WIDGET, shape_layer.name.split()[1])
-        #     if val is None:
-        #         # print('none')
-        #         VIEWER.status = f'{shape_layer.name} intensity at {coords}: N/A'
-        #     else:
-        #         # print('else')
-        #         VIEWER.status = f'{shape_layer.name} intensity at {coords}: {val}'
-
-        # def get_layer_name(shape_layer):
-        #     # Find details for the layer under the mouse
-        #     status_layer,coords,val = find_mouse(shape_layer, VIEWER.cursor.position) 
-        #     # Find this layers corresponding status layer
-        #     for candidate in VIEWER.layers:
-        #         if candidate.name == 'Page Name': continue
-
-        #         cellnum = candidate.name.split()[1]
-        #         if cellnum == status_layer.name.split()[1] and ('status' in candidate.name.split()[-1] or 'status' in candidate.name.split()[-2]):
-        #             status_layer = candidate
-        #             break
-        #         else:
-        #             continue
-        #     return status_layer.name,status_layer
-            
-        # @shape_layer.bind_key('Space')
-        # def toggle_status(shape_layer):
-        #     name,status_layer = get_layer_name(shape_layer)
-        #     # Rename the status layer and change the color
-        #     if 'status' in name:
-        #         cur_status = name.split('_')[1] 
-        #         cur_index = list(status_colors.keys()).index(cur_status)
-        #         next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
-        #         print(f'next status (shape_layer) is {next_status}')
-        #         status_layer.name = name.split('_')[0] +'_'+next_status 
-        #         STATUS_LIST[int(name.split()[1])] = next_status
-        #         if COMPOSITE_MODE: 
-        #             status_layer.data = generate_status_box(status_colors[next_status])
-        #         else:
-        #             status_layer.colormap = status_colors[next_status]
-        #     else:
-        #         pass
-        
-        # @shape_layer.bind_key('c')
-        # def set_unseen(shape_layer):
-        #     next_status = 'unseen'
-
-        #     name,status_layer = get_layer_name(shape_layer)
-        #     # Rename the status layer and change the color
-        #     if 'status' in name:
-        #         status_layer.name = name.split('_')[0] +'_'+next_status 
-        #         STATUS_LIST[int(name.split()[1])] = next_status
-        #         if COMPOSITE_MODE: 
-        #             status_layer.data = generate_status_box(status_colors[next_status])
-        #         else:
-        #             status_layer.colormap = status_colors[next_status]
-        #     else:
-        #         pass
-
-        # @shape_layer.bind_key('v')
-        # def set_nr(shape_layer):
-        #     next_status = 'needs review'
-
-        #     name,status_layer = get_layer_name(shape_layer)
-        #     # Rename the status layer and change the color
-        #     if 'status' in name:
-        #         status_layer.name = name.split('_')[0] +'_'+next_status 
-        #         STATUS_LIST[int(name.split()[1])] = next_status
-        #         if COMPOSITE_MODE: 
-        #             status_layer.data = generate_status_box(status_colors[next_status])
-        #         else:
-        #             status_layer.colormap = status_colors[next_status]
-        #     else:
-        #         pass
-        # @shape_layer.bind_key('b')
-        # def set_confirmed(shape_layer):
-        #     next_status = 'confirmed'
-
-        #     name,status_layer = get_layer_name(shape_layer)
-        #     # Rename the status layer and change the color
-        #     if 'status' in name:
-        #         status_layer.name = name.split('_')[0] +'_'+next_status 
-        #         STATUS_LIST[int(name.split()[1])] = next_status
-        #         if COMPOSITE_MODE: 
-        #             status_layer.data = generate_status_box(status_colors[next_status])
-        #         else:
-        #             status_layer.colormap = status_colors[next_status]
-        #     else:
-        #         pass
-
-        # @shape_layer.bind_key('n')
-        # def set_rejected(shape_layer):
-        #     next_status = 'rejected'
-
-        #     name,status_layer = get_layer_name(shape_layer)
-        #     # Rename the status layer and change the color
-        #     if 'status' in name:
-        #         status_layer.name = name.split('_')[0] +'_'+next_status 
-        #         STATUS_LIST[int(name.split()[1])] = next_status
-        #         if COMPOSITE_MODE: 
-        #             status_layer.data = generate_status_box(status_colors[next_status])
-        #         else:
-        #             status_layer.colormap = status_colors[next_status]
-        #     else:
-        #         pass
 
         return True
     # def add_layer_rgb(viewer, layer, name):
@@ -1101,7 +802,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         elif color_space == 'Luminescence':
             return np.zeros((ceil(PAGE_SIZE/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE))
 
-    IMAGE_DATA_ORIGINAL = {}
+    # IMAGE_DATA_ORIGINAL = {}
     for chn in CHANNELS_STR:
         IMAGE_DATA_ORIGINAL[chn] = black_background('Luminescence')
 
@@ -1127,12 +828,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 # name cell layer
                 #TODO this should REALLY be a dictionary lookup...
                 if i==DAPI: fluor='DAPI'
-                elif i==OPAL570: fluor='570'
-                elif i==OPAL690: fluor='690' 
-                elif i==OPAL480: fluor='480'
-                elif i==OPAL620: fluor='620' 
-                elif i==OPAL780: fluor='780'
-                elif i==OPAL520: fluor='520'
+                elif i==OPAL570: fluor='OPAL570'
+                elif i==OPAL690: fluor='OPAL690' 
+                elif i==OPAL480: fluor='OPAL480'
+                elif i==OPAL620: fluor='OPAL620' 
+                elif i==OPAL780: fluor='OPAL780'
+                elif i==OPAL520: fluor='OPAL520'
                 elif i==AF: fluor='AF' 
                 cell_name = f'Cell {cell_id} {fluor}'
 
@@ -1182,10 +883,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 #   can be properly applied. Need to copy that code again somewhere I guess
 
                 cp_save = cell_punchout_raw 
-                ido_key = fluor
-                if ido_key not in ["DAPI","Composite"]:
-                    ido_key = 'OPAL'+ ido_key
-                IMAGE_DATA_ORIGINAL[ido_key][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
+                # ido_key = fluor
+                # if ido_key not in ["DAPI","Composite"]:
+                #     ido_key = 'OPAL'+ ido_key
+                IMAGE_DATA_ORIGINAL[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
                                                   (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cp_save #; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
 
                 # #TODO Gamma correct right here since there's a bug that doesn't allow passing to the viewer
@@ -1266,7 +967,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         # print(f'For cell number {cell_id} the datatype is {composite.dtype}, max value is {np.max(composite[:,:,0])} and the min is {np.min(composite[:,:,0])}')
         # print(f'also the shape is {composite.shape}') # (100,100,4)
         
-        IMAGE_DATA_ADJUSTED[cell_name] = composite.astype('int')
+        # IMAGE_DATA_ADJUSTED[cell_name] = composite.astype('int')
         # add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
         # add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
         # print(f"PAGEIMAGE is {type(page_image)} and shape {page_image.shape} and dtype {page_image.dtype}")
@@ -1278,6 +979,9 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         # exit(0)
         page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[cell_status])
     
+    IMAGE_DATA_ORIGINAL['Composite'] = page_image.astype('int')
+    IMAGE_DATA_ADJUSTED = copy.copy(IMAGE_DATA_ORIGINAL)
+    # IMAGE_DATA_ADJUSTED['Composite'] = page_image.astype('int')
     composite_layer = viewer.add_image(page_image.astype('int'), name = "Composite", gamma = 0.5)
     status_layer = viewer.add_image(page_status_layer.astype('int'), name='Status Layer')
     composite_layer.mouse_move_callbacks = []
@@ -1520,7 +1224,7 @@ def chn_key_wrapper(viewer):
 
 def set_initial_adjustment_parameters():
     for fluor in CHANNELS_STR:
-        fluor = fluor.replace("OPAL",'')
+        # fluor = fluor.replace("OPAL",'')
         ADJUSTMENT_SETTINGS[fluor+ ' black-in']=0
         ADJUSTMENT_SETTINGS[fluor+ ' white-in']=255
         ADJUSTMENT_SETTINGS[fluor+ ' gamma']= 1.0
@@ -1774,16 +1478,8 @@ def main(preprocess_class = None):
         end_time = time.time()
         print(f'... completed in {end_time-start_time} seconds')
 
-    # #TODO think of something better than this. It tanks RAM usage to store this thing
-    # #       Literally  ~ 10GB difference
     
     viewer = napari.Viewer(title='CTC Gallery')
-    # viewer._update_status_bar_from_cursor
-    # try:
-    #     viewer
-    # except Exception as e:
-    #     print(e)
-    #     exit()
     VIEWER = viewer
     # Get rid of the crap on the left sidebar for a cleaner screen
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
