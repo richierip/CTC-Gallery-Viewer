@@ -23,6 +23,7 @@ import time
 import store_and_load
 import custom_maps # Necessary, do not remove
 from math import ceil
+from PIL import Image, ImageFont, ImageDraw
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
@@ -440,10 +441,9 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
             hdata.insert(5,"Notes","-")
             hdata.fillna("")
         global XY_STORE, STATUS_LIST
-        for cell_id in STATUS_LIST.keys:
+        for cell_id in STATUS_LIST.keys():
             status = STATUS_LIST[cell_id]
             
-            print(f"Save status {status}, cid {cell_id}")
             try:
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
@@ -497,20 +497,16 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     print(f"length is {len(XY_STORE)} and type is {type(XY_STORE)}")
     if Mode == 1: # change to Show All
         COMPOSITE_MODE = False
-        VIEWER.grid.shape = (PAGE_SIZE, len(CHANNELS)+1)
         print(f'\nAttempting to clear')
         VIEWER.layers.clear()
-        # concurrent_clear(VIEWER)
         # data = extract_phenotype_xldata() # Don't need this since it is saved now
-        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_enabled=False, new_page=False)
+        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_only=False, new_page=False)
     elif Mode ==2: # change to composite only
         COMPOSITE_MODE = True
-        VIEWER.grid.shape = (PAGE_SIZE, 5)
         print(f'\nAttempting to clear')
         VIEWER.layers.clear()
-        # concurrent_clear(VIEWER)
         #data = extract_phenotype_xldata() # Don't need this since it is saved now
-        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_enabled=True, new_page=False)
+        add_layers(VIEWER,RAW_PYRAMID, copy.copy(XY_STORE), int(PUNCHOUT_SIZE/2), composite_only=True, new_page=False)
     else:
         raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {Mode}. Must be 1 or 2.")
         # Perform adjustments before exiting function
@@ -544,7 +540,6 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
 
         for cell_id in STATUS_LIST.keys():
             status = STATUS_LIST[cell_id]
-            print(f"Save status {status}, cid {cell_id}")
             try:
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
@@ -593,7 +588,7 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
             VIEWER.status="Can't load cells: out of bounds error."
         else:
             VIEWER.layers.clear()
-            add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_enabled=True)
+            add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_only=True)
             
     else:
         xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
@@ -601,13 +596,13 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
             VIEWER.status="Can't load cells: out of bounds error."
         else:
             VIEWER.layers.clear()
-            add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_enabled=False)
+            add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_only=False)
     
     single_cell_lineEdit.clear() # reset the widget
     # Perform adjustments before exiting function
     #TODO
-    # reuse_contrast_limits()
-    # reuse_gamma() # might not need to do both of these... One is enough?
+    reuse_contrast_limits()
+    reuse_gamma() # might not need to do both of these... One is enough?
     set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
     for widg in ALL_CUSTOM_WIDGETS.values():
         widg.setVisible(True)
@@ -664,17 +659,15 @@ def set_notes_label(display_note_widget, ID):
 #   for the ctc cells. Gallery mode might end up being a pain for downstream.
 #   Counterpoint - how to apply filters to only some channels if they are in same image?
 #   Counterpoint to counterpoint - never get rid of numpy arrays and remake whole image as needed. 
-def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, new_page=True):
+def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new_page=True):
     print(f'\n---------\n \n Entering the add_layers function')
     print(f"pyramid shape is {pyramid.shape}")
     # Make the color bar that appears to the left of the composite image
     status_colors = {"unseen":"gray", "needs review":"bop orange", "confirmed":"green", "rejected":"red" }
-
-    # Choice depends on whether we want to be in composite only mode or not
-    # if not composite_enabled:
-    #     viewer.grid.stride = 1
-    # else:
-    #     viewer.grid.stride = 2
+    if not composite_only:
+        global ROW_SIZE
+        ROW_SIZE = len(CHANNELS_STR) #+1
+        # print(f"$$$$$$$ ROW SIZE VS CHANSTR: {ROW_SIZE} vs {len(CHANNELS_STR)}")
 
     def retrieve_status(cell_id, cell):
         ''' Kind of an anachronistic function at this point.'''
@@ -698,8 +691,18 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 return STATUS_LIST[str(cell_id)]
             except:
                 raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {STATUS_LIST}")
-                
-    def generate_status_box(color):
+
+    ''' Expects a numpy array of shape PUNCHOUT_SIZE x 16, with a 16x16 box taking up the left-hand side'''    
+    def write_cid_text_to_array(cb_size, edge_width, color, cid):
+        new = Image.new("RGBA", (3*(PUNCHOUT_SIZE+(2*edge_width)),3*cb_size), (0,0,0,255))
+        font = ImageFont.truetype("arial.ttf",48)
+        editable_image = ImageDraw.Draw(new)
+        editable_image.text((70,1), str(cid), color, font = font)
+        resized = np.array(new.resize((PUNCHOUT_SIZE+(2*edge_width),cb_size), Image.Resampling.LANCZOS))
+        resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
+        return resized
+
+    def generate_status_box(color, cid):
         if color == 'red':
             color_tuple = (255,0,0,255)
         elif color == 'green':
@@ -707,7 +710,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         elif color =='bop orange':
             color_tuple = (255,160,0,255)
         else: # assume 'gray'
-            color_tuple = (150,150,150,255)
+            color_tuple = (180,180,180,255)
 
         corner_box_size = 16
         edge_width = 1
@@ -720,14 +723,23 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
 
         z = np.repeat(x,[corner_box_size,PUNCHOUT_SIZE+edge_width-(corner_box_size),edge_width],axis=1)
         above_mid = np.repeat(z,corner_box_size-edge_width, axis=0)
+
+        top = write_cid_text_to_array(corner_box_size, edge_width, color_tuple, cid)
+        # text_added = text_added | above_mid
         # top = np.append([top_or_bottom],above_mid,axis=0)
-        top = np.append([top_or_bottom],above_mid,axis=0)
+        # print(f"SHAPES: tob {np.array([top_or_bottom]).shape} and text_added {text_added.shape}")
+        # exit()
+        top[0:corner_box_size,0:corner_box_size,:] = color_tuple
+        top[0,:,:] = color_tuple
+        top[:,-1,:] = color_tuple
+
+        # top = np.append([top_or_bottom],text_added,axis=0)
         # z = np.repeat([np.repeat([0],12)],2,axis=0)z
         xy = np.append(top,mid, axis=0)
         return np.append(xy,[top_or_bottom],axis=0)
 
     # def add_status_bar(viewer, name, status = 'unseen'):
-    #     if not composite_enabled:
+    #     if not composite_only:
     #         # Make a strip - will display at the left of each row of channels (one row per cell)
     #         x = np.array([[0,255,0]])
     #         y = np.repeat(x,[PUNCHOUT_SIZE-8,7,1],axis=1)
@@ -796,18 +808,23 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         exec(f'rgb = TEMP(SC_DATA)', globals(), loc)
         return loc['rgb']
     
-    def black_background(color_space):
+    def black_background(color_space, mult):
         if color_space == 'RGB':
-            return np.zeros((ceil(PAGE_SIZE/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE, 4))
+            return np.zeros((ceil((PAGE_SIZE*mult)/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE, 4))
         elif color_space == 'Luminescence':
-            return np.zeros((ceil(PAGE_SIZE/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE))
+            return np.zeros((ceil((PAGE_SIZE*mult)/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE))
 
+    if composite_only: size_multiplier = 1
+    else: size_multiplier = 4
     # IMAGE_DATA_ORIGINAL = {}
     for chn in CHANNELS_STR:
-        IMAGE_DATA_ORIGINAL[chn] = black_background('Luminescence')
+        if chn == 'Composite':
+            IMAGE_DATA_ORIGINAL[chn] = black_background('RGB', size_multiplier)
+        else:
+            IMAGE_DATA_ORIGINAL[chn] = black_background('Luminescence', size_multiplier)
 
-    page_image = black_background('RGB')
-    page_status_layer = black_background('RGB')
+    page_image = black_background('RGB',size_multiplier)
+    page_status_layer = black_background('RGB',size_multiplier)
     print(f'Adding {len(cells)} cells to viewer... Channels are {CHANNELS} // {CHANNELS_STR}')
     col = 0
     row = 0
@@ -838,10 +855,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 cell_name = f'Cell {cell_id} {fluor}'
 
                 # Shortcut if we have seen the cell before and done the work
-                if not composite_enabled and cell_name in IMAGE_DATA_ADJUSTED:
-                    # Have to apply a 255 multiplier since it's saved with a range of 0-1 (used for the composite calculations)
-                    add_layer(viewer,IMAGE_DATA_ADJUSTED[cell_name]*255, cell_name, colormap= cell_colors[i])
-                    continue # go on to the next
+                # if not composite_only and cell_name in IMAGE_DATA_ADJUSTED:
+                #     # Have to apply a 255 multiplier since it's saved with a range of 0-1 (used for the composite calculations)
+                #     add_layer(viewer,IMAGE_DATA_ADJUSTED[cell_name]*255, cell_name, colormap= cell_colors[i])
+                #     continue # go on to the next
 
                 # print(f'Adding cell {cell_x},{cell_y} - layer {i}')
                 # Save record of what colormap is chosen for what fluor. Useful for 
@@ -857,11 +874,6 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                     # rasterio reading didn't work, so entire image should be in memory as np array
                     cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
                 print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}')
-
-                if not composite_enabled: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
-                    # add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
-                    page_image[(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
-                                (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout_raw
                 
                 # normalize to 1.0
 
@@ -886,6 +898,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 # ido_key = fluor
                 # if ido_key not in ["DAPI","Composite"]:
                 #     ido_key = 'OPAL'+ ido_key
+                # print(f'fluor {fluor} IMAGEDATAORIGINAL shape: {IMAGE_DATA_ORIGINAL[fluor].shape} | row {row}, col {col} | cpsave shape {cp_save.shape}')
                 IMAGE_DATA_ORIGINAL[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
                                                   (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cp_save #; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
 
@@ -894,6 +907,21 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                 # print(f'\n\n Type before color mapping is {cell_punchout_raw.dtype}, shape is {cell_punchout_raw.shape}|| there are {len(np.unique(cell_punchout_raw))} unique elements. Min/max is {np.min(cell_punchout_raw)} |{np.max(cell_punchout_raw)}\n\n')
                 cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
 
+                # print(f'fluor {fluor} pageimage shape: {pageimage.shape} | row {row}, col {col} | cpsave shape {cp_save.shape}')
+                if not composite_only: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
+                    # add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
+                    # cell_punchout = cell_punchout * 255.0
+                    # print(f"shape: {cell_punchout.shape} | {cell_punchout[40,40,:]} ")
+                    # exit()
+                    page_image[(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
+                                (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout * 255.0
+                    GRID_TO_ID[f'{row},{col}'] = cell_id
+                    GRID_TO_ID[f'{row},{ROW_SIZE}'] = cell_id
+                    # Do this next one to assemble the composite image 
+                    IMAGE_DATA_ORIGINAL[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
+                                                  (ROW_SIZE-1)*(PUNCHOUT_SIZE+2)+1:ROW_SIZE*(PUNCHOUT_SIZE+2)-1] = cp_save
+                    col+=1
+                    continue
 
                 # print(f'raw np shape is {cell_punchout_raw.shape}') # (100,100)
                 # print(f'colormapped np shape is {cell_punchout.shape}') # (100,100,4)
@@ -909,82 +937,85 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
                     # np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\normed.txt", cm.Reds(norm(cell_punchout_raw))[:,:,0])
                     # np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\cell_punch_raw.txt", cell_punchout_raw)
 
-                
-                # Confirmation that values are 0-255
-                # mymax = np.max(pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i])
-                # print(f'For cell number {cell_id}, channel {i}, the max value is {mymax}')
-        # add composite
-        cell_name = f'Cell {cell_id} Composite'
-        # This will add the cell to the viewer if it has been calculated already
-        # if cell_name in IMAGE_DATA_ADJUSTED:
-        #     add_layer(viewer, IMAGE_DATA_ADJUSTED[cell_name], cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
-        #     add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
-        #     continue
-        composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
-        # print(f'shape before summing is {composite.shape}')
-        # print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
+        if composite_only: # This stuff is only necessary in composite mode   
+                    # Confirmation that values are 0-255
+                    # mymax = np.max(pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i])
+                    # print(f'For cell number {cell_id}, channel {i}, the max value is {mymax}')
+            # add composite
+            cell_name = f'Cell {cell_id} Composite'
+            # This will add the cell to the viewer if it has been calculated already
+            # if cell_name in IMAGE_DATA_ADJUSTED:
+            #     add_layer(viewer, IMAGE_DATA_ADJUSTED[cell_name], cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
+            #     add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
+            #     continue
+            composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
+            # print(f'shape before summing is {composite.shape}')
+            # print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
 
-        composite = np.sum(composite, axis=0)
-        composite = np.clip(composite,0,np.max(composite)) # ensures 0-1 scaling 
-        # print(f'\n!!! Shape after summing is {composite.shape}')
-        # print(f'same pixel added: {composite [45,45,:]}')
-        composite[:,:,3] = 1.0 # Restore Alpha value to 1.0 (possibly redundant)
-        # print(f'same pixel averaged by 3: {composite [45,45,:]}')
+            composite = np.sum(composite, axis=0)
+            composite = np.clip(composite,0,np.max(composite)) # ensures 0-1 scaling 
+            # print(f'\n!!! Shape after summing is {composite.shape}')
+            # print(f'same pixel added: {composite [45,45,:]}')
+            composite[:,:,3] = 1.0 # Restore Alpha value to 1.0 (possibly redundant)
+            # print(f'same pixel averaged by 3: {composite [45,45,:]}')
 
 
-        rgb_mins = [] ## Axis here?
-        rgb_maxes = []
-        for i in range(3):
-            temp = np.ndarray.flatten(composite[:,:,i])
-            # print(f'Shape of intermediate is {temp.shape}')
-            rgb_mins.append(np.min(temp))
-            rgb_maxes.append(np.max(temp))
-        # print(f'Using axis {1}, here are the mins: {rgb_mins}')
-        # print(f'Here are the maxes: {rgb_maxes}')
+            rgb_mins = [] ## Axis here?
+            rgb_maxes = []
+            for i in range(3):
+                temp = np.ndarray.flatten(composite[:,:,i])
+                # print(f'Shape of intermediate is {temp.shape}')
+                rgb_mins.append(np.min(temp))
+                rgb_maxes.append(np.max(temp))
+            # print(f'Using axis {1}, here are the mins: {rgb_mins}')
+            # print(f'Here are the maxes: {rgb_maxes}')
 
-        # rgb_mins = np.amin(composite, axis=2) ## Axis here?
-        # rgb_maxes = np.amax(composite, axis = 2)
-        # print(f'\n \nUsing axis {2}, here are the mins: {rgb_mins}')
-        # print(f'\n Here are the maxes: {rgb_maxes}')
-        # for j in range(3):
-        #     print(f'My j is {j}. 0 should be black channel, one is blue, 2 is red ')
-        # print(f'\n \n Beginning the min/max normalization loop.')
-        for i in range(3):
-            # Map values back to normal range of 0, 255.0 before passing as RGB. Napari does a shitty job of displaying without this.
-            # print(f'My i is {i}. RGB maps to 012 min/max is {rgb_mins[i]}/{rgb_maxes[i]}')
-            # continue
-            #TODO decide what to do here
-            ##### try to colormap a 255 and use that as a max ... It's 1 
+            # rgb_mins = np.amin(composite, axis=2) ## Axis here?
+            # rgb_maxes = np.amax(composite, axis = 2)
+            # print(f'\n \nUsing axis {2}, here are the mins: {rgb_mins}')
+            # print(f'\n Here are the maxes: {rgb_maxes}')
+            # for j in range(3):
+            #     print(f'My j is {j}. 0 should be black channel, one is blue, 2 is red ')
+            # print(f'\n \n Beginning the min/max normalization loop.')
+            for i in range(3):
+                # Map values back to normal range of 0, 255.0 before passing as RGB. Napari does a shitty job of displaying without this.
+                # print(f'My i is {i}. RGB maps to 012 min/max is {rgb_mins[i]}/{rgb_maxes[i]}')
+                # continue
+                #TODO decide what to do here
+                ##### try to colormap a 255 and use that as a max ... It's 1 
 
-            composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
-                                                    #rgb_maxes[i]
-            composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
-            composite[:,:,i] = composite[:,:,i] * 255.0
+                composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
+                                                        #rgb_maxes[i]
+                composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
+                composite[:,:,i] = composite[:,:,i] * 255.0
 
-            # composite[:,:,i] -= np.min(composite[:,:,i])
-            # composite[:,:,i] *= 255.0/np.max(composite[:,:,i])
-        # print(f'same pixel multiplied / normalized to 0,255 range: {composite [45,45,:]}')
-        # print(f'For cell number {cell_id} the datatype is {composite.dtype}, max value is {np.max(composite[:,:,0])} and the min is {np.min(composite[:,:,0])}')
-        # print(f'also the shape is {composite.shape}') # (100,100,4)
+                # composite[:,:,i] -= np.min(composite[:,:,i])
+                # composite[:,:,i] *= 255.0/np.max(composite[:,:,i])
+            # print(f'same pixel multiplied / normalized to 0,255 range: {composite [45,45,:]}')
+            # print(f'For cell number {cell_id} the datatype is {composite.dtype}, max value is {np.max(composite[:,:,0])} and the min is {np.min(composite[:,:,0])}')
+            # print(f'also the shape is {composite.shape}') # (100,100,4)
+            
+            # IMAGE_DATA_ADJUSTED[cell_name] = composite.astype('int')
+            # add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
+            # add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
+            # print(f"PAGEIMAGE is {type(page_image)} and shape {page_image.shape} and dtype {page_image.dtype}")
+            # print(f"COMPOSITE is {type(composite)} and shape {composite.shape} and dtype {composite.dtype}")
+            GRID_TO_ID[f'{row},{col}'] = cell_id
+
+
+            page_image[(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = composite
+            IMAGE_DATA_ORIGINAL['Composite'][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = composite
+            # box = generate_status_box(status_colors[cell_status])
+            # print(f'\n {box.shape}')
+            # exit(0)
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[cell_status], cell_id)
         
-        # IMAGE_DATA_ADJUSTED[cell_name] = composite.astype('int')
-        # add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
-        # add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
-        # print(f"PAGEIMAGE is {type(page_image)} and shape {page_image.shape} and dtype {page_image.dtype}")
-        # print(f"COMPOSITE is {type(composite)} and shape {composite.shape} and dtype {composite.dtype}")
-        GRID_TO_ID[f'{row},{col}'] = cell_id
-        page_image[(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = composite
-        # box = generate_status_box(status_colors[cell_status])
-        # print(f'\n {box.shape}')
-        # exit(0)
-        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[cell_status])
-    
-    IMAGE_DATA_ORIGINAL['Composite'] = page_image.astype('int')
+    IMAGE_DATA_ORIGINAL['All'] = page_image.astype('int')
     IMAGE_DATA_ADJUSTED = copy.copy(IMAGE_DATA_ORIGINAL)
     # IMAGE_DATA_ADJUSTED['Composite'] = page_image.astype('int')
     composite_layer = viewer.add_image(page_image.astype('int'), name = "Composite", gamma = 0.5)
+    # if composite_only:
     status_layer = viewer.add_image(page_status_layer.astype('int'), name='Status Layer')
-    composite_layer.mouse_move_callbacks = []
     '''Take a pixel coordinate (y,x) and return an (x,y) position for the image that contains the pixel in the image grid'''
     def pixel_coord_to_grid(coords):
         x = coords[0]; y = coords[1]
@@ -1052,7 +1083,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         STATUS_LIST[str(cell_num)] = next_status
         if COMPOSITE_MODE: 
             page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status])
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num))
             image_layer.data = page_status_layer.astype('int')
         else:
             status_layer.colormap = status_colors[next_status]
@@ -1070,7 +1101,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         STATUS_LIST[str(cell_num)] = next_status
         if COMPOSITE_MODE: 
             page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status])
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num))
             image_layer.data = page_status_layer.astype('int')
         else:
             status_layer.colormap = status_colors[next_status]
@@ -1088,7 +1119,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         STATUS_LIST[str(cell_num)] = next_status
         if COMPOSITE_MODE: 
             page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status])
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num))
             image_layer.data = page_status_layer.astype('int')
         else:
             status_layer.colormap = status_colors[next_status]
@@ -1106,7 +1137,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         STATUS_LIST[str(cell_num)] = next_status
         if COMPOSITE_MODE: 
             page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status])
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num))
             image_layer.data = page_status_layer.astype('int')
         else:
             status_layer.colormap = status_colors[next_status]
@@ -1124,7 +1155,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_enabled=COMPOSITE_MODE, 
         STATUS_LIST[str(cell_num)] = next_status
         if COMPOSITE_MODE: 
             page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status])
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num))
             image_layer.data = page_status_layer.astype('int')
         else:
             status_layer.colormap = status_colors[next_status]
@@ -1331,8 +1362,10 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
     print(f"#$%#$% local sort is {sort_by_intensity}")
 
     if sort_by_intensity is not None:
+        if sort_by_intensity == "Object Id": lsort = False
+        else: lsort = True
         try:    
-            cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = False, kind = 'mergesort')
+            cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = lsort, kind = 'mergesort')
         except:
             if global_sort_status:
                 VIEWER.status = f"Unable to sort this page by '{sort_by_intensity}', will use ID instead. Check your data headers."
@@ -1576,8 +1609,8 @@ def main(preprocess_class = None):
         # Perform adjustments before exiting function
 
     #TODO
-    # reuse_contrast_limits()
-    # reuse_gamma() # might not need to do both of these... One is enough?
+    reuse_contrast_limits()
+    reuse_gamma() # might not need to do both of these... One is enough?
 
     print('Before')
     print(type(viewer.window))
