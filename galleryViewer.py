@@ -693,16 +693,16 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {STATUS_LIST}")
 
     ''' Expects a numpy array of shape PUNCHOUT_SIZE x 16, with a 16x16 box taking up the left-hand side'''    
-    def write_cid_text_to_array(cb_size, edge_width, color, cid):
-        new = Image.new("RGBA", (3*(PUNCHOUT_SIZE+(2*edge_width)),3*cb_size), (0,0,0,255))
+    def write_cid_text_to_array(cb_size, im_length, edge_width, color, cid):
+        new = Image.new("RGBA", (3*im_length,3*cb_size), (0,0,0,255))
         font = ImageFont.truetype("arial.ttf",48)
         editable_image = ImageDraw.Draw(new)
         editable_image.text((70,1), str(cid), color, font = font)
-        resized = np.array(new.resize((PUNCHOUT_SIZE+(2*edge_width),cb_size), Image.Resampling.LANCZOS))
+        resized = np.array(new.resize((im_length,cb_size), Image.Resampling.LANCZOS))
         resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
         return resized
 
-    def generate_status_box(color, cid):
+    def generate_status_box(color, cid, composite_only):
         if color == 'red':
             color_tuple = (255,0,0,255)
         elif color == 'green':
@@ -714,17 +714,24 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
         corner_box_size = 16
         edge_width = 1
+        if composite_only:
+            layer_length = (PUNCHOUT_SIZE+(edge_width*2))
+        else:
+            layer_length = (PUNCHOUT_SIZE+(edge_width*2)) * ROW_SIZE
 
-        top_or_bottom = [color_tuple, ] *(PUNCHOUT_SIZE+(edge_width*2))
+        print(f"Layer_Length is {layer_length}")
+        # exit()
+
+        top_or_bottom = [color_tuple, ] *layer_length
         # top_or_bottom = np.append([top_or_bottom],[top_or_bottom],axis = 0)
         x = np.array([[color_tuple, (0,0,0,0), color_tuple]])
-        y = np.repeat(x,[edge_width,PUNCHOUT_SIZE,edge_width],axis=1)
+        y = np.repeat(x,[edge_width,layer_length - (2*edge_width),edge_width],axis=1)
         mid = np.repeat(y,PUNCHOUT_SIZE+edge_width-(corner_box_size), axis=0)
 
-        z = np.repeat(x,[corner_box_size,PUNCHOUT_SIZE+edge_width-(corner_box_size),edge_width],axis=1)
-        above_mid = np.repeat(z,corner_box_size-edge_width, axis=0)
+        z = np.repeat(x,[corner_box_size,(layer_length-(2*edge_width))+edge_width-(corner_box_size),edge_width],axis=1)
+        # above_mid = np.repeat(z,corner_box_size-edge_width, axis=0)
 
-        top = write_cid_text_to_array(corner_box_size, edge_width, color_tuple, cid)
+        top = write_cid_text_to_array(corner_box_size, layer_length, edge_width, color_tuple, cid)
         # text_added = text_added | above_mid
         # top = np.append([top_or_bottom],above_mid,axis=0)
         # print(f"SHAPES: tob {np.array([top_or_bottom]).shape} and text_added {text_added.shape}")
@@ -909,10 +916,9 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
                 # print(f'fluor {fluor} pageimage shape: {pageimage.shape} | row {row}, col {col} | cpsave shape {cp_save.shape}')
                 if not composite_only: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
-                    # add_layer(viewer,cell_punchout_raw, cell_name, colormap= cell_colors[i])
-                    # cell_punchout = cell_punchout * 255.0
-                    # print(f"shape: {cell_punchout.shape} | {cell_punchout[40,40,:]} ")
-                    # exit()
+                    if col ==1:
+                        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                                          (col-1)*(PUNCHOUT_SIZE+2):] = generate_status_box(status_colors[cell_status], cell_id, composite_only)
                     page_image[(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
                                 (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout * 255.0
                     GRID_TO_ID[f'{row},{col}'] = cell_id
@@ -920,7 +926,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                     # Do this next one to assemble the composite image 
                     IMAGE_DATA_ORIGINAL[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
                                                   (ROW_SIZE-1)*(PUNCHOUT_SIZE+2)+1:ROW_SIZE*(PUNCHOUT_SIZE+2)-1] = cp_save
-                    col+=1
+                    col+=1 # so that next luminescence image is tiled 
                     continue
 
                 # print(f'raw np shape is {cell_punchout_raw.shape}') # (100,100)
@@ -1008,7 +1014,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             # box = generate_status_box(status_colors[cell_status])
             # print(f'\n {box.shape}')
             # exit(0)
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[cell_status], cell_id)
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[cell_status], cell_id, composite_only)
         
     IMAGE_DATA_ORIGINAL['All'] = page_image.astype('int')
     IMAGE_DATA_ADJUSTED = copy.copy(IMAGE_DATA_ORIGINAL)
@@ -1083,10 +1089,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         STATUS_LIST[str(cell_num)] = next_status
         if COMPOSITE_MODE: 
             page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num))
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
             image_layer.data = page_status_layer.astype('int')
         else:
-            status_layer.colormap = status_colors[next_status]
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+                :] = generate_status_box(status_colors[next_status],str(cell_num), False)
+            image_layer.data = page_status_layer.astype('int')
 
     @status_layer.bind_key('c')
     def set_unseen(image_layer):
@@ -1101,10 +1109,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         STATUS_LIST[str(cell_num)] = next_status
         if COMPOSITE_MODE: 
             page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num))
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
             image_layer.data = page_status_layer.astype('int')
         else:
-            status_layer.colormap = status_colors[next_status]
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+                :] = generate_status_box(status_colors[next_status],str(cell_num), False)
+            image_layer.data = page_status_layer.astype('int')
 
     @status_layer.bind_key('v')
     def set_nr(image_layer):
@@ -1119,10 +1129,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         STATUS_LIST[str(cell_num)] = next_status
         if COMPOSITE_MODE: 
             page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num))
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
             image_layer.data = page_status_layer.astype('int')
         else:
-            status_layer.colormap = status_colors[next_status]
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                :] = generate_status_box(status_colors[next_status],str(cell_num), False)
+            image_layer.data = page_status_layer.astype('int')
 
     @status_layer.bind_key('b')
     def set_confirmed(image_layer):
@@ -1137,10 +1149,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         STATUS_LIST[str(cell_num)] = next_status
         if COMPOSITE_MODE: 
             page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num))
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
             image_layer.data = page_status_layer.astype('int')
         else:
-            status_layer.colormap = status_colors[next_status]
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                :] = generate_status_box(status_colors[next_status],str(cell_num), False)
+            image_layer.data = page_status_layer.astype('int')
     
     @status_layer.bind_key('n')
     def set_rejected(image_layer):
@@ -1155,10 +1169,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         STATUS_LIST[str(cell_num)] = next_status
         if COMPOSITE_MODE: 
             page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num))
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
             image_layer.data = page_status_layer.astype('int')
         else:
-            status_layer.colormap = status_colors[next_status]
+            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                :] = generate_status_box(status_colors[next_status],str(cell_num), False)
+            image_layer.data = page_status_layer.astype('int')
 
     #TODO make a page label... 
     # add polygon (just for text label)
