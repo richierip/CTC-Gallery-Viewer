@@ -30,7 +30,8 @@ class userPresets:
 
     def __init__(self, channels = copy.copy(CHANNELS_STR), cell_colors = [], qptiff = None, 
                 objectData = None, phenotype = None, imageSize = 100, specific_cell = None, 
-                channelOrder = CHANNEL_ORDER, page_size = 25, global_sort = "Sort object table by Cell Id"):
+                channelOrder = CHANNEL_ORDER, page_size = 56, global_sort = "Sort object table by Cell Id",
+                cells_per_row = 8):
         self.qptiff = qptiff #String - image path
         self.objectData = objectData # String - object data path
         self.imageSize = imageSize # Int - size of EACH punchout around a cell
@@ -42,6 +43,8 @@ class userPresets:
         self.channelOrder = channelOrder #String array - Order of multichannel data found in the image
         self.page_size = page_size # Integer - How many cells should be displayed per page
         self.global_sort = global_sort # String - Header to use to sort the object data. Default is cell ID (sheet is usually pre-sorted like this)
+        self.cells_per_row = cells_per_row
+
 
     def attempt_channel_add(self, channelName):
         ''' Adds a channel name to the class variable. Ensures that the list is sorted, and that

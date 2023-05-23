@@ -45,15 +45,15 @@ OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data
 # OBJECT_DATA = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\PMR_test_Results.csv"
 PUNCHOUT_SIZE = 90 # microns or pixels? Probably pixels
 PAGE_SIZE = 15 # How many cells will be shown in next page
-ROW_SIZE = 8
+CELLS_PER_ROW = 8
 SPECIFIC_CELL = None # Will be an int if the user wants to load the page with that cell
 PHENOTYPE = 'Tumor' #'CTC 488pos'
 GLOBAL_SORT = None
 DAPI = 0; OPAL480 = 3; OPAL520 = 6; OPAL570 = 1; OPAL620 = 4; OPAL690 = 2; OPAL780 = 5; AF=7; Composite = 8
 
-data = store_and_load.loadObject('data/presets')
+userInfo = store_and_load.loadObject('data/presets')
 # CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
-CHANNELS_STR = data.channelOrder #["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
+CHANNELS_STR = userInfo.channelOrder #["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
 CHANNELS_STR.append("Composite") # Seems like this has to happen on a separate line
 
 # CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690,OPAL780,AF,Composite] # Default. Not really that useful info since channel order was added.
@@ -69,6 +69,7 @@ RAW_PYRAMID=None
 NOTES_WIDGET = None; ALL_CUSTOM_WIDGETS = {}
 COMPOSITE_MODE = True # Start in composite mode
 RASTERS = None
+NO_LABEL_BOX = False
 GRID_TO_ID = {}
 
 
@@ -612,7 +613,7 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
 #         Status_Bar_Visibility={"widget_type": "RadioButtons","orientation": "vertical",
 #         "choices": [("Show", 1), ("Hide", 2)]})
 # def toggle_statusbar_visibility(Status_Bar_Visibility: int=1):
-def toggle_statusbar_visibility(show_widget):
+def toggle_statuslayer_visibility(show_widget):
     if show_widget.isChecked(): Status_Bar_Visibility = 1
     else: Status_Bar_Visibility = 2
     # Find status layers and toggle visibility
@@ -622,11 +623,54 @@ def toggle_statusbar_visibility(show_widget):
                 layer.visible = True
     elif Status_Bar_Visibility==2:
         for layer in VIEWER.layers:
-            layername = layer.name
             if layer.name == 'Status Layer':
                 layer.visible = False
     else:
         raise Exception(f"Invalid parameter passed to toggle_statusbar_visibility: {Status_Bar_Visibility}. Must be 1 or 2.")
+    return None
+
+def toggle_statusbox_visibility(show_widget):
+    if show_widget.isChecked(): Status_Box_Visibility = 1
+    else: Status_Box_Visibility = 2
+    # Find status layers and toggle visibility
+    if Status_Box_Visibility==1:
+        for layer in VIEWER.layers:
+            if layer.name == 'Status Layer':
+                im = layer.data
+                if COMPOSITE_MODE:
+                    mult = 1
+                else:
+                    mult = 4
+                for j in range(0,((PUNCHOUT_SIZE+2)*CELLS_PER_ROW), (PUNCHOUT_SIZE+2)):#rows
+                    for i in range(0,(ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2))+1, (PUNCHOUT_SIZE+2)):#cols
+                        im[i:i+1, j:j+PUNCHOUT_SIZE+2, 3] = 255 # top
+                        im[i:i+PUNCHOUT_SIZE+2,j:j+1, 3] = 255 # left
+                        im[i+PUNCHOUT_SIZE+1:i+PUNCHOUT_SIZE+2, j:j+PUNCHOUT_SIZE+2, 3] = 255 # right
+                        im[i:i+PUNCHOUT_SIZE+2,j+PUNCHOUT_SIZE+1:j+PUNCHOUT_SIZE+2, 3] = 255 # bottom
+                        im[i:i+16, j:j+16, 3] = 255
+
+                layer.data = im
+                # for col in range(1,CELLS_PER_ROW,1):
+                    
+    elif Status_Box_Visibility==2:
+        for layer in VIEWER.layers:
+            if layer.name == 'Status Layer':
+                im = layer.data
+                if COMPOSITE_MODE:
+                    mult = 1
+                else:
+                    mult = 4
+                for j in range(0,((PUNCHOUT_SIZE+2)*CELLS_PER_ROW), (PUNCHOUT_SIZE+2)):
+                    for i in range(0,(ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2))+1, (PUNCHOUT_SIZE+2)):
+                        im[i:i+1, j:j+PUNCHOUT_SIZE+2, 3] = 0 # top
+                        im[i:i+PUNCHOUT_SIZE+2,j:j+1, 3] = 0 # left
+                        im[i+PUNCHOUT_SIZE+1:i+PUNCHOUT_SIZE+2, j:j+PUNCHOUT_SIZE+2, 3] = 0 # right
+                        im[i:i+PUNCHOUT_SIZE+2,j+PUNCHOUT_SIZE+1:j+PUNCHOUT_SIZE+2, 3] = 0 # bottom
+                        im[i:i+16, j:j+16, 3] = 0 # box
+                layer.data = im
+                # print(im.shape)
+    else:
+        raise Exception(f"Invalid parameter passed to toggle_statusbox_visibility: {Status_Box_Visibility}. Must be 1 or 2.")
     return None
 
 def sort_by_intensity():
@@ -664,10 +708,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     print(f"pyramid shape is {pyramid.shape}")
     # Make the color bar that appears to the left of the composite image
     status_colors = {"unseen":"gray", "needs review":"bop orange", "confirmed":"green", "rejected":"red" }
+    global CELLS_PER_ROW
     if not composite_only:
-        global ROW_SIZE
-        ROW_SIZE = len(CHANNELS_STR) #+1
-        # print(f"$$$$$$$ ROW SIZE VS CHANSTR: {ROW_SIZE} vs {len(CHANNELS_STR)}")
+        CELLS_PER_ROW = len(CHANNELS_STR) #+1
+        # print(f"$$$$$$$ ROW SIZE VS CHANSTR: {CELLS_PER_ROW} vs {len(CHANNELS_STR)}")
+    else: # composite_only = True
+        CELLS_PER_ROW = userInfo.cells_per_row
 
     def retrieve_status(cell_id, cell):
         ''' Kind of an anachronistic function at this point.'''
@@ -717,10 +763,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         if composite_only:
             layer_length = (PUNCHOUT_SIZE+(edge_width*2))
         else:
-            layer_length = (PUNCHOUT_SIZE+(edge_width*2)) * ROW_SIZE
+            layer_length = (PUNCHOUT_SIZE+(edge_width*2)) * CELLS_PER_ROW
 
-        print(f"Layer_Length is {layer_length}")
-        # exit()
+        if NO_LABEL_BOX:
+            number_only = write_cid_text_to_array(PUNCHOUT_SIZE+(edge_width*2), layer_length, edge_width, color_tuple, cid)
+            return number_only
 
         top_or_bottom = [color_tuple, ] *layer_length
         # top_or_bottom = np.append([top_or_bottom],[top_or_bottom],axis = 0)
@@ -742,20 +789,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
         # top = np.append([top_or_bottom],text_added,axis=0)
         # z = np.repeat([np.repeat([0],12)],2,axis=0)z
-        xy = np.append(top,mid, axis=0)
-        return np.append(xy,[top_or_bottom],axis=0)
-
-    # def add_status_bar(viewer, name, status = 'unseen'):
-    #     if not composite_only:
-    #         # Make a strip - will display at the left of each row of channels (one row per cell)
-    #         x = np.array([[0,255,0]])
-    #         y = np.repeat(x,[PUNCHOUT_SIZE-8,7,1],axis=1)
-    #         overlay = np.repeat(y,PUNCHOUT_SIZE,axis=0)
-    #         status_layer = viewer.add_image(overlay, name = f'{name}_{status}', colormap = status_colors[status])
-    #     else:
-    #         # Create a small box - will display in the top left corner above each composite image
-    #         overlay = generate_status_box(status_colors[status])
-    #         status_layer = viewer.add_image(overlay, name = f'{name}_{status}')#, colormap = status_colors[status])
+        tm = np.append(top,mid, axis=0)
+        return np.append(tm,[top_or_bottom],axis=0)
 
     def add_layer(viewer, layer, name, colormap = None, contr = [0,255] ):
 
@@ -817,9 +852,9 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     
     def black_background(color_space, mult):
         if color_space == 'RGB':
-            return np.zeros((ceil((PAGE_SIZE*mult)/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE, 4))
+            return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW, 4))
         elif color_space == 'Luminescence':
-            return np.zeros((ceil((PAGE_SIZE*mult)/ROW_SIZE)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * ROW_SIZE))
+            return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW))
 
     if composite_only: size_multiplier = 1
     else: size_multiplier = 4
@@ -836,7 +871,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     col = 0
     row = 0
     while bool(cells): # coords left
-        col = (col%ROW_SIZE)+1
+        col = (col%CELLS_PER_ROW)+1
         if col ==1: row+=1 
         print(f'Next round of while. Still {len(cells)} cells left. Row {row}, Col {col}')
         cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; cell_status = retrieve_status(cell_id,cell)
@@ -922,10 +957,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                     page_image[(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
                                 (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout * 255.0
                     GRID_TO_ID[f'{row},{col}'] = cell_id
-                    GRID_TO_ID[f'{row},{ROW_SIZE}'] = cell_id
+                    GRID_TO_ID[f'{row},{CELLS_PER_ROW}'] = cell_id
                     # Do this next one to assemble the composite image 
                     IMAGE_DATA_ORIGINAL[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
-                                                  (ROW_SIZE-1)*(PUNCHOUT_SIZE+2)+1:ROW_SIZE*(PUNCHOUT_SIZE+2)-1] = cp_save
+                                                  (CELLS_PER_ROW-1)*(PUNCHOUT_SIZE+2)+1:CELLS_PER_ROW*(PUNCHOUT_SIZE+2)-1] = cp_save
                     col+=1 # so that next luminescence image is tiled 
                     continue
 
@@ -1190,7 +1225,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
 #TODO make a button to do this as well?
 def set_viewer_to_neutral_zoom(viewer):
-    viewer.camera.center = (300,250) # these values seem to work best
+    viewer.camera.center = (100,250) # these values seem to work best
     viewer.camera.zoom = 1.3
 
 def add_custom_colors():
@@ -1241,15 +1276,26 @@ def sv_wrapper(viewer):
 
 def tsv_wrapper(viewer):
     @viewer.bind_key('h')
-    def toggle_statusbar_visibility(viewer):
-        show_vis_radio = ALL_CUSTOM_WIDGETS['show visibility radio']
-        hide_vis_radio = ALL_CUSTOM_WIDGETS['hide visibility radio']
+    def toggle_statuslayer_visibility(viewer):
+        show_vis_radio = ALL_CUSTOM_WIDGETS['show status layer radio']
+        hide_vis_radio = ALL_CUSTOM_WIDGETS['hide status layer radio']
         if show_vis_radio.isChecked():
             show_vis_radio.setChecked(False)
             hide_vis_radio.setChecked(True)
         else:
             show_vis_radio.setChecked(True)
             hide_vis_radio.setChecked(False)
+
+    @viewer.bind_key('Shift-h')
+    def toggle_statusbox_visibility(viewer):
+        show_box_radio = ALL_CUSTOM_WIDGETS['show status box radio']
+        hide_box_radio = ALL_CUSTOM_WIDGETS['hide status box radio']
+        if show_box_radio.isChecked():
+            show_box_radio.setChecked(False)
+            hide_box_radio.setChecked(True)
+        else:
+            show_box_radio.setChecked(True)
+            hide_box_radio.setChecked(False)
 
 def chn_key_wrapper(viewer):
     def create_fun(position,channel):
@@ -1422,7 +1468,7 @@ def replace_note(cell_widget, note_widget):
 def GUI_execute(preprocess_class):
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
     global cell_colors, qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER
-    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, SPECIFIC_CELL, GLOBAL_SORT
+    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
 
     cell_colors = userInfo.cell_colors
     qptiff = userInfo.qptiff
@@ -1432,6 +1478,7 @@ def GUI_execute(preprocess_class):
     SPECIFIC_CELL = userInfo.specific_cell
     OBJECT_DATA = userInfo.objectData
     CHANNELS_STR = userInfo.channels # Update this so that only the checked fluors are present
+    CELLS_PER_ROW = userInfo.cells_per_row
     if "Composite" not in CHANNELS_STR: CHANNELS_STR.append("Composite")
     CHANNEL_ORDER = userInfo.channelOrder
     if "Composite" not in CHANNEL_ORDER: CHANNEL_ORDER.append("Composite")
@@ -1578,12 +1625,20 @@ def main(preprocess_class = None):
     switch_mode_button.pressed.connect(lambda: toggle_composite_viewstatus(all_channels_rb,composite_only_rb))
     mode_container = viewer.window.add_dock_widget([all_channels_rb,composite_only_rb,switch_mode_button],name ="Mode selection",area="right")
     
-    visibility_show = QRadioButton("Show label overlay"); visibility_show.setChecked(True)
-    visibility_hide = QRadioButton("Hide label overlay"); visibility_hide.setChecked(False)
-    vis_group = QButtonGroup(); vis_group.addButton(visibility_show);vis_group.addButton(visibility_hide)
-    visibility_hide.toggled.connect(lambda: toggle_statusbar_visibility(visibility_show))
-    visibility_show.toggled.connect(lambda: toggle_statusbar_visibility(visibility_show))
-    vis_container = viewer.window.add_dock_widget([visibility_show,visibility_hide],name ="Toggle overlay",area="right")
+    status_layer_show = QRadioButton("Show label overlay"); status_layer_show.setChecked(True)
+    status_layer_hide = QRadioButton("Hide label overlay"); status_layer_hide.setChecked(False)
+    vis_group = QButtonGroup(); vis_group.addButton(status_layer_show);vis_group.addButton(status_layer_hide)
+    status_layer_hide.toggled.connect(lambda: toggle_statuslayer_visibility(status_layer_show))
+    status_layer_show.toggled.connect(lambda: toggle_statuslayer_visibility(status_layer_show))
+
+    # Label box
+    status_box_show = QRadioButton("Show status box"); status_box_show.setChecked(True)
+    status_box_hide = QRadioButton("Hide status box"); status_box_hide.setChecked(False)
+    box_group = QButtonGroup(); box_group.addButton(status_box_show);box_group.addButton(status_box_hide)
+    status_box_show.toggled.connect(lambda: toggle_statusbox_visibility(status_box_show))
+    status_box_hide.toggled.connect(lambda: toggle_statusbox_visibility(status_box_show))
+    vis_container = viewer.window.add_dock_widget([status_layer_show,status_layer_hide],name ="Toggle overlay",area="right")
+    box_container = viewer.window.add_dock_widget([status_box_show,status_box_hide],name ="Box overlay",area="right")
 
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
@@ -1597,7 +1652,8 @@ def main(preprocess_class = None):
     ALL_CUSTOM_WIDGETS['next page button']=next_page_button
     ALL_CUSTOM_WIDGETS['channels mode radio']=all_channels_rb; ALL_CUSTOM_WIDGETS['composite mode radio']=composite_only_rb
     ALL_CUSTOM_WIDGETS['switch mode buton']=switch_mode_button; 
-    ALL_CUSTOM_WIDGETS['show visibility radio']=visibility_show; ALL_CUSTOM_WIDGETS['hide visibility radio']=visibility_hide
+    ALL_CUSTOM_WIDGETS['show status layer radio']=status_layer_show; ALL_CUSTOM_WIDGETS['hide status layer radio']=status_layer_hide
+    ALL_CUSTOM_WIDGETS['show status box radio']=status_box_show; ALL_CUSTOM_WIDGETS['hide status box radio']=status_box_hide
     ALL_CUSTOM_WIDGETS['page combobox']=page_combobox
     notes_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
     page_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
