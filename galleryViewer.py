@@ -71,6 +71,7 @@ COMPOSITE_MODE = True # Start in composite mode
 RASTERS = None
 NO_LABEL_BOX = False
 GRID_TO_ID = {}
+CANVAS_VALUES = {}
 
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
@@ -647,7 +648,8 @@ def toggle_statusbox_visibility(show_widget):
                         im[i:i+PUNCHOUT_SIZE+2,j:j+1, 3] = 255 # left
                         im[i+PUNCHOUT_SIZE+1:i+PUNCHOUT_SIZE+2, j:j+PUNCHOUT_SIZE+2, 3] = 255 # right
                         im[i:i+PUNCHOUT_SIZE+2,j+PUNCHOUT_SIZE+1:j+PUNCHOUT_SIZE+2, 3] = 255 # bottom
-                        im[i:i+16, j:j+16, 3] = 255
+                        if j == 0 or COMPOSITE_MODE:
+                            im[i:i+16, j:j+16, 3] = 255
 
                 layer.data = im
                 # for col in range(1,CELLS_PER_ROW,1):
@@ -1122,14 +1124,15 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         cur_index = list(status_colors.keys()).index(cur_status)
         next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
         STATUS_LIST[str(cell_num)] = next_status
+
+        imdata = image_layer.data
         if COMPOSITE_MODE: 
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
                               (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
-            image_layer.data = page_status_layer.astype('int')
         else:
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
                 :] = generate_status_box(status_colors[next_status],str(cell_num), False)
-            image_layer.data = page_status_layer.astype('int')
+        image_layer.data = imdata.astype('int')
 
     @status_layer.bind_key('c')
     def set_unseen(image_layer):
@@ -1142,14 +1145,15 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         except KeyError as e:
             return None
         STATUS_LIST[str(cell_num)] = next_status
+
+        imdata = image_layer.data
         if COMPOSITE_MODE: 
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
                               (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
-            image_layer.data = page_status_layer.astype('int')
         else:
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
                 :] = generate_status_box(status_colors[next_status],str(cell_num), False)
-            image_layer.data = page_status_layer.astype('int')
+        image_layer.data = imdata.astype('int')
 
     @status_layer.bind_key('v')
     def set_nr(image_layer):
@@ -1162,14 +1166,15 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         except KeyError as e:
             return None
         STATUS_LIST[str(cell_num)] = next_status
+
+        imdata = image_layer.data
         if COMPOSITE_MODE: 
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
                               (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
-            image_layer.data = page_status_layer.astype('int')
         else:
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
                 :] = generate_status_box(status_colors[next_status],str(cell_num), False)
-            image_layer.data = page_status_layer.astype('int')
+        image_layer.data = imdata.astype('int')
 
     @status_layer.bind_key('b')
     def set_confirmed(image_layer):
@@ -1182,14 +1187,15 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         except KeyError as e:
             return None
         STATUS_LIST[str(cell_num)] = next_status
+
+        imdata = image_layer.data   
         if COMPOSITE_MODE: 
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
                               (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
-            image_layer.data = page_status_layer.astype('int')
         else:
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
                 :] = generate_status_box(status_colors[next_status],str(cell_num), False)
-            image_layer.data = page_status_layer.astype('int')
+        image_layer.data = imdata.astype('int')
     
     @status_layer.bind_key('n')
     def set_rejected(image_layer):
@@ -1202,14 +1208,15 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         except KeyError as e:
             return None
         STATUS_LIST[str(cell_num)] = next_status
+
+        imdata = image_layer.data   
         if COMPOSITE_MODE: 
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
                               (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
-            image_layer.data = page_status_layer.astype('int')
         else:
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
                 :] = generate_status_box(status_colors[next_status],str(cell_num), False)
-            image_layer.data = page_status_layer.astype('int')
+        image_layer.data = imdata.astype('int')
 
     #TODO make a page label... 
     # add polygon (just for text label)
@@ -1225,7 +1232,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
 #TODO make a button to do this as well?
 def set_viewer_to_neutral_zoom(viewer):
-    viewer.camera.center = (100,250) # these values seem to work best
+    global CANVAS_VALUES
+    CANVAS_VALUES['X'] = 450
+    CANVAS_VALUES['Y'] = 350
+    CANVAS_VALUES['ZOOM'] = 1.3
+    viewer.camera.center = (350,450) # these values seem to work best
     viewer.camera.zoom = 1.3
 
 def add_custom_colors():
@@ -1286,7 +1297,7 @@ def tsv_wrapper(viewer):
             show_vis_radio.setChecked(True)
             hide_vis_radio.setChecked(False)
 
-    @viewer.bind_key('Shift-h')
+    @viewer.bind_key('Control-h')
     def toggle_statusbox_visibility(viewer):
         show_box_radio = ALL_CUSTOM_WIDGETS['show status box radio']
         hide_box_radio = ALL_CUSTOM_WIDGETS['hide status box radio']
@@ -1296,6 +1307,63 @@ def tsv_wrapper(viewer):
         else:
             show_box_radio.setChecked(True)
             hide_box_radio.setChecked(False)
+
+    @viewer.bind_key('Control-k')
+    def restore_canvas(viewer):
+        set_viewer_to_neutral_zoom(viewer)
+
+    @viewer.bind_key('k')
+    def recenter_canvas(viewer):
+        viewer.camera.center = (CANVAS_VALUES['Y'],CANVAS_VALUES['X']) #y,x # these values seem to work best
+        viewer.camera.zoom = CANVAS_VALUES['ZOOM']
+
+    def set_viewer_to_zoom(viewer, x, y, z):
+        viewer.camera.center = (y,x) #y,x # these values seem to work best
+        viewer.camera.zoom = z
+
+    @viewer.bind_key('Up')
+    def scroll_up(viewer):
+        global CANVAS_VALUES
+        y = CANVAS_VALUES['Y'] - 50
+        CANVAS_VALUES['Y'] = y
+        set_viewer_to_zoom(viewer, CANVAS_VALUES['X'], y ,CANVAS_VALUES['ZOOM'])
+
+    @viewer.bind_key('Down')
+    def scroll_up(viewer):
+        global CANVAS_VALUES
+        y = CANVAS_VALUES['Y'] + 50
+        CANVAS_VALUES['Y'] = y
+        set_viewer_to_zoom(viewer, CANVAS_VALUES['X'], y ,CANVAS_VALUES['ZOOM'])
+    
+    @viewer.bind_key('Left')
+    def scroll_up(viewer):
+        global CANVAS_VALUES
+        x = CANVAS_VALUES['X'] - 50
+        CANVAS_VALUES['X'] = x
+        set_viewer_to_zoom(viewer, x, CANVAS_VALUES['Y'] ,CANVAS_VALUES['ZOOM'])
+    @viewer.bind_key('Right')   
+    def scroll_up(viewer):
+        global CANVAS_VALUES
+        x = CANVAS_VALUES['X'] + 50
+        CANVAS_VALUES['X'] = x
+        set_viewer_to_zoom(viewer, x, CANVAS_VALUES['Y'] ,CANVAS_VALUES['ZOOM'])
+
+    @viewer.bind_key('Control-Right')  
+    @viewer.bind_key('Control-Up')   
+    def zoom_in(viewer):
+        global CANVAS_VALUES
+        z = CANVAS_VALUES['ZOOM'] * 1.3
+        CANVAS_VALUES['ZOOM'] = z
+        set_viewer_to_zoom(viewer, CANVAS_VALUES['X'], CANVAS_VALUES['Y'],z)
+
+    @viewer.bind_key('Control-Left')  
+    @viewer.bind_key('Control-Down')   
+    def zoom_out(viewer):
+        global CANVAS_VALUES
+        z = CANVAS_VALUES['ZOOM'] / 1.3
+        CANVAS_VALUES['ZOOM'] = z
+        set_viewer_to_zoom(viewer, CANVAS_VALUES['X'], CANVAS_VALUES['Y'],z)
+    
 
 def chn_key_wrapper(viewer):
     def create_fun(position,channel):
