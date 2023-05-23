@@ -4,7 +4,7 @@ Started on 6/7/22
 Peter Richieri
 '''
 
-import IPython
+# import IPython
 import tifffile
 import rasterio
 from rasterio.windows import Window
@@ -875,7 +875,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     while bool(cells): # coords left
         col = (col%CELLS_PER_ROW)+1
         if col ==1: row+=1 
-        print(f'Next round of while. Still {len(cells)} cells left. Row {row}, Col {col}')
+        # print(f'Next round of while. Still {len(cells)} cells left. Row {row}, Col {col}')
         cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; cell_status = retrieve_status(cell_id,cell)
         composite = []
         # add the rest of the layers to the viewer
@@ -917,7 +917,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 else:
                     # rasterio reading didn't work, so entire image should be in memory as np array
                     cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
-                print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}')
+                # print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}')
                 
                 # normalize to 1.0
 
@@ -1068,7 +1068,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         return row_num, col_num
     
 
-    def find_mouse(image_layer, pos):
+    def find_mouse(image_layer, pos, scope = 'world'):
         # data_coordinates = image_layer.world_to_data(pos)
         # coords = np.round(data_coordinates).astype(int)
         # val = image_layer.get_value(data_coordinates)
@@ -1092,14 +1092,17 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             return "None" , None, None
         # adjust output to local coords + RGB without alpha
         if len(val) > 1: val = val[:-1]
-        x = coords[1] - (PUNCHOUT_SIZE+2)*(col-1)
-        y = coords[0] - (PUNCHOUT_SIZE+2)*(row-1)
-        return str(image_name), (x,y), val
+        if scope == 'world':
+            return str(image_name), coords, val
+        else:
+            x = coords[1] - (PUNCHOUT_SIZE+2)*(col-1)
+            y = coords[0] - (PUNCHOUT_SIZE+2)*(row-1)
+            return str(image_name), (x,y), val
 
     @viewer.mouse_move_callbacks.append
     def display_intensity(image_layer, event):
         
-        cell_num,coords,val = find_mouse(image_layer, event.position) 
+        cell_num,coords,val = find_mouse(image_layer, event.position, scope = 'grid') 
         image_name = f'Cell {cell_num}'
         set_notes_label(NOTES_WIDGET, str(cell_num))
         if val is None:
@@ -1112,13 +1115,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     @status_layer.bind_key('Space')
     def toggle_status(image_layer):
         
-        data_coordinates = image_layer.world_to_data(viewer.cursor.position)
+        cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
+        if val is None:
+            return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        try:
-           cell_num = GRID_TO_ID[f'{row},{col}']
-        except KeyError as e:
-            return None
 
         cur_status = STATUS_LIST[str(cell_num)]
         cur_index = list(status_colors.keys()).index(cur_status)
@@ -1134,16 +1135,18 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 :] = generate_status_box(status_colors[next_status],str(cell_num), False)
         image_layer.data = imdata.astype('int')
 
+    @status_layer.mouse_drag_callbacks.append
+    def trigger_toggle_status(image_layer, event):
+        toggle_status(image_layer)
+
     @status_layer.bind_key('c')
     def set_unseen(image_layer):
         next_status = 'unseen'
-        data_coordinates = image_layer.world_to_data(viewer.cursor.position)
+        cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
+        if val is None:
+            return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        try:
-           cell_num = GRID_TO_ID[f'{row},{col}']
-        except KeyError as e:
-            return None
         STATUS_LIST[str(cell_num)] = next_status
 
         imdata = image_layer.data
@@ -1158,13 +1161,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     @status_layer.bind_key('v')
     def set_nr(image_layer):
         next_status = 'needs review'
-        data_coordinates = image_layer.world_to_data(viewer.cursor.position)
+        cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
+        if val is None:
+            return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        try:
-           cell_num = GRID_TO_ID[f'{row},{col}']
-        except KeyError as e:
-            return None
         STATUS_LIST[str(cell_num)] = next_status
 
         imdata = image_layer.data
@@ -1179,13 +1180,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     @status_layer.bind_key('b')
     def set_confirmed(image_layer):
         next_status = 'confirmed'
-        data_coordinates = image_layer.world_to_data(viewer.cursor.position)
+        cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
+        if val is None:
+            return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        try:
-           cell_num = GRID_TO_ID[f'{row},{col}']
-        except KeyError as e:
-            return None
         STATUS_LIST[str(cell_num)] = next_status
 
         imdata = image_layer.data   
@@ -1200,13 +1199,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     @status_layer.bind_key('n')
     def set_rejected(image_layer):
         next_status = 'rejected'
-        data_coordinates = image_layer.world_to_data(viewer.cursor.position)
+        cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
+        if val is None:
+            return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        try:
-           cell_num = GRID_TO_ID[f'{row},{col}']
-        except KeyError as e:
-            return None
         STATUS_LIST[str(cell_num)] = next_status
 
         imdata = image_layer.data   
@@ -1395,7 +1392,7 @@ def fetch_notes(cell_set):
     for index,row in cell_set.iterrows():
         ID = str(row['Object Id'])
         SAVED_NOTES[ID] = row['Notes']
-    print(f'dumping dict {SAVED_NOTES}')
+    # print(f'dumping dict {SAVED_NOTES}')
 
 '''Get object data from csv and parse.''' 
 def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1, 
@@ -1676,10 +1673,10 @@ def main(preprocess_class = None):
         intensity_sort_box.setCurrentIndex(0) # Set "sort by CID" to be the default
     elif "Opal" in GLOBAL_SORT:
         local_sort = f"OPAL{GLOBAL_SORT.split()[1]}"
-        intensity_sort_box.setCurrentText(f"Sort page by {chn} Intensity")
+        intensity_sort_box.setCurrentText(f"Sort page by {local_sort} Intensity")
     else:
         local_sort = "AF"
-        intensity_sort_box.setCurrentText(f"Sort page by Sample {chn} Intensity")
+        intensity_sort_box.setCurrentText(f"Sort page by Sample {local_sort} Intensity")
 
     next_page_button = QPushButton("Go")
     next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry, intensity_sort_box))
@@ -1705,8 +1702,8 @@ def main(preprocess_class = None):
     box_group = QButtonGroup(); box_group.addButton(status_box_show);box_group.addButton(status_box_hide)
     status_box_show.toggled.connect(lambda: toggle_statusbox_visibility(status_box_show))
     status_box_hide.toggled.connect(lambda: toggle_statusbox_visibility(status_box_show))
-    vis_container = viewer.window.add_dock_widget([status_layer_show,status_layer_hide],name ="Toggle overlay",area="right")
-    box_container = viewer.window.add_dock_widget([status_box_show,status_box_hide],name ="Box overlay",area="right")
+    vis_container = viewer.window.add_dock_widget([status_layer_show,status_layer_hide],name ="Show/hide overlay",area="right")
+    box_container = viewer.window.add_dock_widget([status_box_show,status_box_hide],name ="Show/hide boxes",area="right")
 
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
