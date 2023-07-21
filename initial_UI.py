@@ -61,8 +61,8 @@ class ViewerPresets(QDialog):
         self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
         if self.userInfo.qptiff is not None:
             self.qptiffEntry.insert(self.userInfo.qptiff)
-        else:
-            self.qptiffEntry.setPlaceholderText('Enter path to .qptiff')
+        # Want to do this in any case
+        self.qptiffEntry.setPlaceholderText('Enter path to .qptiff')
 
         self.qptiffEntry.setFixedWidth(800)
         # qptiffEntry.setAlignment(Qt.AlignLeft)
@@ -74,8 +74,7 @@ class ViewerPresets(QDialog):
         self.dataEntry = QLineEdit()  # Put retrieved previous answer here
         if self.userInfo.objectData is not None:
             self.dataEntry.insert(self.userInfo.objectData)
-        else:
-            self.dataEntry.setPlaceholderText('Enter path to .csv')
+        self.dataEntry.setPlaceholderText('Enter path to .csv')
         self.dataEntry.setFixedWidth(800)
         # dataEntry.setAlignment(Qt.AlignLeft)
         dataEntryLabel = QLabel("Object Data: ")
@@ -323,9 +322,8 @@ class ViewerPresets(QDialog):
 
         #TODO attach previous choice here
         self.phenotypeToGrab = QLineEdit(self.topRightGroupBox)
-        if self.userInfo.phenotype is None:
-            self.phenotypeToGrab.setPlaceholderText('Phenotype of Interest')
-        else:
+        self.phenotypeToGrab.setPlaceholderText('Phenotype of Interest')
+        if self.userInfo.phenotype is not None:
             self.phenotypeToGrab.insert(self.userInfo.phenotype)
         self.phenotypeToGrab.setFixedWidth(220)
         self.phenotypeToGrab.textEdited.connect(self.savePhenotype)
@@ -344,9 +342,8 @@ class ViewerPresets(QDialog):
         self.imageSize.setFixedWidth(100)
 
         self.specificCellChoice = QLineEdit(self.topRightGroupBox)
-        if self.userInfo.specific_cell is None:
-            self.specificCellChoice.setPlaceholderText('Leave blank for page 1')
-        else:
+        self.specificCellChoice.setPlaceholderText('Leave blank for page 1')
+        if self.userInfo.specific_cell is not None:
             self.specificCellChoice.insert(str(self.userInfo.specific_cell))
         self.specificCellChoice.setFixedWidth(220)
         self.specificCellChoice.textEdited.connect(self.saveSpecificCell)

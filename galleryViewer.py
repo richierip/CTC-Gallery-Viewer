@@ -72,6 +72,7 @@ RASTERS = None
 NO_LABEL_BOX = False
 GRID_TO_ID = {}
 CANVAS_VALUES = {}
+STATUS_COLORS = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red" }
 
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
@@ -433,21 +434,24 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            hdata.loc[2,"Validation"]
+            hdata.loc[2,"Validation - Unseen"]
         except KeyError:
-            hdata.insert(4,"Validation", "unseen")
-            hdata.loc[hdata[PHENOTYPE]==0,"Validation"] = ""
+            for call_type in reversed(STATUS_COLORS.keys()):
+                hdata.insert(8,f"Validation - {call_type}", 0)
         try:
             hdata.loc[2,"Notes"]
         except KeyError:
-            hdata.insert(5,"Notes","-")
+            hdata.insert(8,"Notes","-")
             hdata.fillna("")
         global XY_STORE, STATUS_LIST
         for cell_id in STATUS_LIST.keys():
             status = STATUS_LIST[cell_id]
             
             try:
-                hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
+                # reset all validation cols to zero before assigning a 1 to the appropriate status col
+                for call_type in STATUS_COLORS.keys():
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {call_type}"] = 0
+                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {status}"] = 1
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
@@ -530,20 +534,23 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            hdata.loc[2,"Validation"]
+            hdata.loc[2,"Validation - Unseen"]
         except KeyError:
-            hdata.insert(4,"Validation", "unseen")
-            hdata.loc[hdata[PHENOTYPE]==0,"Validation"] = ""
+            for call_type in reversed(STATUS_COLORS.keys()):
+                hdata.insert(8,f"Validation - {call_type}", 0)
         try:
             hdata.loc[2,"Notes"]
         except KeyError:
-            hdata.insert(5,"Notes","-")
+            hdata.insert(8,"Notes","-")
             hdata.fillna("")
 
         for cell_id in STATUS_LIST.keys():
             status = STATUS_LIST[cell_id]
             try:
-                hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
+                # reset all validation cols to zero before assigning a 1 to the appropriate status col
+                for call_type in STATUS_COLORS.keys():
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {call_type}"] = 0
+                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {status}"] = 1
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
@@ -684,11 +691,11 @@ def set_notes_label(display_note_widget, ID):
     except KeyError: # in case the name was off
         return False
     status = STATUS_LIST[str(ID)]
-    if status == 'confirmed':
+    if status == 'Confirmed':
         idcolor = '#00ff00'
-    elif status == 'rejected':
+    elif status == 'Rejected':
         idcolor = '#ff0000'
-    elif status == 'needs review':
+    elif status == 'Needs review':
         idcolor = '#ffa000'
     else:
         idcolor = '#ffffff'
@@ -709,7 +716,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     print(f'\n---------\n \n Entering the add_layers function')
     print(f"pyramid shape is {pyramid.shape}")
     # Make the color bar that appears to the left of the composite image
-    status_colors = {"unseen":"gray", "needs review":"bop orange", "confirmed":"green", "rejected":"red" }
+    status_colors = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red" }
     global CELLS_PER_ROW
     if not composite_only:
         CELLS_PER_ROW = len(CHANNELS_STR) #+1
@@ -726,10 +733,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 # print(f'Got it. Status is .{status}.')
             except:
                 # Column doesn't exist, use default
-                status = "unseen"
+                status = "Unseen"
                 # print(f'exception. Could not grab status')
             if type(status) is not str or status not in status_colors.keys():
-                status = "unseen"
+                status = "Unseen"
             # Save to dict to make next retrieval faster
             STATUS_LIST[str(cell_id)] = status
             return status
@@ -1141,7 +1148,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
     @status_layer.bind_key('c')
     def set_unseen(image_layer):
-        next_status = 'unseen'
+        next_status = 'Unseen'
         cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
         if val is None:
             return None
@@ -1160,7 +1167,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
     @status_layer.bind_key('v')
     def set_nr(image_layer):
-        next_status = 'needs review'
+        next_status = 'Needs review'
         cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
         if val is None:
             return None
@@ -1179,7 +1186,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
     @status_layer.bind_key('b')
     def set_confirmed(image_layer):
-        next_status = 'confirmed'
+        next_status = 'Confirmed'
         cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
         if val is None:
             return None
@@ -1198,7 +1205,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     
     @status_layer.bind_key('n')
     def set_rejected(image_layer):
-        next_status = 'rejected'
+        next_status = 'Rejected'
         cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
         if val is None:
             return None
@@ -1252,21 +1259,24 @@ def sv_wrapper(viewer):
         viewer.status = 'Saving ...'
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            hdata.loc[2,"Validation"]
+            hdata.loc[2,"Validation - Unseen"]
         except KeyError:
-            hdata.insert(4,"Validation", "unseen")
-            hdata.loc[hdata[PHENOTYPE]==0,"Validation"] = ""
+            for call_type in reversed(STATUS_COLORS.keys()):
+                hdata.insert(8,f"Validation - {call_type}", 0)
         try:
             hdata.loc[2,"Notes"]
         except KeyError:
-            hdata.insert(5,"Notes","-")
+            hdata.insert(8,"Notes","-")
             hdata.fillna("")
 
         for cell_id in STATUS_LIST.keys():
             status = STATUS_LIST[cell_id]
             print(f"\nSave status {status}, cid {cell_id}")
             try:
-                hdata.loc[hdata["Object Id"]==int(cell_id),"Validation"] = status
+                # reset all validation cols to zero before assigning a 1 to the appropriate status col
+                for call_type in STATUS_COLORS.keys():
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {call_type}"] = 0
+                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {status}"] = 1
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
@@ -1417,14 +1427,14 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
         raise KeyError
     # Add columns w/defaults if they aren't there to avoid runtime issues
     try:
-        halo_export.loc[2,"Validation"]
+        halo_export.loc[2,"Validation - Unseen"]
     except KeyError:
-        halo_export.insert(4,"Validation", "unseen")
-        halo_export.loc[halo_export[PHENOTYPE]==0,"Validation"] = ""
+        for call_type in reversed(STATUS_COLORS.keys()):
+            halo_export.insert(8,f"Validation - {call_type}", 0)
     try:
         halo_export.loc[2,"Notes"]
     except KeyError:
-        halo_export.insert(5,"Notes","-")
+        halo_export.insert(8,"Notes","-")
         halo_export.fillna("")
     try:
         halo_export.to_csv(OBJECT_DATA, index=False)
@@ -1436,7 +1446,9 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
     all_possible_intensities = ['DAPI Cell Intensity', 'Opal 480 Cell Intensity','Opal 520 Cell Intensity',
             'Opal 570 Cell Intensity', 'Opal 620 Cell Intensity', 'Opal 690 Cell Intensity','Opal 780 Cell Intensity',
             'AF Cell Intensity','Autofluorescence Cell Intensity', "Sample AF Cell Intensity"] # not sure what the correct nomenclature is here
-    cols_to_keep = ["Object Id","Validation","Notes", "XMin","XMax","YMin", "YMax", phenotype] + all_possible_intensities
+    v = list(STATUS_COLORS.keys())
+    validation_cols = ["Validation - " + s for s in v]
+    cols_to_keep = ["Object Id", "Notes", "XMin","XMax","YMin", "YMax", phenotype] + all_possible_intensities + validation_cols
     cols_to_keep = halo_export.columns.intersection(cols_to_keep)
     halo_export = halo_export.loc[:, cols_to_keep]
 
@@ -1500,12 +1512,19 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
                 VIEWER.status = f"Unable to sort everything by '{sort_by_intensity}', will use ID instead. Check your data headers."
             cell_set = cell_set.sort_values(by = 'Object Id', ascending = False, kind = 'mergesort')
     fetch_notes(cell_set)
-
     tumor_cell_XYs = []
-    for index,row in cell_set.iterrows():
-        center_x = int((row['XMax']+row['XMin'])/2)
-        center_y = int((row['YMax']+row['YMin'])/2)
-        tumor_cell_XYs.append([center_x, center_y, row["Object Id"], row["Validation"]])
+    try:
+        for index,row in cell_set.iterrows():
+            center_x = int((row['XMax']+row['XMin'])/2)
+            center_y = int((row['YMax']+row['YMin'])/2)
+            vals = row[validation_cols]
+            print(vals)
+            validation_call = str(vals[vals == 1].index.values[0]).replace("Validation - ", "")
+            print(validation_call)
+            tumor_cell_XYs.append([center_x, center_y, row["Object Id"], validation_call])
+    except Exception as e:
+        print(e)
+        exit()
     global XY_STORE
     XY_STORE = copy.copy(tumor_cell_XYs)
     return tumor_cell_XYs
@@ -1732,7 +1751,8 @@ def main(preprocess_class = None):
     RAW_PYRAMID=pyramid
     try:
         tumor_cell_XYs = extract_phenotype_xldata(specific_cell=SPECIFIC_CELL, sort_by_intensity=local_sort)
-    except KeyError:
+    except KeyError as e:
+        print(e)
         # If the user has given bad input, the function will raise a KeyError. Fail gracefully and inform the user
         status+=f'<font color="#f5551a">  Failed.<br> The phenotype "{PHENOTYPE}" does not exist in the object data!</font>'
         _update_status(status)
