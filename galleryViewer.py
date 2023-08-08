@@ -693,7 +693,8 @@ def set_notes_label(display_note_widget, ID):
     intensity_series = SAVED_INTENSITIES[ID]
     intensity_str = ''
     for intensity in intensity_series.index:
-        intensity_str += f'<br>{str(intensity).replace(" Cell Intensity","")}: {round(float(intensity_series[intensity]),3)}'
+        fluor = str(intensity).replace(" Cell Intensity","")
+        intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor.replace(" ","").upper()]}">{fluor}: {round(float(intensity_series[intensity]),3)}</font>'
     # Add note if it exists
     if note == '-' or note == '' or note is None: 
         note = prefix + intensity_str
@@ -1683,7 +1684,7 @@ def main(preprocess_class = None):
         local_sort = "AF"
         intensity_sort_box.setCurrentText(f"Sort page by Sample {local_sort} Intensity")
 
-    next_page_button = QPushButton("Go")
+    next_page_button = QPushButton("Change Page")
     next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry, intensity_sort_box))
     notes_container = viewer.window.add_dock_widget([NOTES_WIDGET,note_text_entry, note_cell_entry, note_button], name = 'Annotation', area = 'right')
     page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, intensity_sort_box, next_page_button], name = 'Page selection', area = 'right')
@@ -1755,9 +1756,6 @@ def main(preprocess_class = None):
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
 
-    print('Before')
-    print(type(viewer.window))
-
     all_boxes = []
     for marker_function in CHANNELS_STR:
         # Only make visible the chosen markers
@@ -1768,8 +1766,6 @@ def main(preprocess_class = None):
     sv_wrapper(viewer)
     tsv_wrapper(viewer)
     chn_key_wrapper(viewer)
-    print('After')
-    print(type(viewer.window))
     # viewer.grid.stride = 2 # start in composite mode
     set_viewer_to_neutral_zoom(viewer) # Fix zoomed out issue
 
