@@ -64,7 +64,7 @@ VIEWER = None
 SC_DATA = None # Using this to store data to coerce the exec function into doing what I want
 TEMP = None
 IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}; ADJUSTMENT_SETTINGS={}; 
-SAVED_NOTES={} ; STATUS_LIST={}; XY_STORE = [1,2,3]
+SAVED_NOTES={} ; STATUS_LIST={}; SAVED_INTENSITIES={}; XY_STORE = [1,2,3]
 RAW_PYRAMID=None
 NOTES_WIDGET = None; ALL_CUSTOM_WIDGETS = {}
 COMPOSITE_MODE = True # Start in composite mode
@@ -302,7 +302,7 @@ def adjust_gamma(viewer, gamma):
     # This allows the function to be called to reuse the same settings instead of updating them
     #   useful for keeping settings when loading next page or switching modes. 
     for fluor in ADJUSTED:
-        print(f'FLUOR IS {fluor} || {CHANNELS_STR}')
+        # print(f'FLUOR IS {fluor} || {CHANNELS_STR}')
         _update_dictionary(fluor,gamma)
 
     for ctclayer in VIEWER.layers:
@@ -688,10 +688,17 @@ def set_notes_label(display_note_widget, ID):
     else:
         idcolor = '#ffffff'
     prefix = f'{SAVED_NOTES["page"]}<br><font color="{idcolor}">CID: {ID}</font>'
+
+    # Add intensities
+    intensity_series = SAVED_INTENSITIES[ID]
+    intensity_str = ''
+    for intensity in intensity_series.index:
+        intensity_str += f'<br>{str(intensity).replace(" Cell Intensity","")}: {round(float(intensity_series[intensity]),3)}'
+    # Add note if it exists
     if note == '-' or note == '' or note is None: 
-        note = prefix
+        note = prefix + intensity_str
     else:
-        note = prefix +'<br>'+ f'<font size="5pt">{note}</font>'
+        note = prefix + intensity_str + f'<br><font size="5pt">{note}</font>'
     display_note_widget.setText(note)
     return True
 ######------------------------- Image loading and processing functions ---------------------######
@@ -1370,11 +1377,15 @@ def set_initial_adjustment_parameters():
         ADJUSTMENT_SETTINGS[fluor+ ' white-in']=255
         ADJUSTMENT_SETTINGS[fluor+ ' gamma']= 1.0
 
-def fetch_notes(cell_set):
-    '''Grab notes for each cell in the list and save to global dict'''
+def fetch_notes(cell_set, intensity_col_names):
+    '''Grab notes and intensities for each cell in the list and save to global dicts'''
     for index,row in cell_set.iterrows():
         ID = str(row['Object Id'])
         SAVED_NOTES[ID] = row['Notes']
+        # Find out which columns are present in the Series and subset to those
+        present_intensities = sorted(list(set(list(row.index)).intersection(set(intensity_col_names))))
+        row = row.loc[present_intensities]
+        SAVED_INTENSITIES[ID] = row
     # print(f'dumping dict {SAVED_NOTES}')
 
 '''Get object data from csv and parse.''' 
@@ -1476,6 +1487,7 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
     
     print(f"#$%#$% local sort is {sort_by_intensity}")
 
+    # Reorder cells in the page according to user input
     if sort_by_intensity is not None:
         if sort_by_intensity == "Object Id": lsort = False
         else: lsort = True
@@ -1487,7 +1499,7 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
             else:
                 VIEWER.status = f"Unable to sort everything by '{sort_by_intensity}', will use ID instead. Check your data headers."
             cell_set = cell_set.sort_values(by = 'Object Id', ascending = False, kind = 'mergesort')
-    fetch_notes(cell_set)
+    fetch_notes(cell_set, all_possible_intensities)
     tumor_cell_XYs = []
     try:
         for index,row in cell_set.iterrows():
@@ -1728,7 +1740,7 @@ def main(preprocess_class = None):
     except KeyError as e:
         print(e)
         # If the user has given bad input, the function will raise a KeyError. Fail gracefully and inform the user
-        status+=f'<font color="#f5551a">  Failed.<br> The phenotype "{PHENOTYPE}" does not exist in the object data!</font>'
+        status+=f'<font color="#f5551a">  Failed.<br> The phenotype "{PHENOTYPE}" might not exist in the data, or other column names may have changed!</font>'
         _update_status(status)
         viewer.close()
         return None # allows the input GUI to continue running

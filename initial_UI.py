@@ -192,15 +192,15 @@ class ViewerPresets(QDialog):
             colorWidget.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[colorWidget.currentText()]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
             
 
-            print(f'My trigger was {colorWidget.objectName()}')
+            # print(f'My trigger was {colorWidget.objectName()}')
             colorChannel = colorWidget.objectName()
-            print(f'#### Channel order fsr: {store_and_load.CHANNELS_STR} \n')
+            # print(f'#### Channel order fsr: {store_and_load.CHANNELS_STR} \n')
             colorPos = store_and_load.CHANNELS_STR.index(colorChannel)
-            print(f'2. Position of {colorChannel} in CHANNEL_ORDER is {colorPos}')
+            # print(f'2. Position of {colorChannel} in CHANNEL_ORDER is {colorPos}')
             self.userInfo.UI_color_display.pop(colorPos)
-            print(f'3. Our intermediate step is this: {self.userInfo.UI_color_display}')
+            # print(f'3. Our intermediate step is this: {self.userInfo.UI_color_display}')
             self.userInfo.UI_color_display.insert(colorPos, colorWidget.currentText())
-            print(f'4. Now color should be in right spot. Here is the thing {self.userInfo.UI_color_display}')
+            # print(f'4. Now color should be in right spot. Here is the thing {self.userInfo.UI_color_display}')
 
             # # Now do it for visual display:
             # colorPos = CHANNELS_STR.index(colorChannel)
