@@ -20,7 +20,10 @@ CHANNELS = [DAPI, OPAL570, OPAL690, OPAL480, OPAL620, OPAL780, OPAL520, AF]
 # Currently in the default Opal Motif order. Maybe could change in the future? So use this
 #   variably to determine the order of filters so the software knows which columns in the data
 #   to use. 
-CHANNEL_ORDER = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
+# CHANNEL_ORDER = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
+CHANNEL_ORDER = {'DAPI': 'gray', 'OPAL570': 'purple', 'OPAL690': 'blue', 'OPAL480': 'green', 'OPAL620': 'orange',
+  'OPAL780': 'red', 'OPAL520': 'yellow', 'AF': 'cyan'}
+STATUSES = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red" }
 
 class userPresets:
     ''' This class is used to store user-selected parameters on disk persistently,
@@ -28,15 +31,14 @@ class userPresets:
     with values I have chosen (can modify these in the init below, or with certain global 
     variables above.) '''
 
-    def __init__(self, channels = copy.copy(CHANNELS_STR), cell_colors = [], qptiff = None, 
+    def __init__(self, channels = copy.copy(CHANNELS_STR), qptiff = None, 
                 objectData = None, phenotype = None, imageSize = 100, specific_cell = None, 
                 channelOrder = CHANNEL_ORDER, page_size = 56, global_sort = "Sort object table by Cell Id",
-                cells_per_row = 8):
+                cells_per_row = 8, statuses = None):
         self.qptiff = qptiff #String - image path
         self.objectData = objectData # String - object data path
         self.imageSize = imageSize # Int - size of EACH punchout around a cell
         self.channels = channels # String array - user choice for channels to read and display
-        self.cell_colors = cell_colors # String array - user choice of which colors to apply to the channels, represented by a shared index
         self.UI_color_display = copy.copy(CELL_COLORS) # keep track of user selected colors for fluors
         self.specific_cell = specific_cell # Int if USER wants to load the page containing this cell, None otherwise
         self.phenotype = phenotype # String - Label for the column name of interest in the object data file
@@ -44,6 +46,7 @@ class userPresets:
         self.page_size = page_size # Integer - How many cells should be displayed per page
         self.global_sort = global_sort # String - Header to use to sort the object data. Default is cell ID (sheet is usually pre-sorted like this)
         self.cells_per_row = cells_per_row
+        self.statuses = copy.copy(STATUSES)
 
 
     def attempt_channel_add(self, channelName):
@@ -65,16 +68,6 @@ class userPresets:
             if "AF" in self.channels:
                 self.channels.remove("AF")
                 self.channels.append("AF")
-
-    def _correct_color_order(self):
-        ''' Contructs the list of cell colors by translating position in the list of GUI elements,
-        i.e. user choice, into the appropriate position in the storage array. Thus, the color in a certain index in
-        the color array will apply to the channel in the same position in the channels array.'''
-        self.cell_colors = []
-        for chnl in CHANNEL_ORDER:
-            pos = CHANNELS_STR.index(chnl)
-            self.cell_colors.append(self.UI_color_display[pos])
-        # print(f'Color correction finished, will pass {self.cell_colors}')
 
 def storeObject(obj, filename):
     ''' Write the class object to a file. Default location is data/presets'''

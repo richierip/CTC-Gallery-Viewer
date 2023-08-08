@@ -27,19 +27,20 @@ from PIL import Image, ImageFont, ImageDraw
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
-cell_colors = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'Pink', 'cyan']
+cell_colors = store_and_load.CELL_COLORS
 print('\n--------------- adding custom cmaps\n')
 
 for colormap in cell_colors:
     # print(f'cmap: {colormap}')
     if colormap == 'gray': continue
+    if colormap == 'pink': colormap = 'Pink'
     exec(f'my_map = custom_maps.create_{colormap}_lut()')
     exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
     exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
 # print(f'\n---------My colormaps are now {plt.colormaps()}--------\n')
 
 cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink', 'cyan'] # for local execution
-fluor_to_color = {}
+CHANNEL_ORDER = {}
 qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
 OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
 # OBJECT_DATA = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\PMR_test_Results.csv"
@@ -52,14 +53,13 @@ GLOBAL_SORT = None
 DAPI = 0; OPAL480 = 3; OPAL520 = 6; OPAL570 = 1; OPAL620 = 4; OPAL690 = 2; OPAL780 = 5; AF=7; Composite = 8
 
 userInfo = store_and_load.loadObject('data/presets')
-# CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF", "Composite"]
-CHANNELS_STR = userInfo.channelOrder #["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
-CHANNELS_STR.append("Composite") # Seems like this has to happen on a separate line
 
 # CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690,OPAL780,AF,Composite] # Default. Not really that useful info since channel order was added.
 CHANNELS = [DAPI, OPAL520,OPAL690, Composite] # for local execution / debugging
-ADJUSTED = copy.copy(CHANNELS)
 CHANNEL_ORDER = ['DAPI', 'OPAL570', 'OPAL690', 'OPAL480', 'OPAL620', 'OPAL780', 'OPAL520', 'AF', 'Composite'] # to save variable position data for channels (they can be in any order...)
+CHANNELS_STR = list(userInfo.channelOrder.keys()) #["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
+CHANNELS_STR.append("Composite") # Seems like this has to happen on a separate line
+ADJUSTED = copy.copy(CHANNELS_STR)
 VIEWER = None
 SC_DATA = None # Using this to store data to coerce the exec function into doing what I want
 TEMP = None
@@ -79,21 +79,7 @@ STATUS_COLORS = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"gree
 #TODO merge some of the GUI elements into the same container to prevent strange spacing issues
 
 def validate_adjustment(chn): # grab last part of label
-    if chn == 'DAPI' and DAPI in ADJUSTED:
-        return True
-    elif chn == 'OPAL480' and OPAL480 in ADJUSTED:
-        return True
-    elif chn == 'OPAL520'and OPAL520 in ADJUSTED:
-        return True
-    elif chn == 'OPAL570' and OPAL570 in ADJUSTED:
-        return True
-    elif chn == 'OPAL620'and OPAL620 in ADJUSTED:
-        return True
-    elif chn == 'OPAL690'and OPAL690 in ADJUSTED:
-        return True
-    elif chn == 'OPAL780'and OPAL780 in ADJUSTED:
-        return True
-    elif chn == 'AF'and AF in ADJUSTED:
+    if chn in ADJUSTED:
         return True
     else:
         return False
@@ -130,26 +116,25 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
     composite = []
     # get data from other CHECKED channels, not including Composite (always 8)
     need_gamma_adjustment = copy.copy(ADJUSTED)
-    if Composite in ADJUSTED: need_gamma_adjustment.remove(Composite)
-    fluors_only = copy.copy(CHANNELS)
-    fluors_only.remove(Composite)
+    if 'Composite' in ADJUSTED: need_gamma_adjustment.remove('Composite')
+    fluors_only = copy.copy(CHANNELS_STR)
+    fluors_only.remove('Composite')
     # print(f'\n dumping ADJUSTED needed: {ADJUSTED}\n and CHANNELS: {CHANNELS}\n and CHANNELS_STR {CHANNELS_STR}\n and CHANNEL_ORDER {CHANNEL_ORDER}\n and something?? {CHANNELS}')
     # print(f'\n dumping adjustment needed: {need_gamma_adjustment}')
-    for chn_pos in fluors_only:
-        chn_str = CHANNEL_ORDER[chn_pos]
+    for chn_str in fluors_only:
         # chn_str = chn_str.replace('OPAL','') # OPAL is not in the name of the data key
         # gamma adjust
         
         # In this certain case, don't show anything for this channel
-        if Composite not in ADJUSTED and chn_pos not in need_gamma_adjustment:
+        if 'Composite' not in ADJUSTED and chn_str not in need_gamma_adjustment:
             # print(f'Conditions satisfied!\n')
             chn_data = copy.copy(IMAGE_DATA_ADJUSTED[chn_str])
             chn_data.fill(0)
-            chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)
+            chn_data = _convert_to_rgb(np.asarray(chn_data), CHANNEL_ORDER[chn_str], divisor=1)
             composite.append([chn_data])
             continue
 
-        if chn_pos in need_gamma_adjustment:
+        if chn_str in need_gamma_adjustment:
             # print(f'Will gamma adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[chn_str])
 
@@ -160,7 +145,7 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
             if color_range != 0:
                 chn_data = (chn_data - low) / color_range
             #TODO determine whether gamma gets changed before or after color mapping
-            # chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1) # can do this at the end?
+            # chn_data = _convert_to_rgb(chn_data, CHANNEL_ORDER[chn_str], divisor=1) # can do this at the end?
             if keepSettingsTheSame:
                 gamma_correct = np.vectorize(lambda x:x**ADJUSTMENT_SETTINGS[chn_str+' gamma'])
             else:
@@ -170,7 +155,7 @@ def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
             IMAGE_DATA_ADJUSTED[chn_str] = chn_data # store adjustments
         else:
             chn_data = np.asarray(copy.copy(IMAGE_DATA_ADJUSTED[chn_str]))
-        chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
+        chn_data = _convert_to_rgb(chn_data, CHANNEL_ORDER[chn_str], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
         composite.append([chn_data])
 
 
@@ -229,25 +214,24 @@ def adjust_composite_limits(layer):
     composite = []
     # get data from other CHECKED channels, not including Composite (always 8)
     need_contrast_adjustment = copy.copy(ADJUSTED)
-    if Composite in ADJUSTED: need_contrast_adjustment.remove(Composite) # nervous about hard-coding this...
-    fluors_only = copy.copy(CHANNELS)
-    fluors_only.remove(Composite)
+    if 'Composite' in ADJUSTED: need_contrast_adjustment.remove('Composite') # nervous about hard-coding this...
+    fluors_only = copy.copy(CHANNELS_STR)
+    fluors_only.remove('Composite')
     # print(f'\n dumping ADJUSTED needed: {ADJUSTED}\n and CHANNELS: {CHANNELS}\n and CHANNELS_STR {CHANNELS_STR}\n and CHANNEL_ORDER {CHANNEL_ORDER}\n and something?? {CHANNELS}')
     # print(f'\n dumping contrast adjustment needed: {need_contrast_adjustment}')
-    for chn_pos in fluors_only:
-        chn_str = CHANNEL_ORDER[chn_pos]
+    for chn_str in fluors_only:
         # chn_str = chn_str.replace('OPAL','') # OPAL is not in the name of the data key
         # gamma adjust
 
         # In this certain case, don't show anything for this channel
-        if Composite not in ADJUSTED and chn_pos not in need_contrast_adjustment:
+        if 'Composite' not in ADJUSTED and chn_str not in need_contrast_adjustment:
             chn_data = copy.copy(IMAGE_DATA_ADJUSTED[chn_str])
             chn_data.fill(0)
-            chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)
+            chn_data = _convert_to_rgb(np.asarray(chn_data), CHANNEL_ORDER[chn_str], divisor=1)
             composite.append([chn_data])
             continue
 
-        if chn_pos in need_contrast_adjustment:
+        if chn_str in need_contrast_adjustment:
             # print(f'Will contrast adjust {chn_str}')
             chn_data = copy.copy(IMAGE_DATA_ORIGINAL[chn_str])
 
@@ -259,14 +243,14 @@ def adjust_composite_limits(layer):
                 chn_data = (chn_data - low) / color_range
             gamma_correct = np.vectorize(lambda x:x**ADJUSTMENT_SETTINGS[chn_str+' gamma'])
             chn_data = gamma_correct(chn_data)
-            # chn_data = _convert_to_rgb(chn_data, fluor_to_color[chn_str], divisor=1) # can do this at the end?
+            # chn_data = _convert_to_rgb(chn_data, CHANNEL_ORDER[chn_str], divisor=1) # can do this at the end?
             # print(f'Checking dimensions of chn_data: {np.asarray(chn_data).shape}')
             IMAGE_DATA_ADJUSTED[chn_str] = chn_data # store adjustments
         else:
             print(f'Just fetching {chn_str} data...')
             chn_data = copy.copy(IMAGE_DATA_ADJUSTED[chn_str])
-        # print(f'Converting back to rgb, using the {fluor_to_color[chn_str]} palette ...')
-        chn_data = _convert_to_rgb(np.asarray(chn_data), fluor_to_color[chn_str], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
+        # print(f'Converting back to rgb, using the {CHANNEL_ORDER[chn_str]} palette ...')
+        chn_data = _convert_to_rgb(np.asarray(chn_data), CHANNEL_ORDER[chn_str], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
         composite.append([chn_data])
 
 
@@ -318,8 +302,8 @@ def adjust_gamma(viewer, gamma):
     # This allows the function to be called to reuse the same settings instead of updating them
     #   useful for keeping settings when loading next page or switching modes. 
     for fluor in ADJUSTED:
-        fluorname = CHANNEL_ORDER[fluor]
-        _update_dictionary(fluorname,gamma)
+        print(f'FLUOR IS {fluor} || {CHANNELS_STR}')
+        _update_dictionary(fluor,gamma)
 
     for ctclayer in VIEWER.layers:
         if ctclayer.name != 'Status Layer' and len(ADJUSTED)>0:
@@ -340,8 +324,7 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' white-in'] = val
     for fluor in ADJUSTED:
-        fluorname = CHANNEL_ORDER[fluor]
-        _update_dictionary(fluorname,white_in)
+        _update_dictionary(fluor,white_in)
     
     for ctclayer in VIEWER.layers:
         if ctclayer.name != 'Status Layer' and len(ADJUSTED)>0:
@@ -357,8 +340,7 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         ADJUSTMENT_SETTINGS[name+' black-in'] = val
     
     for fluor in ADJUSTED:
-        fluorname = CHANNEL_ORDER[fluor]
-        _update_dictionary(fluorname,black_in)
+        _update_dictionary(fluor,black_in)
 
     for ctclayer in VIEWER.layers:
         if ctclayer.name != 'Status Layer' and len(ADJUSTED)>0:
@@ -375,18 +357,18 @@ def dynamic_checkbox_creator(checkbox_name, setChecked = True):
         # print(f'in myfunc backend CHANNELS are {CHANNELS}, and {CHANNELS_STR}. Trying to remove {checkbox_name}, whose global value is {globals()[checkbox_name]}, from {ADJUSTED}')
         if not COMPOSITE_MODE:
             if check:
-                ADJUSTED.append(globals()[checkbox_name])
+                ADJUSTED.append(str(checkbox_name))
                 # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = True
                 # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just added {checkbox_name}')
             else:
-                ADJUSTED.remove(globals()[checkbox_name])
+                ADJUSTED.remove(str(checkbox_name))
                 # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = False
                 # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just removed {checkbox_name}')
         else: # In composite mode 
             if check:
-                ADJUSTED.append(globals()[checkbox_name])
+                ADJUSTED.append(str(checkbox_name))
             else:
-                ADJUSTED.remove(globals()[checkbox_name])
+                ADJUSTED.remove(str(checkbox_name))
             # now remake composite images with the channels listed in ADJUSTED
             #   But only if the "Composite" check is active, otherwise show all channels in the image
             # if Composite not in ADJUSTED:
@@ -421,7 +403,7 @@ checkbox_setup()
 #   unchecked by now.  
 def fix_default_composite_adj():
     global ADJUSTED
-    ADJUSTED = list(filter(lambda a: a != globals()["Composite"], ADJUSTED))
+    ADJUSTED = list(filter(lambda a: a != "Composite", ADJUSTED))
 
 ## --- Side bar functions and GUI elements 
 
@@ -434,10 +416,13 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            hdata.loc[2,"Validation - Unseen"]
+            hdata.loc[2,f"Validation - {PHENOTYPE} - Unseen"]
         except KeyError:
             for call_type in reversed(STATUS_COLORS.keys()):
-                hdata.insert(8,f"Validation - {call_type}", 0)
+                if call_type == 'Unseen':
+                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 1)
+                else:
+                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 0) 
         try:
             hdata.loc[2,"Notes"]
         except KeyError:
@@ -450,8 +435,8 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
             try:
                 # reset all validation cols to zero before assigning a 1 to the appropriate status col
                 for call_type in STATUS_COLORS.keys():
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {call_type}"] = 0
-                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {status}"] = 1
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {call_type}"] = 0
+                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {status}"] = 1
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
@@ -534,10 +519,13 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            hdata.loc[2,"Validation - Unseen"]
+            hdata.loc[2,f"Validation - {PHENOTYPE} - Unseen"]
         except KeyError:
             for call_type in reversed(STATUS_COLORS.keys()):
-                hdata.insert(8,f"Validation - {call_type}", 0)
+                if call_type == 'Unseen':
+                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 1)
+                else:
+                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 0) 
         try:
             hdata.loc[2,"Notes"]
         except KeyError:
@@ -549,8 +537,8 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
             try:
                 # reset all validation cols to zero before assigning a 1 to the appropriate status col
                 for call_type in STATUS_COLORS.keys():
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {call_type}"] = 0
-                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {status}"] = 1
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {call_type}"] = 0
+                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {status}"] = 1
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
@@ -891,18 +879,9 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             num_channels = len(RASTERS) 
         else:
             num_channels = pyramid.shape[2] # Data is [X,Y,C]
-        for i in range(num_channels): # loop through channels
-            if i in CHANNELS:
+        for pos, fluor in enumerate(CHANNEL_ORDER): # loop through channels
+            if pos in CHANNELS and fluor != 'Composite':
                 # name cell layer
-                #TODO this should REALLY be a dictionary lookup...
-                if i==DAPI: fluor='DAPI'
-                elif i==OPAL570: fluor='OPAL570'
-                elif i==OPAL690: fluor='OPAL690' 
-                elif i==OPAL480: fluor='OPAL480'
-                elif i==OPAL620: fluor='OPAL620' 
-                elif i==OPAL780: fluor='OPAL780'
-                elif i==OPAL520: fluor='OPAL520'
-                elif i==AF: fluor='AF' 
                 cell_name = f'Cell {cell_id} {fluor}'
 
                 # Shortcut if we have seen the cell before and done the work
@@ -915,11 +894,9 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 # Save record of what colormap is chosen for what fluor. Useful for 
                 #   altering the composite image later (white-in / black-in). 
                 # This is dumb - do it somewhere else
-                if cell_colors[i] == 'pink': cell_colors[i] = 'Pink'
-                global fluor_to_color; fluor_to_color[fluor] = cell_colors[i]
                 # print(f'Testing if raster used: {RASTERS}') # YES can see subdatasets.
                 if RASTERS is not None:
-                    with rasterio.open(RASTERS[i]) as channel:
+                    with rasterio.open(RASTERS[pos]) as channel:
                         cell_punchout_raw = channel.read(1,window=Window(cell_x-offset,cell_y-offset, offset*2,offset*2)).astype('float64')
                 else:
                     # rasterio reading didn't work, so entire image should be in memory as np array
@@ -956,7 +933,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 # #TODO Gamma correct right here since there's a bug that doesn't allow passing to the viewer
                 # cell_punchout_raw = np.asarray([x**0.5 for x in cell_punchout_raw])
                 # print(f'\n\n Type before color mapping is {cell_punchout_raw.dtype}, shape is {cell_punchout_raw.shape}|| there are {len(np.unique(cell_punchout_raw))} unique elements. Min/max is {np.min(cell_punchout_raw)} |{np.max(cell_punchout_raw)}\n\n')
-                cell_punchout = _convert_to_rgb(cell_punchout_raw, cell_colors[i], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
+                cell_punchout = _convert_to_rgb(cell_punchout_raw, CHANNEL_ORDER[fluor], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
 
                 # print(f'fluor {fluor} pageimage shape: {pageimage.shape} | row {row}, col {col} | cpsave shape {cp_save.shape}')
                 if not composite_only: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
@@ -977,15 +954,6 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 # print(f'colormapped np shape is {cell_punchout.shape}') # (100,100,4)
                 # composite = np.vstack([composite, cell_punchout]')
                 composite.append([cell_punchout])
-
-                if len(cells) == 5 and cell_colors[i] == 'Reds':
-                    pass
-                    # print(f'Colormapped shape is {cell_punchout.shape}')
-                    # print(f'Colormapped RAW shape is {cell_punchout_raw.shape}')
-                    # print(f' our min and max in the raw file is {np.min(cell_punchout_raw)} and {np.max(cell_punchout_raw)}')
-                    # np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\cell_punch.txt", cell_punchout[:,:,0])
-                    # np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\normed.txt", cm.Reds(norm(cell_punchout_raw))[:,:,0])
-                    # np.savetxt(r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\cell_punch_raw.txt", cell_punchout_raw)
 
         if composite_only: # This stuff is only necessary in composite mode   
                     # Confirmation that values are 0-255
@@ -1259,10 +1227,13 @@ def sv_wrapper(viewer):
         viewer.status = 'Saving ...'
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            hdata.loc[2,"Validation - Unseen"]
+            hdata.loc[2,f"Validation - {PHENOTYPE} - Unseen"]
         except KeyError:
             for call_type in reversed(STATUS_COLORS.keys()):
-                hdata.insert(8,f"Validation - {call_type}", 0)
+                if call_type == 'Unseen':
+                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 1)
+                else:
+                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 0) 
         try:
             hdata.loc[2,"Notes"]
         except KeyError:
@@ -1271,12 +1242,12 @@ def sv_wrapper(viewer):
 
         for cell_id in STATUS_LIST.keys():
             status = STATUS_LIST[cell_id]
-            print(f"\nSave status {status}, cid {cell_id}")
+            # print(f"\nSave status {status}, cid {cell_id}")
             try:
                 # reset all validation cols to zero before assigning a 1 to the appropriate status col
                 for call_type in STATUS_COLORS.keys():
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {call_type}"] = 0
-                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {status}"] = 1
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {call_type}"] = 0
+                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {status}"] = 1
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
@@ -1334,6 +1305,8 @@ def tsv_wrapper(viewer):
         y = CANVAS_VALUES['Y'] - 50
         CANVAS_VALUES['Y'] = y
         set_viewer_to_zoom(viewer, CANVAS_VALUES['X'], y ,CANVAS_VALUES['ZOOM'])
+        # viewer = napari.Viewer
+        # viewer.cursor.update()
 
     @viewer.bind_key('Down')
     def scroll_up(viewer):
@@ -1427,10 +1400,13 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
         raise KeyError
     # Add columns w/defaults if they aren't there to avoid runtime issues
     try:
-        halo_export.loc[2,"Validation - Unseen"]
+        halo_export.loc[2,f"Validation - {phenotype} - Unseen"]
     except KeyError:
         for call_type in reversed(STATUS_COLORS.keys()):
-            halo_export.insert(8,f"Validation - {call_type}", 0)
+            if call_type == 'Unseen':
+                halo_export.insert(8,f"Validation - {phenotype} - {call_type}", 1)
+            else:
+                halo_export.insert(8,f"Validation - {phenotype} - {call_type}", 0) 
     try:
         halo_export.loc[2,"Notes"]
     except KeyError:
@@ -1447,7 +1423,7 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
             'Opal 570 Cell Intensity', 'Opal 620 Cell Intensity', 'Opal 690 Cell Intensity','Opal 780 Cell Intensity',
             'AF Cell Intensity','Autofluorescence Cell Intensity', "Sample AF Cell Intensity"] # not sure what the correct nomenclature is here
     v = list(STATUS_COLORS.keys())
-    validation_cols = ["Validation - " + s for s in v]
+    validation_cols = [f"Validation - {PHENOTYPE} - " + s for s in v]
     cols_to_keep = ["Object Id", "Notes", "XMin","XMax","YMin", "YMax", phenotype] + all_possible_intensities + validation_cols
     cols_to_keep = halo_export.columns.intersection(cols_to_keep)
     halo_export = halo_export.loc[:, cols_to_keep]
@@ -1518,9 +1494,7 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
             center_x = int((row['XMax']+row['XMin'])/2)
             center_y = int((row['YMax']+row['YMin'])/2)
             vals = row[validation_cols]
-            print(vals)
-            validation_call = str(vals[vals == 1].index.values[0]).replace("Validation - ", "")
-            print(validation_call)
+            validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation - {phenotype} - ", "")
             tumor_cell_XYs.append([center_x, center_y, row["Object Id"], validation_call])
     except Exception as e:
         print(e)
@@ -1551,30 +1525,30 @@ def replace_note(cell_widget, note_widget):
 ''' Reset globals and proceed to main '''
 def GUI_execute(preprocess_class):
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
-    global cell_colors, qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER
+    global qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER
     global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
 
-    cell_colors = userInfo.cell_colors
     qptiff = userInfo.qptiff
     PUNCHOUT_SIZE = userInfo.imageSize
     PHENOTYPE = userInfo.phenotype
     PAGE_SIZE = userInfo.page_size
     SPECIFIC_CELL = userInfo.specific_cell
     OBJECT_DATA = userInfo.objectData
-    CHANNELS_STR = userInfo.channels # Update this so that only the checked fluors are present
     CELLS_PER_ROW = userInfo.cells_per_row
-    if "Composite" not in CHANNELS_STR: CHANNELS_STR.append("Composite")
     CHANNEL_ORDER = userInfo.channelOrder
-    if "Composite" not in CHANNEL_ORDER: CHANNEL_ORDER.append("Composite")
+    if "Composite" not in list(CHANNEL_ORDER.keys()): CHANNEL_ORDER['Composite'] = 'None'
     CHANNELS = []
-    for pos,chn in enumerate(CHANNEL_ORDER):
+    CHANNELS_STR = []
+    for pos,chn in enumerate(list(CHANNEL_ORDER.keys())):
         # print(f'enumerating {chn} and {pos} for {CHANNELS_STR}')
         exec(f"globals()['{chn}'] = {pos}") # Important to do this for ALL channels
-        if chn in CHANNELS_STR:
+        if chn in userInfo.channels:
             # print(f'IF triggered with {chn} and {pos}')
             exec(f"globals()['CHANNELS'].append({chn})")
+            CHANNELS_STR.append(chn)
     # print(f'GUI execute channels are {CHANNELS}')
-    ADJUSTED = copy.copy(CHANNELS)
+    CHANNELS.append(len(CHANNEL_ORDER)-1) ; CHANNELS_STR.append('Composite')
+    ADJUSTED = copy.copy(CHANNELS_STR)
     if userInfo.global_sort == "Sort object table by Cell Id":
         GLOBAL_SORT = None
     elif "OPAL" in userInfo.global_sort:

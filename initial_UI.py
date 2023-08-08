@@ -19,13 +19,23 @@ from datetime import datetime
 import os
 import warnings
 warnings.filterwarnings("ignore")
+import pandas as pd
+import copy
+from random import choice
+
+import tifffile
+import xml.etree.ElementTree as ET
 
 VERSION_NUMBER = '1.1.0'
 FONT_SIZE = 12
 #DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
 CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
 AVAILABLE_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'pink', 'cyan']
+COLOR_TO_RGB = {'gray': '(170,170,170, 255)', 'purple':'(160,32,240, 255)', 'blue':'(100,100,255, 255)',
+                    'green':'(60,179,113, 255)', 'orange':'(255,127,80, 255)', 'red': '(215,40,40, 255)',
+                    'yellow': '(255,215,0, 255)', 'pink': '(255,105,180, 255)', 'cyan' : '(0,220,255, 255)'}
 WIDGET_SELECTED = None
+ANNOTATION_LAYERS = ['All'] 
 
 class ViewerPresets(QDialog):
     def __init__(self, app, parent=None):
@@ -82,6 +92,12 @@ class ViewerPresets(QDialog):
         dataEntryLabel.setAlignment(Qt.AlignCenter)
         dataEntryLabel.setMaximumWidth(600)
 
+        self.previewDataButton = QPushButton("Fetch metadata")
+        self.previewDataButton.setDefault(False)
+        if "csv" not in self.dataEntry.text() and ((".qptiff" not in self.qptiffEntry.text()) or (".tif" not in self.qptiffEntry.text())):
+            self.previewDataButton.setEnabled(False)
+
+
         # Push button to start reading image data and start up napari by remotely executing main method of main script
         self.findDataButton = QPushButton("Load Gallery Images")
         self.findDataButton.setDefault(False)
@@ -98,6 +114,7 @@ class ViewerPresets(QDialog):
         self.findDataButton.pressed.connect(self.loadGallery)
         self.qptiffEntry.textEdited.connect(self.saveQptiff)
         self.dataEntry.textEdited.connect(self.saveObjectData)
+        self.previewDataButton.pressed.connect(self.prefillData)
 
         topLayout = QGridLayout()
         # topLayout.addStretch(1)
@@ -108,6 +125,7 @@ class ViewerPresets(QDialog):
         topLayout.addWidget(self.qptiffEntry,1,1)
         topLayout.addWidget(dataEntryLabel,2,0,1,0)
         topLayout.addWidget(self.dataEntry,2,1)
+        topLayout.addWidget(self.previewDataButton,2,2)
         # topLayout.addWidget(self.findDataButton,2,1)
 
         self.mainLayout = QGridLayout()
@@ -129,8 +147,17 @@ class ViewerPresets(QDialog):
 
     def saveQptiff(self):
         self.userInfo.qptiff = os.path.normpath(self.qptiffEntry.text().strip('"'))
+        if "csv" in self.dataEntry.text() and ((".qptiff" in self.qptiffEntry.text()) or (".tif" in self.qptiffEntry.text())):
+            self.previewDataButton.setEnabled(True)
+        else:
+            self.previewDataButton.setEnabled(False)
     def saveObjectData(self):
         self.userInfo.objectData = os.path.normpath(self.dataEntry.text().strip('"'))
+        if "csv" in self.dataEntry.text() and ((".qptiff" in self.qptiffEntry.text()) or (".tif" in self.qptiffEntry.text())):
+            self.previewDataButton.setEnabled(True)
+        else:
+            self.previewDataButton.setEnabled(False)
+
     def savePhenotype(self):
         self.userInfo.phenotype = self.phenotypeToGrab.text()
     def saveSpecificCell(self):
@@ -162,39 +189,92 @@ class ViewerPresets(QDialog):
     def saveColors(self):
         for colorWidget in self.myColors:
             # Set each the color of each QSpin
-            if colorWidget.currentText() == 'gray': # gray
-                    colorWidget.setStyleSheet("background-color: rgba(170,170,170, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'purple': # purple
-                colorWidget.setStyleSheet("background-color: rgba(160,32,240, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'blue': # blue
-                colorWidget.setStyleSheet("background-color: rgba(100,100,255, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'green': # green
-                colorWidget.setStyleSheet("background-color: rgba(60,179,113, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'orange': # orange
-                colorWidget.setStyleSheet("background-color: rgba(255,127,80, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'red': # red
-                colorWidget.setStyleSheet("background-color: rgba(215,40,40, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'yellow': # yellow
-                colorWidget.setStyleSheet("background-color: rgba(255,215,0, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'pink': # pink
-                colorWidget.setStyleSheet("background-color: rgba(255,105,180, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'cyan': # cyan
-                colorWidget.setStyleSheet("background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            colorWidget.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[colorWidget.currentText()]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            
 
-            # print(f'My trigger was {colorWidget.objectName()}')
+            print(f'My trigger was {colorWidget.objectName()}')
             colorChannel = colorWidget.objectName()
-            # print(f'#### Channel order fsr: {store_and_load.CHANNELS_STR} \n 1. also userinfo.cell_colors before change: {self.userInfo.cell_colors}')
+            print(f'#### Channel order fsr: {store_and_load.CHANNELS_STR} \n')
             colorPos = store_and_load.CHANNELS_STR.index(colorChannel)
-            # print(f'2. Position of {colorChannel} in CHANNEL_ORDER is {colorPos}')
+            print(f'2. Position of {colorChannel} in CHANNEL_ORDER is {colorPos}')
             self.userInfo.UI_color_display.pop(colorPos)
-            # print(f'3. Our intermediate step is this: {self.userInfo.UI_color_display}')
+            print(f'3. Our intermediate step is this: {self.userInfo.UI_color_display}')
             self.userInfo.UI_color_display.insert(colorPos, colorWidget.currentText())
-            # print(f'4. Now color should be in right spot. Here is the thing {self.userInfo.UI_color_display}')
+            print(f'4. Now color should be in right spot. Here is the thing {self.userInfo.UI_color_display}')
 
             # # Now do it for visual display:
             # colorPos = CHANNELS_STR.index(colorChannel)
             # self.userInfo.UI_color_display.pop(colorPos)
             # self.userInfo.UI_color_display.insert(colorPos, colorWidget.currentText())
+
+    def prefillData(self):
+        path = self.dataEntry.text().strip('"')
+        if ".csv" not in path:
+            return None
+        headers = pd.read_csv(path, index_col=False, nrows=0).columns.tolist()  
+        all_layers = list(pd.read_csv(path, usecols=['Analysis Region'])['Analysis Region'].unique())
+        global ANNOTATION_LAYERS
+        ANNOTATION_LAYERS = ['All'] + all_layers
+        print(ANNOTATION_LAYERS)
+
+        # Parse annoying TIF metadata
+        # It seems to be stored in XML format under the 'ImageDescription' TIF tag. 
+        path = self.qptiffEntry.text().strip('"')
+        description = tifffile.TiffFile(path).pages[0].tags['ImageDescription'].value
+        root = ET.fromstring(description)
+        # QPTIFF only
+        sc = root.find(".//ScanColorTable")
+        raw = sc.findall(".//")
+        raw = [x.text.split("_")[0] for x in raw]
+        fluors = {}
+        for i in range(0,len(raw),2):
+            fluors[raw[i]] = raw[i+1]
+        
+        # rename keys 
+        for key in list(fluors.keys()):
+            fluors[key.replace(" ", '').replace('SampleAF','AF').upper()] = fluors.pop(key).lower().replace('white', 'gray').replace('lime','green').replace('pink','Pink')
+        print(fluors)
+        unused_colors = copy.copy(AVAILABLE_COLORS)
+        for col in fluors.values():
+            if col in unused_colors:
+                unused_colors.remove(col)
+        
+        for key, value in fluors.items():
+            if value in AVAILABLE_COLORS: 
+                continue
+            else:
+                if len(unused_colors) < 1:
+                    random_color = choice(AVAILABLE_COLORS)
+                else:
+                    random_color = choice(unused_colors)
+                    unused_colors.remove(random_color)
+                fluors[key] = random_color
+        print(fluors)
+
+        # Change display widgets to reflect change
+        for pos,combo in enumerate(self.myColors):
+            widget_name = combo.objectName()
+            widget_color = fluors[widget_name]
+            # print(widget_name +  "  |  " + widget_color)
+            # colorComboName = button.objectName() + "_colors"
+            combo.setCurrentText(widget_color)
+            combo.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[widget_color]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+        for button in self.mycheckbuttons:
+            button.setChecked(False)
+            widget_name = button.objectName()
+            if widget_name in list(fluors.keys()):
+                button.setChecked(True)
+        
+        self.userInfo.channelOrder = fluors
+        display_list =  sorted(fluors.items())
+        display_list = [x[1] for x in display_list]
+        display_list.append(display_list.pop(0))
+        self.userInfo.UI_color_display = display_list
+        self.saveChannel()
+        self.saveColors()
+        self.previewDataButton.setEnabled(False)
+        self.previewDataButton.setStyleSheet(f"color: rgba(100,200,100,255)")
+
             
     def createTopLeftGroupBox(self):
         self.topLeftGroupBox = QGroupBox("Channels and Colors")
@@ -295,30 +375,20 @@ class ViewerPresets(QDialog):
             
         for colorWidget in self.myColors:
             # Set each the color of each QSpin
-            if colorWidget.currentText() == 'gray': # gray
-                    colorWidget.setStyleSheet("background-color: rgba(170,170,170, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'purple': # purple
-                colorWidget.setStyleSheet("background-color: rgba(160,32,240, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'blue': # blue
-                colorWidget.setStyleSheet("background-color: rgba(100,100,255, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'green': # green
-                colorWidget.setStyleSheet("background-color: rgba(60,179,113, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'orange': # orange
-                colorWidget.setStyleSheet("background-color: rgba(255,127,80, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'red': # red
-                colorWidget.setStyleSheet("background-color: rgba(215,40,40, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'yellow': # yellow
-                colorWidget.setStyleSheet("background-color: rgba(255,215,0, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'pink': # pink
-                colorWidget.setStyleSheet("background-color: rgba(255,105,180, 255);color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif colorWidget.currentText() == 'cyan': # cyan
-                colorWidget.setStyleSheet("background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            colorWidget.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[colorWidget.currentText()]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
 
-        
         self.topLeftGroupBox.setLayout(layout)    
 
     def createTopRightGroupBox(self):
         self.topRightGroupBox = QGroupBox("Cells to Read")
+
+        explanationLabel0 = QLabel("Custom object data <b>phenotype<b>")
+        explanationLabel1 = QLabel("Cell image size in <b>pixels</b>")
+        explanationLabel2 = QLabel("Load the page with this <b>Cell ID<b>")
+        explanationLabel3 = QLabel("Number of cells <b>per page<b>")
+        explanationLabel4 = QLabel("Number of cells <b>per row<b>")
+        # explanationLabel5 = QLabel("Number of cells <b>per row<b>")
+
 
         #TODO attach previous choice here
         self.phenotypeToGrab = QLineEdit(self.topRightGroupBox)
@@ -328,12 +398,7 @@ class ViewerPresets(QDialog):
         self.phenotypeToGrab.setFixedWidth(220)
         self.phenotypeToGrab.textEdited.connect(self.savePhenotype)
         # phenotypeToGrab.set
-
-        explanationLabel0 = QLabel("Custom object data <b>phenotype<b>")
-        explanationLabel1 = QLabel("Cell image size in <b>pixels</b>")
-        explanationLabel2 = QLabel("Load the page with this <b>Cell ID<b>")
-        explanationLabel3 = QLabel("Number of cells <b>per page<b>")
-        explanationLabel4 = QLabel("Number of cells <b>per row<b>")
+        self.annotationLayers = QComboBox
 
         self.imageSize = QSpinBox(self.topRightGroupBox)
         self.imageSize.setRange(50,200)
@@ -391,8 +456,10 @@ class ViewerPresets(QDialog):
 
         self.findDataButton.setEnabled(False) # disable load button after click
         store_and_load.storeObject(self.userInfo, 'data/presets')
-        # Correct color order
-        self.userInfo._correct_color_order()
+
+        # If user fetched metadata, save changes to color mappings
+        # self.saveColors()
+
 
         # print(f'QPTIFF: {self.userInfo.qptiff}')
         # print(f'OBJECTDATA : {self.userInfo.objectData}')
@@ -438,7 +505,7 @@ class ViewerPresets(QDialog):
         except Exception as e:
             params = f"Image path: {self.userInfo.qptiff} \nData path: {self.userInfo.objectData}\n"
             params += f"Punchout size: {self.userInfo.imageSize} \nUser selected channels: {self.userInfo.channels}\n"
-            params += f"Color scheme: {self.userInfo.cell_colors} \nChosen phenotype: {self.userInfo.phenotype}\n"
+            params += f"Avaliable color: {store_and_load.CELL_COLORS} \nChosen phenotype: {self.userInfo.phenotype}\n"
             params += f"Batch/page size: {self.userInfo.page_size} \nSort: {self.userInfo.global_sort}\n"
             params += f"Specific cell chosen?: {self.userInfo.specific_cell} \nExpected order of multichannel data: {self.userInfo.channelOrder}\n"
             logging.basicConfig(filename=logpath, encoding='utf-8', level=logging.DEBUG)
