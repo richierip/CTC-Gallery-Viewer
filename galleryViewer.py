@@ -71,7 +71,6 @@ COMPOSITE_MODE = True # Start in composite mode
 RASTERS = None
 NO_LABEL_BOX = False
 GRID_TO_ID = {}
-CANVAS_VALUES = {}
 STATUS_COLORS = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red" }
 
 
@@ -1212,10 +1211,6 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
 #TODO make a button to do this as well?
 def set_viewer_to_neutral_zoom(viewer):
-    global CANVAS_VALUES
-    CANVAS_VALUES['X'] = 450
-    CANVAS_VALUES['Y'] = 350
-    CANVAS_VALUES['ZOOM'] = 1.3
     viewer.camera.center = (350,450) # these values seem to work best
     viewer.camera.zoom = 1.3
 
@@ -1300,58 +1295,41 @@ def tsv_wrapper(viewer):
 
     @viewer.bind_key('k')
     def recenter_canvas(viewer):
-        viewer.camera.center = (CANVAS_VALUES['Y'],CANVAS_VALUES['X']) #y,x # these values seem to work best
-        viewer.camera.zoom = CANVAS_VALUES['ZOOM']
-
-    def set_viewer_to_zoom(viewer, x, y, z):
-        viewer.camera.center = (y,x) #y,x # these values seem to work best
-        viewer.camera.zoom = z
+        set_viewer_to_neutral_zoom(viewer)
 
     @viewer.bind_key('Up')
     def scroll_up(viewer):
-        global CANVAS_VALUES
-        y = CANVAS_VALUES['Y'] - 50
-        CANVAS_VALUES['Y'] = y
-        set_viewer_to_zoom(viewer, CANVAS_VALUES['X'], y ,CANVAS_VALUES['ZOOM'])
-        # viewer = napari.Viewer
-        # viewer.cursor.update()
+        z,y,x = viewer.camera.center
+        viewer.camera.center = (y-50,x)
 
     @viewer.bind_key('Down')
-    def scroll_up(viewer):
-        global CANVAS_VALUES
-        y = CANVAS_VALUES['Y'] + 50
-        CANVAS_VALUES['Y'] = y
-        set_viewer_to_zoom(viewer, CANVAS_VALUES['X'], y ,CANVAS_VALUES['ZOOM'])
+    def scroll_down(viewer):
+        z,y,x = viewer.camera.center
+        viewer.camera.center = (y+50,x)
     
     @viewer.bind_key('Left')
-    def scroll_up(viewer):
-        global CANVAS_VALUES
-        x = CANVAS_VALUES['X'] - 50
-        CANVAS_VALUES['X'] = x
-        set_viewer_to_zoom(viewer, x, CANVAS_VALUES['Y'] ,CANVAS_VALUES['ZOOM'])
+    def scroll_left(viewer):
+        z,y,x = viewer.camera.center
+        viewer.camera.center = (y,x-50)
+        #TODO trigger mouse update here
+        # napari.Viewer.window.qt_viewer._process_mouse_event
+        # viewer.window.qt_viewer.canvas.events.mouse_press(pos=(x, y), modifiers=(), button=0)
+        # viewer.cursor.position = viewer.window.qt_viewer._map_canvas2world([x,y])
+
     @viewer.bind_key('Right')   
-    def scroll_up(viewer):
-        global CANVAS_VALUES
-        x = CANVAS_VALUES['X'] + 50
-        CANVAS_VALUES['X'] = x
-        set_viewer_to_zoom(viewer, x, CANVAS_VALUES['Y'] ,CANVAS_VALUES['ZOOM'])
+    def scroll_right(viewer):
+        z,y,x = viewer.camera.center
+        viewer.camera.center = (y,x+50)
 
     @viewer.bind_key('Control-Right')  
     @viewer.bind_key('Control-Up')   
     def zoom_in(viewer):
-        global CANVAS_VALUES
-        z = CANVAS_VALUES['ZOOM'] * 1.3
-        CANVAS_VALUES['ZOOM'] = z
-        set_viewer_to_zoom(viewer, CANVAS_VALUES['X'], CANVAS_VALUES['Y'],z)
+        viewer.camera.zoom *= 1.3
 
     @viewer.bind_key('Control-Left')  
     @viewer.bind_key('Control-Down')   
     def zoom_out(viewer):
-        global CANVAS_VALUES
-        z = CANVAS_VALUES['ZOOM'] / 1.3
-        CANVAS_VALUES['ZOOM'] = z
-        set_viewer_to_zoom(viewer, CANVAS_VALUES['X'], CANVAS_VALUES['Y'],z)
-    
+        viewer.camera.zoom /= 1.3  
 
 def chn_key_wrapper(viewer):
     def create_fun(position,channel):
