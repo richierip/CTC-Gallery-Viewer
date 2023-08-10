@@ -181,7 +181,7 @@ class ViewerPresets(QDialog):
     def saveChannel(self):
         for button in self.mycheckbuttons:
             channelName = button.objectName()
-            # print(f"{channelName} and {self.userInfo.channels}")
+            print(f"{channelName} and {self.userInfo.channels}")
             if button.isChecked():
                 self.userInfo.attempt_channel_add(channelName)
             elif not button.isChecked():
@@ -207,6 +207,8 @@ class ViewerPresets(QDialog):
             # colorPos = CHANNELS_STR.index(colorChannel)
             # self.userInfo.UI_color_display.pop(colorPos)
             # self.userInfo.UI_color_display.insert(colorPos, colorWidget.currentText())
+            # Save info to channelOrder
+            self.userInfo.channelOrder[colorChannel] = colorWidget.currentText()
 
     def prefillData(self):
         try:
@@ -313,7 +315,7 @@ class ViewerPresets(QDialog):
         display_list.append(display_list.pop(0))
         self.userInfo.UI_color_display = display_list
         self.saveChannel()
-        self.saveColors()
+        # self.saveColors()
         return 'passed'
 
             
@@ -350,10 +352,11 @@ class ViewerPresets(QDialog):
                     colorWidget.setStyleSheet(f"selection-background-color: rgba(215,40,40, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
                 elif index ==6: # yellow
                     colorWidget.setStyleSheet(f"selection-background-color: rgba(255,215,0, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-                elif index ==7: # pink
-                    colorWidget.setStyleSheet(f"selection-background-color: rgba(255,105,180, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-                elif index ==8: # cyan
+                elif index ==7: # cyan
                     colorWidget.setStyleSheet(f"selection-background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                elif index ==8: # pink
+                    colorWidget.setStyleSheet(f"selection-background-color: rgba(255,105,180, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+                
                 # colorWidget.setStyleSheet(f"color: {colorWidget.currentText()}; font-size: {FONT_SIZE}pt;")
             return set_color_index 
         # Space / time saving way to create 16 widgets and change their parameters
@@ -384,10 +387,11 @@ class ViewerPresets(QDialog):
             exec(f'{colorComboName}.setItemData(5,QColor(0,0,0,255),Qt.ForegroundRole)')
             exec(f'{colorComboName}.setItemData(6,QColor(255,255,0,0),Qt.BackgroundRole)')# yellow
             exec(f'{colorComboName}.setItemData(6,QColor(0,0,0,255),Qt.ForegroundRole)')
-            exec(f'{colorComboName}.setItemData(7,QColor(255,0,255,0),Qt.BackgroundRole)') # pink
+            exec(f'{colorComboName}.setItemData(7,QColor(0,255,255,0),Qt.BackgroundRole)') # cyan
             exec(f'{colorComboName}.setItemData(7,QColor(0,0,0,255),Qt.ForegroundRole)')
-            exec(f'{colorComboName}.setItemData(8,QColor(0,255,255,0),Qt.BackgroundRole)') # cyan
+            exec(f'{colorComboName}.setItemData(8,QColor(255,0,255,0),Qt.BackgroundRole)') # pink
             exec(f'{colorComboName}.setItemData(8,QColor(0,0,0,255),Qt.ForegroundRole)')
+
             
             # exec(f'{colorComboName}.setStyleSheet("background-color: rgb(0,0,0); selection-background-color: rgba(255,255,255,1);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")')
             # exec(f'{colorComboName}.setStyleSheet("selection-background-color: rgba(255,0,0,255);selection-color: rgb(255,255,255); font-size:{FONT_SIZE}pt;")')
