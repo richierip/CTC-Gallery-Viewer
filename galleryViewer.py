@@ -691,17 +691,37 @@ def set_notes_label(display_note_widget, ID):
     # Add intensities
     intensity_series = SAVED_INTENSITIES[ID]
     intensity_str = ''
-    for i in range(0,len(intensity_series),3):
-        cell = intensity_series.index[i]
-        cyto = intensity_series.index[i+1]
-        nuc = intensity_series.index[i+2]
-        fluor = str(cell).replace(" Cell Intensity","")
-        intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor.replace(" ","").upper()].replace("blue","#0462d4")}">{fluor} cyto: {round(float(intensity_series[cyto]),1)} nuc: {round(float(intensity_series[nuc]),1)} cell: {round(float(intensity_series[cell]),1)}</font>'
+    for pos in CHANNELS:
+        fluor = list(CHANNEL_ORDER.keys())[pos]
+        if fluor == 'Composite':
+            continue
+        # fluor = str(cell).replace(" Cell Intensity","")
+        fluor = str(fluor)
+        intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">{fluor.replace("OPAL","Opal ")}'
+        try:
+            # cyto = fluor.replace("OPAL","Opal ")
+            cyto = round(float(intensity_series[f'{fluor.replace("OPAL","Opal ")} Cytoplasm Intensity']),1)
+            intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cyto: {cyto}</font>'
+        except KeyError:
+            pass
+        try:
+            # nuc = fluor.replace("OPAL","Opal ")
+            nuc = round(float(intensity_series[f'{fluor.replace("OPAL","Opal ")} Nucleus Intensity']),1)
+            intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> nuc: {nuc}</font>'
+        except KeyError:
+            pass
+        try:
+            # cell = fluor.replace("OPAL","Opal ")
+            cell = round(float(intensity_series[f'{fluor.replace("OPAL","Opal ")} Cell Intensity']),1)
+            intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cell: {cell}</font>'
+        except KeyError:
+            pass
+        # intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor.replace(" ","").upper()].replace("blue","#0462d4")}">{fluor} cyto: {round(float(intensity_series[cyto]),1)} nuc: {round(float(intensity_series[nuc]),1)} cell: {round(float(intensity_series[cell]),1)}</font>'
     # Add note if it exists
     if note == '-' or note == '' or note is None: 
         note = prefix + intensity_str
     else:
-        note = prefix + intensity_str + f'<br><font size="5pt">{note}</font>'
+        note = prefix + intensity_str + f'<br><font size="5pt" color="white">{note}</font>'
     display_note_widget.setText(note)
     return True
 ######------------------------- Image loading and processing functions ---------------------######
@@ -864,7 +884,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW))
 
     if composite_only: size_multiplier = 1
-    else: size_multiplier = 4
+    else: size_multiplier = len(CHANNELS)
     # IMAGE_DATA_ORIGINAL = {}
     for chn in CHANNELS_STR:
         if chn == 'Composite':
@@ -936,7 +956,9 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 # ido_key = fluor
                 # if ido_key not in ["DAPI","Composite"]:
                 #     ido_key = 'OPAL'+ ido_key
-                # print(f'fluor {fluor} IMAGEDATAORIGINAL shape: {IMAGE_DATA_ORIGINAL[fluor].shape} | row {row}, col {col} | cpsave shape {cp_save.shape}')
+                s = IMAGE_DATA_ORIGINAL[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
+                                                  (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1].shape
+                print(f'fluor {fluor} IMAGEDATAORIGINAL shape: {IMAGE_DATA_ORIGINAL[fluor].shape} punch shape: {s} | row {row}, col {col} | cpsave shape {cp_save.shape}')
                 IMAGE_DATA_ORIGINAL[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
                                                   (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cp_save #; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
 
