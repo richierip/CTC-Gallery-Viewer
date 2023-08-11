@@ -691,9 +691,12 @@ def set_notes_label(display_note_widget, ID):
     # Add intensities
     intensity_series = SAVED_INTENSITIES[ID]
     intensity_str = ''
-    for intensity in intensity_series.index:
-        fluor = str(intensity).replace(" Cell Intensity","")
-        intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor.replace(" ","").upper()]}">{fluor}: {round(float(intensity_series[intensity]),3)}</font>'
+    for i in range(0,len(intensity_series),3):
+        cell = intensity_series.index[i]
+        cyto = intensity_series.index[i+1]
+        nuc = intensity_series.index[i+2]
+        fluor = str(cell).replace(" Cell Intensity","")
+        intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor.replace(" ","").upper()].replace("blue","#0462d4")}">{fluor} cyto: {round(float(intensity_series[cyto]),1)} nuc: {round(float(intensity_series[nuc]),1)} cell: {round(float(intensity_series[cell]),1)}</font>'
     # Add note if it exists
     if note == '-' or note == '' or note is None: 
         note = prefix + intensity_str
@@ -1409,9 +1412,16 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
 
     # Get relevant columns for intensity sorting
     # TODO make this conditional, and in a try except format
-    all_possible_intensities = ['DAPI Cell Intensity', 'Opal 480 Cell Intensity','Opal 520 Cell Intensity',
-            'Opal 570 Cell Intensity', 'Opal 620 Cell Intensity', 'Opal 690 Cell Intensity','Opal 780 Cell Intensity',
-            'AF Cell Intensity','Autofluorescence Cell Intensity', "Sample AF Cell Intensity"] # not sure what the correct nomenclature is here
+    all_possible_intensities = ['DAPI Nucleus Intensity','DAPI Cytoplasm Intensity','DAPI Cell Intensity', 
+                                'Opal 480 Nucleus Intensity','Opal 480 Cytoplasm Intensity','Opal 480 Cell Intensity',
+                                'Opal 520 Nucleus Intensity','Opal 520 Cytoplasm Intensity','Opal 520 Cell Intensity',
+            'Opal 570 Nucleus Intensity','Opal 570 Cytoplasm Intensity','Opal 570 Cell Intensity',
+              'Opal 620 Nucleus Intensity','Opal 620 Cytoplasm Intensity','Opal 620 Cell Intensity',
+                'Opal 690 Nucleus Intensity','Opal 690 Cytoplasm Intensity','Opal 690 Cell Intensity',
+                'Opal 780 Nucleus Intensity','Opal 780 Cytoplasm Intensity','Opal 780 Cell Intensity',
+            'AF Nucleus Intensity','AF Cytoplasm Intensity','AF Cell Intensity',
+            'Autofluorescence Nucleus Intensity','Autofluorescence Cytoplasm Intensity','Autofluorescence Cell Intensity',
+            "Sample AF Nucleus Intensity", "Sample AF Cytoplasm Intensity", "Sample AF Cell Intensity"] # not sure what the correct nomenclature is here
     v = list(STATUS_COLORS.keys())
     validation_cols = [f"Validation - {PHENOTYPE} - " + s for s in v]
     cols_to_keep = ["Object Id", "Notes", "XMin","XMax","YMin", "YMax", phenotype] + all_possible_intensities + validation_cols
