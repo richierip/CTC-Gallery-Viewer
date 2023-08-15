@@ -94,7 +94,17 @@ class ViewerPresets(QDialog):
         self.previewDataButton.setDefault(False)
         if "csv" not in self.dataEntry.text() and ((".qptiff" not in self.qptiffEntry.text()) or (".tif" not in self.qptiffEntry.text())):
             self.previewDataButton.setEnabled(False)
+        
+        self.viewSettingsEntry = QLineEdit()
+        self.viewSettingsEntry.insert(self.userInfo.view_settings_path)
+        self.viewSettingsEntry.setPlaceholderText('Enter path to a .viewsettings file (optional)')
+        self.viewSettingsEntry.setFixedWidth(800)
 
+        viewSettingsLabel = QLabel("View Settings: ")
+        viewSettingsLabel.setBuddy(self.viewSettingsEntry)
+        viewSettingsLabel.setAlignment(Qt.AlignCenter)
+        viewSettingsLabel.setMaximumWidth(600)
+        # self.viewSettingsEntry.setAlignment(Qt.AlignCenter)
 
         # Push button to start reading image data and start up napari by remotely executing main method of main script
         self.findDataButton = QPushButton("Load Gallery Images")
@@ -112,6 +122,7 @@ class ViewerPresets(QDialog):
         self.findDataButton.pressed.connect(self.loadGallery)
         self.qptiffEntry.textEdited.connect(self.saveQptiff)
         self.dataEntry.textEdited.connect(self.saveObjectData)
+        # self.viewSettingsEntry.textEdited.connect(self.saveViewSettings)
         self.previewDataButton.pressed.connect(self.prefillData)
 
         topLayout = QGridLayout()
@@ -123,7 +134,9 @@ class ViewerPresets(QDialog):
         topLayout.addWidget(self.qptiffEntry,1,1)
         topLayout.addWidget(dataEntryLabel,2,0,1,0)
         topLayout.addWidget(self.dataEntry,2,1)
+        topLayout.addWidget(viewSettingsLabel,3,0,1,0)
         topLayout.addWidget(self.previewDataButton,2,2)
+        topLayout.addWidget(self.viewSettingsEntry,3,1)
         # topLayout.addWidget(self.findDataButton,2,1)
 
         self.mainLayout = QGridLayout()
@@ -155,6 +168,18 @@ class ViewerPresets(QDialog):
             self.previewDataButton.setEnabled(True)
         else:
             self.previewDataButton.setEnabled(False)
+    def saveViewSettings(self):
+        self.userInfo.view_settings_path = os.path.normpath(self.viewSettingsEntry.text().strip('"'))
+        try:
+            df = pd.read_xml(self.userInfo.view_settings_path)
+            self.userInfo.transfer_view_settings(df)
+            print("Success!")
+            print(self.userInfo.view_settings)
+        except Exception as e:
+            print("Failed to transfer viewsettings")
+            print(e)
+            self.userInfo.view_settings = store_and_load.VIEW_SETTINGS
+            # exit()
 
     def savePhenotype(self):
         self.userInfo.phenotype = self.phenotypeToGrab.text()
@@ -176,6 +201,7 @@ class ViewerPresets(QDialog):
         self.userInfo.global_sort = self.global_sort_widget.currentText()
 
     def saveChannel(self):
+        print(f'\nTrying to save the channel')
         for button in self.mycheckbuttons:
             channelName = button.objectName()
             print(f"{channelName} and {self.userInfo.channels}")
@@ -495,7 +521,7 @@ class ViewerPresets(QDialog):
     def loadGallery(self):
         # self.status_label.setVisible(True)
         # self.app.processEvents()
-
+        self.saveViewSettings()
         self.findDataButton.setEnabled(False) # disable load button after click
         store_and_load.storeObject(self.userInfo, 'data/presets')
 

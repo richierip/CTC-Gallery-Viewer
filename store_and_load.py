@@ -25,11 +25,14 @@ CHANNEL_ORDER = {'DAPI': 'gray', 'OPAL570': 'purple', 'OPAL690': 'blue', 'OPAL48
   'OPAL780': 'red', 'OPAL520': 'yellow', 'AF': 'cyan'} # mappings of fluors to user selected colors. Order is also significant, represents image data channel order
 STATUSES = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red" } # A mapping of statuses to the color used to represent them
 VIEW_SETTINGS = {"DAPI gamma": 0.5, "OPAL570 gamma": 0.5, "OPAL690 gamma": 0.5, "OPAL480 gamma": 0.5,
-                  "OPAL620 gamma": 0.5, "OPAL780 gamma": 0.5, "OPAL520 gamma": 0.5, "AF gamma": 0.5,
-                  "DAPI black-in": 2, "OPAL570 black-in": 2, "OPAL690 black-in": 2, "OPAL480 black-in": 2,
-                  "OPAL620 black-in": 2, "OPAL780 black-in": 2, "OPAL520 black-in": 2, "AF black-in": 2,
-                  "DAPI white-in": 250, "OPAL570 white-in": 250, "OPAL690 white-in": 250, "OPAL480 white-in": 250,
-                  "OPAL620 white-in": 250, "OPAL780 white-in": 250, "OPAL520 white-in": 250, "AF white-in": 250}
+                  "OPAL620 gamma": 0.5, "OPAL780 gamma": 0.5, "OPAL520 gamma": 0.5, 
+                  "AF gamma": 0.5,"Sample AF gamma": 0.5,"Autofluorescence gamma": 0.5,
+                  "DAPI black-in": 0, "OPAL570 black-in": 0, "OPAL690 black-in": 0, "OPAL480 black-in": 0,
+                  "OPAL620 black-in": 0, "OPAL780 black-in": 0, "OPAL520 black-in": 0, 
+                  "AF black-in": 0,"Sample AF black-in": 0,"Autofluorescence black-in": 0,
+                  "DAPI white-in": 255, "OPAL570 white-in": 255, "OPAL690 white-in": 255, "OPAL480 white-in": 255,
+                  "OPAL620 white-in": 255, "OPAL780 white-in": 255, "OPAL520 white-in": 255, 
+                  "AF white-in": 255,"Sample AF white-in": 255,"Autofluorescence white-in": 255}
 
 class userPresets:
     ''' This class is used to store user-selected parameters on disk persistently,
@@ -54,6 +57,8 @@ class userPresets:
         self.cells_per_row = cells_per_row
         self.statuses = copy.copy(STATUSES)
         self.view_settings = view_settings
+        self.view_settings_path = ""
+
 
     '''
     Input: table generated from reading an xml into a dataframe with pandas
@@ -63,6 +68,7 @@ class userPresets:
     1   1   16776960           1         1    0.5  ...  0.019608  0.588235     True                5              150'''
     def transfer_view_settings(self, vs_table):
         for pos, fluor in enumerate(self.channelOrder):
+            if fluor == "Composite": continue
             self.view_settings[f'{fluor} gamma'] = vs_table.iloc[pos]['Gamma']
             self.view_settings[f'{fluor} black-in'] = vs_table.iloc[pos]['BlackInAbsolute']
             self.view_settings[f'{fluor} white-in'] = vs_table.iloc[pos]['WhiteInAbsolute']

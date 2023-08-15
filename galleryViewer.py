@@ -119,7 +119,7 @@ def reuse_contrast_limits():
 ## --- Bottom bar functions and GUI elements 
 
 @magicgui(auto_call=True,
-        Gamma={"widget_type": "FloatSlider", "max":1.0, "min":0.01},
+        Gamma={"widget_type": "FloatSlider", "max":1.5, "min":0.01},
         layout = 'horizontal')
 def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData: 
     def _update_dictionary(name, val):
@@ -183,7 +183,6 @@ def tally_checked_widgets():
 def check_creator2(list_of_names):
     all_boxes = []
     for name in list_of_names:
-        print(f"Creating checkbox {name}")
         cb = QCheckBox(name); cb.setObjectName(name)
         cb.setChecked(True)
         # cb.setStyleSheet("QCheckBox { color: blue }")
@@ -484,27 +483,48 @@ def set_notes_label(display_note_widget, ID):
         fluor = list(CHANNEL_ORDER.keys())[pos]
         if fluor == 'Composite':
             continue
+        print(f'current fluor is {fluor}')
+        if fluor == 'AF':
+            print('\nexamining AF now')
+            print(intensity_series)
         # fluor = str(cell).replace(" Cell Intensity","")
         fluor = str(fluor)
         intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">{fluor.replace("OPAL","Opal ")}'
-        try:
-            # cyto = fluor.replace("OPAL","Opal ")
-            cyto = round(float(intensity_series[f'{fluor.replace("OPAL","Opal ")} Cytoplasm Intensity']),1)
-            intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cyto: {cyto}</font>'
-        except KeyError:
-            pass
-        try:
-            # nuc = fluor.replace("OPAL","Opal ")
-            nuc = round(float(intensity_series[f'{fluor.replace("OPAL","Opal ")} Nucleus Intensity']),1)
-            intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> nuc: {nuc}</font>'
-        except KeyError:
-            pass
-        try:
-            # cell = fluor.replace("OPAL","Opal ")
-            cell = round(float(intensity_series[f'{fluor.replace("OPAL","Opal ")} Cell Intensity']),1)
-            intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cell: {cell}</font>'
-        except KeyError:
-            pass
+        def add_values(intensity_str, fluor, intensity_lookup):
+            flag = True
+            try:
+                # cyto = fluor.replace("OPAL","Opal ")
+                cyto = round(float(intensity_series[f'{intensity_lookup.replace("OPAL","Opal ")} Cytoplasm Intensity']),1)
+                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cyto: {cyto}</font>'
+                flag = False
+            except KeyError: pass
+            try:
+                # nuc = fluor.replace("OPAL","Opal ")
+                nuc = round(float(intensity_series[f'{intensity_lookup.replace("OPAL","Opal ")} Nucleus Intensity']),1)
+                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> nuc: {nuc}</font>'
+                flag = False
+            except KeyError: pass
+            try:
+                # cell = fluor.replace("OPAL","Opal ")
+                cell = round(float(intensity_series[f'{intensity_lookup.replace("OPAL","Opal ")} Cell Intensity']),1)
+                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cell: {cell}</font>'
+                flag = False
+            except KeyError: pass
+            return intensity_str, flag
+        intensity_str, error = add_values(intensity_str, fluor,fluor)
+        possible_af_strings = ['AF', 'Autofluorescence', 'Sample AF']
+        if error and fluor in possible_af_strings:
+            print("error! trying next")
+            possible_af_strings.remove(fluor)
+            while possible_af_strings:
+                new = possible_af_strings.pop()
+                print(f"Looking at {new}")
+                intensity_str, error = add_values(intensity_str,"AF", new)
+                if not error: 
+                    break
+        # Should have something from the fluorescence column if it's there
+
+
         # intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor.replace(" ","").upper()].replace("blue","#0462d4")}">{fluor} cyto: {round(float(intensity_series[cyto]),1)} nuc: {round(float(intensity_series[nuc]),1)} cell: {round(float(intensity_series[cell]),1)}</font>'
     # Add note if it exists
     if note == '-' or note == '' or note is None: 
@@ -555,8 +575,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {STATUS_LIST}")
 
     ''' Expects a numpy array of shape PUNCHOUT_SIZE x 16, with a 16x16 box taking up the left-hand side'''    
-    def write_cid_text_to_array(cb_size, im_length, edge_width, color, cid):
-        new = Image.new("RGBA", (3*im_length,3*cb_size), (0,0,0,255))
+    def write_cid_text_to_array(cb_size, im_length, upsample, color, cid):
+        new = Image.new("RGBA", (int(upsample*im_length),int(upsample*cb_size)), (0,0,0,255))
         font = ImageFont.truetype("arial.ttf",48)
         editable_image = ImageDraw.Draw(new)
         editable_image.text((70,1), str(cid), color, font = font)
@@ -573,6 +593,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             color_tuple = (255,160,0,255)
         else: # assume 'gray'
             color_tuple = (180,180,180,255)
+        
+        upsample = {True : 3, False: 3.5 }
 
         corner_box_size = 16
         edge_width = 1
@@ -582,7 +604,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             layer_length = (PUNCHOUT_SIZE+(edge_width*2)) * CELLS_PER_ROW
 
         if NO_LABEL_BOX:
-            number_only = write_cid_text_to_array(PUNCHOUT_SIZE+(edge_width*2), layer_length, edge_width, color_tuple, cid)
+            number_only = write_cid_text_to_array(PUNCHOUT_SIZE+(edge_width*2), layer_length, upsample[COMPOSITE_MODE], color_tuple, cid)
             return number_only
 
         top_or_bottom = [color_tuple, ] *layer_length
@@ -594,7 +616,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         z = np.repeat(x,[corner_box_size,(layer_length-(2*edge_width))+edge_width-(corner_box_size),edge_width],axis=1)
         # above_mid = np.repeat(z,corner_box_size-edge_width, axis=0)
 
-        top = write_cid_text_to_array(corner_box_size, layer_length, edge_width, color_tuple, cid)
+        top = write_cid_text_to_array(corner_box_size, layer_length, upsample[COMPOSITE_MODE], color_tuple, cid)
         # text_added = text_added | above_mid
         # top = np.append([top_or_bottom],above_mid,axis=0)
         # print(f"SHAPES: tob {np.array([top_or_bottom]).shape} and text_added {text_added.shape}")
@@ -662,9 +684,6 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
                 # print(f'fluor {fluor} pageimage shape: {pageimage.shape} | row {row}, col {col} | cpsave shape {cp_save.shape}')
                 if not composite_only: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
-                    if col ==1:
-                        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                                          (col-1)*(PUNCHOUT_SIZE+2):] = generate_status_box(status_colors[cell_status], cell_id, composite_only)
                     # multichannel mode: individual image
                     page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
                                 (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout
@@ -673,6 +692,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                                 (CELLS_PER_ROW-1)*(PUNCHOUT_SIZE+2)+1:CELLS_PER_ROW*(PUNCHOUT_SIZE+2)-1] = cell_punchout
                     GRID_TO_ID[f'{row},{col}'] = cell_id
                     GRID_TO_ID[f'{row},{CELLS_PER_ROW}'] = cell_id
+                    if col ==1:
+                        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),:] = generate_status_box(status_colors[cell_status], cell_id, composite_only)
 
                     col+=1 # so that next luminescence image is tiled 
                     continue
@@ -711,6 +732,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 # retrieve cell ID name
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
+        if coords[0] < 0 or coords[1]<0:
+            return "None" , None, None
         try:
             image_name = GRID_TO_ID[f'{row},{col}']
         except KeyError as e:
@@ -728,7 +751,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             else:
                 vals[fluor] = img_layer.get_value(data_coordinates)
             if vals[fluor] is None:
-                return "None" , None, None
+                vals[fluor] = "-"
 
         # return either global or local (relative to punchout) coordinates
         if scope == 'world':
@@ -875,7 +898,7 @@ def set_viewer_to_neutral_zoom(viewer):
     if COMPOSITE_MODE:
         viewer.camera.center = (350,450) # these values seem to work best
     else:
-        viewer.camera.center(350, 1000)
+        viewer.camera.center = (350, 220)
     viewer.camera.zoom = 1.3
 
 def add_custom_colors():
@@ -999,26 +1022,26 @@ def chn_key_wrapper(viewer):
     def create_fun(position,channel):
         @viewer.bind_key(str(position+1))
         def toggle_channel_visibility(viewer,pos=position,chn=channel):
-            widget_name = chn+'_box'
+            # widget_name = chn+'_box'
             # print(f'You are trying to toggle {widget_name} with pos {pos}')
-            widget_obj = globals()[widget_name]
-            if widget_obj.check.value:
-                widget_obj.check.value =False
+            widget_obj = UPDATED_CHECKBOXES[pos]
+            if widget_obj.isChecked():
+                widget_obj.setChecked(False)
             else:
-                widget_obj.check.value=True
+                widget_obj.setChecked(True)
+
         return toggle_channel_visibility
 
-    for pos, chn in enumerate(CHANNELS_STR):
+    for pos, chn in enumerate(UPDATED_CHECKBOXES):
         binding_func_name = f'{chn}_box_func'
         exec(f'globals()["{binding_func_name}"] = create_fun({pos},"{chn}")')
         
 
-def set_initial_adjustment_parameters():
-    for fluor in CHANNELS_STR:
-        # fluor = fluor.replace("OPAL",'')
-        ADJUSTMENT_SETTINGS[fluor+ ' black-in']=0
-        ADJUSTMENT_SETTINGS[fluor+ ' white-in']=255
-        ADJUSTMENT_SETTINGS[fluor+ ' gamma']= 0.5
+def set_initial_adjustment_parameters(viewsettings):
+    for key in list(viewsettings.keys()):
+        # print(f'\n key is {key}')
+        ADJUSTMENT_SETTINGS[key] = viewsettings[key]
+    return True
 
 def fetch_notes(cell_set, intensity_col_names):
     '''Grab notes and intensities for each cell in the list and save to global dicts'''
@@ -1397,7 +1420,7 @@ def main(preprocess_class = None):
     status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
     _update_status(status)
 
-    set_initial_adjustment_parameters() # set defaults: 1.0 gamma, 0 black in, 255 white in
+    set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 1.0 gamma, 0 black in, 255 white in
     try:
         add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
     except Exception as e:
@@ -1414,7 +1437,6 @@ def main(preprocess_class = None):
     for i in range(len(all_boxes)):
         box = all_boxes[i]
         if box.objectName() in CHANNELS_STR:
-            print(f'going to add box {box.objectName()} to list')
             box.setStyleSheet(f"QCheckBox {{ color: {CHANNEL_ORDER[box.objectName()].replace('blue','#0462d4')} }}")
             UPDATED_CHECKBOXES.append(box)
     viewer.window.add_dock_widget(UPDATED_CHECKBOXES,area='bottom')
