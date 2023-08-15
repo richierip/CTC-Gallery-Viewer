@@ -1,16 +1,13 @@
 #############################################################################
 
-from PyQt5.QtCore import QDateTime, Qt
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon, QPixmap,QColor,QFont
-from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDateTimeEdit,
-        QDial, QDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-        QProgressBar, QPushButton, QRadioButton, QScrollBar, QSizePolicy,
-        QSlider, QSpinBox, QTableWidget, QTabWidget, QTextEdit,
-        QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QGridLayout, 
+                             QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox)
 
 import sys
 import os
-import time
+# import time
 import store_and_load
 from galleryViewer import GUI_execute
 import ctypes

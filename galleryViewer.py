@@ -11,7 +11,7 @@ from rasterio.windows import Window
 import napari
 from napari.types import ImageData
 from magicgui import magicgui #, magic_factory
-from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton, QRadioButton, QSpinBox, QButtonGroup, QSizePolicy, QComboBox
+from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, QComboBox
 from PyQt5.QtCore import Qt
 import numpy as np
 import pandas as pd
@@ -73,7 +73,9 @@ RASTERS = None
 NO_LABEL_BOX = False
 GRID_TO_ID = {}
 STATUS_COLORS = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red" }
+STATUS_TO_HEX = {'Confirmed':'#00ff00', 'Rejected':'#ff0000', 'Needs review':'#ffa000', "Unseen":'#ffffff'}
 IMAGE_LAYERS = {}
+UPDATED_CHECKBOXES = []
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
 #TODO merge some of the GUI elements into the same container to prevent strange spacing issues
@@ -93,16 +95,16 @@ def validate_adjustment(chn): # grab last part of label
 ## --- Composite functions 
 def adjust_composite_gamma(layer, gamma):
     # print(f'\nin fuxn adjustment settings are {ADJUSTMENT_SETTINGS}')
-    print(f'My datatype is {type(ADJUSTMENT_SETTINGS["DAPI gamma"])} while my value is {ADJUSTMENT_SETTINGS["DAPI gamma"]} and the value of\
-          gamma is {gamma} and the image current gamma for {layer.name} is {layer.gamma}')
+    # print(f'My datatype is {type(ADJUSTMENT_SETTINGS["DAPI gamma"])} while my value is {ADJUSTMENT_SETTINGS["DAPI gamma"]} and the value of\
+    #       gamma is {gamma} and the image current gamma for {layer.name} is {layer.gamma}')
     layer.gamma = gamma
-    print(f'The new gamma is now {layer.gamma}')
+    # print(f'The new gamma is now {layer.gamma}')
 
 def adjust_composite_limits(layer, limits):
     layer.contrast_limits = limits
 
 def reuse_gamma():
-    print(f'\nREUSE adjustment settings are {ADJUSTMENT_SETTINGS}')
+    # print(f'\nREUSE adjustment settings are {ADJUSTMENT_SETTINGS}')
     for fluor in ADJUSTED:
         if fluor == 'Composite':
             continue
@@ -157,48 +159,40 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         _update_dictionary(fluor,black_in)
         adjust_composite_limits(IMAGE_LAYERS[fluor], [black_in,ADJUSTMENT_SETTINGS[fluor+" white-in"]])
 
-# Called in a loop to create as many GUI elements as needed
-#TODO use magicfactory decorator to do this. It probably is better practice, and surely looks nicer
-def dynamic_checkbox_creator(checkbox_name, setChecked = True):
-    #TODO make these colored
-    text = f'<font color="blue">{str(checkbox_name)}</font>'
-    @magicgui(auto_call=True,
-            check={"widget_type": "CheckBox", "text": checkbox_name, "value": setChecked},
-            layout = 'horizontal')
-    def myfunc(check: bool = setChecked):
-        # print(f'in myfunc backend CHANNELS are {CHANNELS}, and {CHANNELS_STR}. Trying to remove {checkbox_name}, whose global value is {globals()[checkbox_name]}, from {ADJUSTED}')
-        # keep track of visible channels in global list and then toggle layer visibility
+def tally_checked_widgets():
+    # keep track of visible channels in global list and then toggle layer visibility
+    global ADJUSTED
+    ADJUSTED = []
+    for checkbox in UPDATED_CHECKBOXES:
+        check = checkbox.isChecked()
+        checkbox_name = checkbox.objectName()
+    # print(f"{checkbox_name} has been clicked and will try to remove from {ADJUSTED}")
         if check:
             ADJUSTED.append(str(checkbox_name))
+
+    # Make visible all channels according to rules
+    for fluor in CHANNELS_STR:
+        if fluor == "Composite":
+            continue
+        if "Composite" in ADJUSTED or fluor in ADJUSTED:
+            IMAGE_LAYERS[fluor].visible = True
         else:
-            ADJUSTED.remove(str(checkbox_name))
+            IMAGE_LAYERS[fluor].visible = False  
+    # return myfunc
 
-        # Make visible all channels according to rules
-        for fluor in CHANNELS_STR:
-            if fluor == "Composite":
-                continue
-            if "Composite" in ADJUSTED or fluor in ADJUSTED:
-                IMAGE_LAYERS[fluor].visible = True
-            else:
-                IMAGE_LAYERS[fluor].visible = False  
-    return myfunc
-
-# print(f'dir is {dir()}')
-def checkbox_setup():
+def check_creator2(list_of_names):
     all_boxes = []
-    for checkbox_name in CHANNELS_STR:   
-        #Turn off composite by default.
-        # print(f'creating checkbox func for {checkbox_name}')
-        if False: #checkbox_name == 'Composite':
-            ADJUSTMENT_SETTINGS[checkbox_name+' box'] = False
-            exec(f"globals()[\'{checkbox_name+'_box'}\'] = globals()[\'dynamic_checkbox_creator\'](checkbox_name, setChecked=False)") # If doing this is wrong I don't want to be right
-        else:
-            # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = True
-            exec(f"globals()[\'{checkbox_name+'_box'}\'] = globals()[\'dynamic_checkbox_creator\'](checkbox_name)")
-        all_boxes.append(globals()[f'{checkbox_name}_box'])
-        # exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
+    for name in list_of_names:
+        print(f"Creating checkbox {name}")
+        cb = QCheckBox(name); cb.setObjectName(name)
+        cb.setChecked(True)
+        # cb.setStyleSheet("QCheckBox { color: blue }")
+        all_boxes.append(cb)
+        # f = dynamic_checkbox_creator()
+        cb.toggled.connect(tally_checked_widgets)
     return all_boxes
-checkbox_setup()
+
+all_boxes = check_creator2(CHANNELS_STR)
 
 # This is called in GUI_execute, because the global 'ADJUSTED' variable will be changed at that time. 
 # We want to make sure that the backend bookkeeping is congruent with the front-end checkbox, which is 
@@ -481,15 +475,7 @@ def set_notes_label(display_note_widget, ID):
     except KeyError: # in case the name was off
         return False
     status = STATUS_LIST[str(ID)]
-    if status == 'Confirmed':
-        idcolor = '#00ff00'
-    elif status == 'Rejected':
-        idcolor = '#ff0000'
-    elif status == 'Needs review':
-        idcolor = '#ffa000'
-    else:
-        idcolor = '#ffffff'
-    prefix = f'{SAVED_NOTES["page"]}<br><font color="{idcolor}">CID: {ID}</font>'
+    prefix = f'{SAVED_NOTES["page"]}<br><font color="{STATUS_TO_HEX[status]}">CID: {ID}</font>'
 
     # Add intensities
     intensity_series = SAVED_INTENSITIES[ID]
@@ -763,10 +749,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             return True
         output_str = ''
         for fluor in vals.keys():
-            output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">{vals[fluor]} </font>'
+            output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {vals[fluor]}   </font>'
         else:
             # print('else')
-            VIEWER.status = f'{image_name} intensities at {coords}: {output_str}'
+            sc = STATUS_TO_HEX[STATUS_LIST[str(cell_num)]]
+            VIEWER.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
 
     @status_layer.bind_key('Space')
     def toggle_status(image_layer):
@@ -885,7 +872,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
 #TODO make a button to do this as well?
 def set_viewer_to_neutral_zoom(viewer):
-    viewer.camera.center = (350,450) # these values seem to work best
+    if COMPOSITE_MODE:
+        viewer.camera.center = (350,450) # these values seem to work best
+    else:
+        viewer.camera.center(350, 1000)
     viewer.camera.zoom = 1.3
 
 def add_custom_colors():
@@ -1420,20 +1410,22 @@ def main(preprocess_class = None):
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
 
-    all_boxes = []
-    for marker_function in CHANNELS_STR:
-        # Only make visible the chosen markers
-        all_boxes.append(globals()[f'{marker_function}_box'])
-        # exec(f"viewer.window.add_dock_widget({marker_function+'_box'}, area='bottom')")
+    # Filter checkboxes down to relevant ones only and update color
+    for i in range(len(all_boxes)):
+        box = all_boxes[i]
+        if box.objectName() in CHANNELS_STR:
+            print(f'going to add box {box.objectName()} to list')
+            box.setStyleSheet(f"QCheckBox {{ color: {CHANNEL_ORDER[box.objectName()].replace('blue','#0462d4')} }}")
+            UPDATED_CHECKBOXES.append(box)
+    viewer.window.add_dock_widget(UPDATED_CHECKBOXES,area='bottom')
 
+    # Finish up, and set keybindings
     status+='<font color="#7dbc39">  Done.</font><br> Goodbye' ;_update_status(status)
     sv_wrapper(viewer)
     tsv_wrapper(viewer)
     chn_key_wrapper(viewer)
-    # viewer.grid.stride = 2 # start in composite mode
     set_viewer_to_neutral_zoom(viewer) # Fix zoomed out issue
 
-    viewer.window.add_dock_widget(all_boxes,area='bottom')
     if preprocess_class is not None: preprocess_class.close() # close other window
     napari.run()
     # close image file
