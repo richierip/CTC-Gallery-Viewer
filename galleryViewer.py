@@ -56,14 +56,15 @@ userInfo = store_and_load.loadObject('data/presets')
 
 # CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690,OPAL780,AF,Composite] # Default. Not really that useful info since channel order was added.
 CHANNELS = [DAPI, OPAL520,OPAL690, Composite] # for local execution / debugging
-CHANNEL_ORDER = ['DAPI', 'OPAL570', 'OPAL690', 'OPAL480', 'OPAL620', 'OPAL780', 'OPAL520', 'AF', 'Composite'] # to save variable position data for channels (they can be in any order...)
+CHANNEL_ORDER = {'DAPI':'blue', 'OPAL570':'blue', 'OPAL690':'blue', 'OPAL480':'blue', 'OPAL620':'blue', 
+                 'OPAL780':'blue', 'OPAL520':'blue', 'AF':'blue', 'Composite':'None'} # to save variable position data for channels (they can be in any order...)
 CHANNELS_STR = list(userInfo.channelOrder.keys()) #["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
 CHANNELS_STR.append("Composite") # Seems like this has to happen on a separate line
 ADJUSTED = copy.copy(CHANNELS_STR)
 VIEWER = None
 SC_DATA = None # Using this to store data to coerce the exec function into doing what I want
 TEMP = None
-IMAGE_DATA_ORIGINAL = {}; IMAGE_DATA_ADJUSTED = {}; ADJUSTMENT_SETTINGS={}; 
+ADJUSTMENT_SETTINGS={"DAPI gamma": 0.5}; 
 SAVED_NOTES={} ; STATUS_LIST={}; SAVED_INTENSITIES={}; XY_STORE = [1,2,3]
 RAW_PYRAMID=None
 NOTES_WIDGET = None; ALL_CUSTOM_WIDGETS = {}
@@ -72,7 +73,7 @@ RASTERS = None
 NO_LABEL_BOX = False
 GRID_TO_ID = {}
 STATUS_COLORS = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red" }
-
+IMAGE_LAYERS = {}
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
 #TODO merge some of the GUI elements into the same container to prevent strange spacing issues
@@ -90,229 +91,43 @@ def validate_adjustment(chn): # grab last part of label
 #     show_intensity.show()
 
 ## --- Composite functions 
-def adjust_composite_gamma(layer, gamma, keepSettingsTheSame = False):
-    def _convert_to_rgb(data, colormap, divisor):
-        # You have to do it like this. Seriously. 
-        global SC_DATA, TEMP
-        SC_DATA = data /divisor
-        loc = {}
-        exec(f'TEMP = cm.get_cmap("{colormap}")', globals())
-        exec(f'rgb = TEMP(SC_DATA)', globals(), loc)
-        return loc['rgb']
+def adjust_composite_gamma(layer, gamma):
+    # print(f'\nin fuxn adjustment settings are {ADJUSTMENT_SETTINGS}')
+    print(f'My datatype is {type(ADJUSTMENT_SETTINGS["DAPI gamma"])} while my value is {ADJUSTMENT_SETTINGS["DAPI gamma"]} and the value of\
+          gamma is {gamma} and the image current gamma for {layer.name} is {layer.gamma}')
+    layer.gamma = gamma
+    print(f'The new gamma is now {layer.gamma}')
 
-    # print(f'Checking keys of outer dict: {IMAGE_DATA_ORIGINAL.keys()}')
-    # print(f'My name is {layer.name}')
-    # composite = copy.copy(IMAGE_DATA_STORE[layer.name])
-    # print(f'Checking keys of inner dict: {color_dict.keys()}')
-    # print(type(layer.colormap))
-    # print(f'{layer.colormap} vs str() {str(layer.colormap)}')
-    stripped_name = layer.name.rstrip('Composite') # Format is 'Cell 271'
-
-    # for chn in ADJUSTED:
-    #     print(f'to be adjusted: {chn}')
-    # print(f'\n DICT: {ADJUSTMENT_SETTINGS}')
-
-    composite = []
-    # get data from other CHECKED channels, not including Composite (always 8)
-    need_gamma_adjustment = copy.copy(ADJUSTED)
-    if 'Composite' in ADJUSTED: need_gamma_adjustment.remove('Composite')
-    fluors_only = copy.copy(CHANNELS_STR)
-    fluors_only.remove('Composite')
-    # print(f'\n dumping ADJUSTED needed: {ADJUSTED}\n and CHANNELS: {CHANNELS}\n and CHANNELS_STR {CHANNELS_STR}\n and CHANNEL_ORDER {CHANNEL_ORDER}\n and something?? {CHANNELS}')
-    # print(f'\n dumping adjustment needed: {need_gamma_adjustment}')
-    for chn_str in fluors_only:
-        # chn_str = chn_str.replace('OPAL','') # OPAL is not in the name of the data key
-        # gamma adjust
-        
-        # In this certain case, don't show anything for this channel
-        if 'Composite' not in ADJUSTED and chn_str not in need_gamma_adjustment:
-            # print(f'Conditions satisfied!\n')
-            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[chn_str])
-            chn_data.fill(0)
-            chn_data = _convert_to_rgb(np.asarray(chn_data), CHANNEL_ORDER[chn_str], divisor=1)
-            composite.append([chn_data])
-            continue
-
-        if chn_str in need_gamma_adjustment:
-            # print(f'Will gamma adjust {chn_str}')
-            chn_data = copy.copy(IMAGE_DATA_ORIGINAL[chn_str])
-
-            low = ADJUSTMENT_SETTINGS[chn_str+' black-in'] / 255.0
-            high = ADJUSTMENT_SETTINGS[chn_str+' white-in'] / 255.0
-            chn_data = np.clip(chn_data,low,high)
-            color_range = high - low
-            if color_range != 0:
-                chn_data = (chn_data - low) / color_range
-            #TODO determine whether gamma gets changed before or after color mapping
-            # chn_data = _convert_to_rgb(chn_data, CHANNEL_ORDER[chn_str], divisor=1) # can do this at the end?
-            if keepSettingsTheSame:
-                gamma_correct = np.vectorize(lambda x:x**ADJUSTMENT_SETTINGS[chn_str+' gamma'])
-            else:
-                gamma_correct = np.vectorize(lambda x:x**gamma)
-            chn_data = gamma_correct(chn_data)
-            # print(f'Checking dimensions of chn_data: {np.asarray(chn_data).shape}')
-            IMAGE_DATA_ADJUSTED[chn_str] = chn_data # store adjustments
-        else:
-            chn_data = np.asarray(copy.copy(IMAGE_DATA_ADJUSTED[chn_str]))
-        chn_data = _convert_to_rgb(chn_data, CHANNEL_ORDER[chn_str], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
-        composite.append([chn_data])
-
-
-    # print(f'Checking dimensions of composite: {np.asarray(composite).shape}')
-    composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
-    # print(f'Checking dimensions of composite after extract: {np.asarray(composite).shape}')
-    composite = np.sum(composite, axis=0) 
-    composite=np.clip(composite,0,np.max(composite))
-    # print(f'Checking dimensions of composite after sum: {np.asarray(composite).shape}')
-    composite[:,:,3] = 1.0
-
-    rgb_mins = [] ## Axis here?
-    rgb_maxes = []
-    for i in range(3):
-        temp = np.ndarray.flatten(composite[:,:,i])
-        
-        rgb_mins.append(np.min(temp))
-        rgb_maxes.append(np.max(temp))
-    
-    for i in range(3):
-        # print(f'Current max is {rgb_maxes[i]} and type is {type(rgb_maxes[i])}\n')
-        composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
-        # the 1.0 value on the next line represents the 'max' value in a given channel. Really not sure if it should stay 1 or not.
-        #TODO
-        composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
-        composite[:,:,i] = composite[:,:,i] * 255.0
-
-    IMAGE_DATA_ADJUSTED['Composite'] = composite.astype('int')
-    # print(f'Final check of dimensions of composite before setting data: {np.asarray(composite).shape}')
-    layer.data = composite.astype('int') # casting is crucial
-
-
-def adjust_composite_limits(layer):
-
-    def _convert_to_rgb(data, colormap, divisor):
-        # You have to do it like this. Seriously. 
-        global SC_DATA, TEMP
-        SC_DATA = data /divisor
-        loc = {}
-        exec(f'TEMP = cm.get_cmap("{colormap}")', globals())
-        exec(f'rgb = TEMP(SC_DATA)', globals(), loc)
-        return loc['rgb']
-
-    # print(f'Checking keys of outer dict: {IMAGE_DATA_ORIGINAL.keys()}')
-    # print(f'My name is {layer.name}')
-    # composite = copy.copy(IMAGE_DATA_STORE[layer.name])
-    # print(f'Checking keys of inner dict: {color_dict.keys()}')
-    # print(type(layer.colormap))
-    # print(f'{layer.colormap} vs str() {str(layer.colormap)}')
-    stripped_name = layer.name.rstrip('Composite') # Format is 'Cell 271'
-
-    # for chn in ADJUSTED:
-    #     print(f'to be adjusted: {chn}')
-
-    # print(f'\n DICT: {ADJUSTMENT_SETTINGS}')
-    composite = []
-    # get data from other CHECKED channels, not including Composite (always 8)
-    need_contrast_adjustment = copy.copy(ADJUSTED)
-    if 'Composite' in ADJUSTED: need_contrast_adjustment.remove('Composite') # nervous about hard-coding this...
-    fluors_only = copy.copy(CHANNELS_STR)
-    fluors_only.remove('Composite')
-    # print(f'\n dumping ADJUSTED needed: {ADJUSTED}\n and CHANNELS: {CHANNELS}\n and CHANNELS_STR {CHANNELS_STR}\n and CHANNEL_ORDER {CHANNEL_ORDER}\n and something?? {CHANNELS}')
-    # print(f'\n dumping contrast adjustment needed: {need_contrast_adjustment}')
-    for chn_str in fluors_only:
-        # chn_str = chn_str.replace('OPAL','') # OPAL is not in the name of the data key
-        # gamma adjust
-
-        # In this certain case, don't show anything for this channel
-        if 'Composite' not in ADJUSTED and chn_str not in need_contrast_adjustment:
-            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[chn_str])
-            chn_data.fill(0)
-            chn_data = _convert_to_rgb(np.asarray(chn_data), CHANNEL_ORDER[chn_str], divisor=1)
-            composite.append([chn_data])
-            continue
-
-        if chn_str in need_contrast_adjustment:
-            # print(f'Will contrast adjust {chn_str}')
-            chn_data = copy.copy(IMAGE_DATA_ORIGINAL[chn_str])
-
-            low = ADJUSTMENT_SETTINGS[chn_str+' black-in'] / 255.0
-            high = ADJUSTMENT_SETTINGS[chn_str+' white-in'] / 255.0
-            chn_data = np.clip(chn_data,low,high)
-            color_range = high - low
-            if color_range != 0:
-                chn_data = (chn_data - low) / color_range
-            gamma_correct = np.vectorize(lambda x:x**ADJUSTMENT_SETTINGS[chn_str+' gamma'])
-            chn_data = gamma_correct(chn_data)
-            # chn_data = _convert_to_rgb(chn_data, CHANNEL_ORDER[chn_str], divisor=1) # can do this at the end?
-            # print(f'Checking dimensions of chn_data: {np.asarray(chn_data).shape}')
-            IMAGE_DATA_ADJUSTED[chn_str] = chn_data # store adjustments
-        else:
-            print(f'Just fetching {chn_str} data...')
-            chn_data = copy.copy(IMAGE_DATA_ADJUSTED[chn_str])
-        # print(f'Converting back to rgb, using the {CHANNEL_ORDER[chn_str]} palette ...')
-        chn_data = _convert_to_rgb(np.asarray(chn_data), CHANNEL_ORDER[chn_str], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
-        composite.append([chn_data])
-
-
-    # print(f'Checking dimensions of composite: {np.asarray(composite).shape}')
-    composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
-    # print(f'Checking dimensions of composite after extract: {np.asarray(composite).shape}')
-    composite = np.sum(composite, axis=0) 
-    # print(f'Checking dimensions of composite after sum: {np.asarray(composite).shape}')
-    composite[:,:,3] = 1.0 # restore alpha value.
-
-    rgb_mins = [] ## Axis here?
-    rgb_maxes = []
-    for i in range(3):
-        temp = np.ndarray.flatten(composite[:,:,i])
-        
-        rgb_mins.append(np.min(temp))
-        rgb_maxes.append(np.max(temp))
-    
-    for i in range(3):
-        # print(f'Current max is {rgb_maxes[i]} and type is {type(rgb_maxes[i])}\n')
-        composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
-        composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
-        composite[:,:,i] = composite[:,:,i] * 255.0
-
-    # Save result
-    IMAGE_DATA_ADJUSTED[layer.name] = composite.astype('int')
-    # print(f'Final check of dimensions of composite before setting data: {np.asarray(composite).shape}')
-    layer.data = composite.astype('int') # casting is crucial
+def adjust_composite_limits(layer, limits):
+    layer.contrast_limits = limits
 
 def reuse_gamma():
-    # print(f'\nDumping adjustment dict... \n {ADJUSTMENT_SETTINGS}\n')
-    # print(f'ADJUSTED is {ADJUSTED}')
-    for ctclayer in VIEWER.layers:
-        if ctclayer.name != 'Status Layer' and len(ADJUSTED)>0:
-            # this gamma doesn't matter since it won't be considered - The final parameter
-            #   tells the function to skip it
-            adjust_composite_gamma(ctclayer,gamma = 1.0, keepSettingsTheSame=True)
+    print(f'\nREUSE adjustment settings are {ADJUSTMENT_SETTINGS}')
+    for fluor in ADJUSTED:
+        if fluor == 'Composite':
+            continue
+        adjust_composite_gamma(IMAGE_LAYERS[fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
 
 def reuse_contrast_limits():
-    for layer in VIEWER.layers:
-        if layer.name != 'Status Layer' and len(ADJUSTED)>0: 
-            adjust_composite_limits(layer)
+    for fluor in ADJUSTED:
+        if fluor == 'Composite':
+            continue
+        adjust_composite_limits(IMAGE_LAYERS[fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
 
 ## --- Bottom bar functions and GUI elements 
-def adjust_gamma(viewer, gamma):
-    def _update_dictionary(name, val):
-        global ADJUSTMENT_SETTINGS
-        ADJUSTMENT_SETTINGS[name+' gamma'] = val
-    # This allows the function to be called to reuse the same settings instead of updating them
-    #   useful for keeping settings when loading next page or switching modes. 
-    for fluor in ADJUSTED:
-        # print(f'FLUOR IS {fluor} || {CHANNELS_STR}')
-        _update_dictionary(fluor,gamma)
-
-    for ctclayer in VIEWER.layers:
-        if ctclayer.name != 'Status Layer' and len(ADJUSTED)>0:
-            adjust_composite_gamma(ctclayer, gamma)
 
 @magicgui(auto_call=True,
         Gamma={"widget_type": "FloatSlider", "max":1.0, "min":0.01},
         layout = 'horizontal')
-def adjust_gamma_widget(Gamma: float = 1.0) -> ImageData: 
-    adjust_gamma(VIEWER,Gamma)
+def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData: 
+    def _update_dictionary(name, val):
+        global ADJUSTMENT_SETTINGS
+        ADJUSTMENT_SETTINGS[name+' gamma'] = val
+    for fluor in ADJUSTED:
+        if fluor == 'Composite':
+            continue
+        _update_dictionary(fluor,Gamma)
+        adjust_composite_gamma(IMAGE_LAYERS[fluor],Gamma)
 adjust_gamma_widget.visible=False
 
 @magicgui(auto_call=True,
@@ -323,12 +138,10 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' white-in'] = val
     for fluor in ADJUSTED:
+        if fluor == 'Composite':
+            continue
         _update_dictionary(fluor,white_in)
-    
-    for ctclayer in VIEWER.layers:
-        if ctclayer.name != 'Status Layer' and len(ADJUSTED)>0:
-            # Works in both cases
-            adjust_composite_limits(ctclayer)
+        adjust_composite_limits(IMAGE_LAYERS[fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],white_in])
 
 @magicgui(auto_call=True,
         black_in={"widget_type": "FloatSlider", "max":255, "label":"Black-in"},
@@ -339,45 +152,35 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         ADJUSTMENT_SETTINGS[name+' black-in'] = val
     
     for fluor in ADJUSTED:
+        if fluor == 'Composite':
+            continue
         _update_dictionary(fluor,black_in)
-
-    for ctclayer in VIEWER.layers:
-        if ctclayer.name != 'Status Layer' and len(ADJUSTED)>0:
-            adjust_composite_limits(ctclayer)
+        adjust_composite_limits(IMAGE_LAYERS[fluor], [black_in,ADJUSTMENT_SETTINGS[fluor+" white-in"]])
 
 # Called in a loop to create as many GUI elements as needed
 #TODO use magicfactory decorator to do this. It probably is better practice, and surely looks nicer
 def dynamic_checkbox_creator(checkbox_name, setChecked = True):
-
+    #TODO make these colored
+    text = f'<font color="blue">{str(checkbox_name)}</font>'
     @magicgui(auto_call=True,
             check={"widget_type": "CheckBox", "text": checkbox_name, "value": setChecked},
             layout = 'horizontal')
     def myfunc(check: bool = setChecked):
         # print(f'in myfunc backend CHANNELS are {CHANNELS}, and {CHANNELS_STR}. Trying to remove {checkbox_name}, whose global value is {globals()[checkbox_name]}, from {ADJUSTED}')
-        if not COMPOSITE_MODE:
-            if check:
-                ADJUSTED.append(str(checkbox_name))
-                # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = True
-                # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just added {checkbox_name}')
+        # keep track of visible channels in global list and then toggle layer visibility
+        if check:
+            ADJUSTED.append(str(checkbox_name))
+        else:
+            ADJUSTED.remove(str(checkbox_name))
+
+        # Make visible all channels according to rules
+        for fluor in CHANNELS_STR:
+            if fluor == "Composite":
+                continue
+            if "Composite" in ADJUSTED or fluor in ADJUSTED:
+                IMAGE_LAYERS[fluor].visible = True
             else:
-                ADJUSTED.remove(str(checkbox_name))
-                # ADJUSTMENT_SETTINGS[checkbox_name+' box'] = False
-                # print(f'In check function. Current state, about to return and ADJUSTED is {ADJUSTED}, just removed {checkbox_name}')
-        else: # In composite mode 
-            if check:
-                ADJUSTED.append(str(checkbox_name))
-            else:
-                ADJUSTED.remove(str(checkbox_name))
-            # now remake composite images with the channels listed in ADJUSTED
-            #   But only if the "Composite" check is active, otherwise show all channels in the image
-            # if Composite not in ADJUSTED:
-        
-        # This will show/hide the appropriate layers in the composite image when checking the box
-        for layer in VIEWER.layers:
-            if layer.name == 'Status Layer': continue
-            else: # modifying "Composite Layer"
-                adjust_composite_gamma(layer, gamma=0.5, keepSettingsTheSame = True)
-            
+                IMAGE_LAYERS[fluor].visible = False  
     return myfunc
 
 # print(f'dir is {dir()}')
@@ -819,90 +622,34 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         tm = np.append(top,mid, axis=0)
         return np.append(tm,[top_or_bottom],axis=0)
 
-    def add_layer(viewer, layer, name, colormap = None, contr = [0,255] ):
-
-        #TODO Decide: here or later (After RGB color mapping?)
-        # Store image data in global dict
-        # IMAGE_DATA_STORE[name+CHANNEL_ORDER[cell_colors.index(colormap)]] = layer
-        # IMAGE_DATA_STORE[name] = layer
-        # if name not in IMAGE_DATA_STORE.keys():
-        #     inner_dict = {} #initialize
-        #     inner_dict[colormap] = layer
-        #     IMAGE_DATA_STORE[name] = inner_dict
-        # else:
-        #     inner_dict[colormap] = layer
-
-        # colors = np.linspace(
-        #     start=[0, 0, 0, 1],
-        #     stop=[1, 0, 1, 1],
-        #     num=256,
-        #     endpoint=True
-        # )
-
-        # new_colormap = {
-        #     'colors': colors,
-        #     'name': 'test_green',
-        #     'interpolation': 'linear'
-        # }
-
-        # Napari bug: setting gamma here doesn't update what is seen, 
-        # even thought the slider gui shows the change
-        #   Will have to do something else.
-        if colormap is not None: # Luminescence image
-            shape_layer = viewer.add_image(layer, name = name, contrast_limits = contr)
-            shape_layer.colormap = custom_maps.retrieve_cm(colormap)
-        elif contr is not None: # RBG image
-            print(f'\n ~~~ Adding RGB Image ~~~ \n')
-            shape_layer = viewer.add_image(layer, name = name, contrast_limits = contr)
-        else:
-            print(f'\n ~~~ Adding RGB Image auto contrast limit ~~~ \n')
-            shape_layer = viewer.add_image(layer, name = name, gamma = 0.5)
-
-
-        return True
-    # def add_layer_rgb(viewer, layer, name):
-    #     viewer.add_image(layer, name = name, rgb=True)
-    #     return True
-
-    def _convert_to_rgb(data, colormap, divisor):
-        # You have to do it like this. Seriously. 
-        # print(f'CONVERTING to {colormap}... \n')
-        global SC_DATA, TEMP
-        SC_DATA = data / divisor
-        # SC_DATA /= divisor
-        loc = {}
-        
-        # exec(f'rgb = cm.{colormap}(norm(SC_DATA))', globals(), loc)
-        exec(f'TEMP = cm.get_cmap("{colormap}")', globals())
-        exec(f'rgb = TEMP(SC_DATA)', globals(), loc)
-        return loc['rgb']
-    
     def black_background(color_space, mult):
         if color_space == 'RGB':
             return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW, 4))
         elif color_space == 'Luminescence':
             return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW))
 
+
+    # Starting to add
     if composite_only: size_multiplier = 1
     else: size_multiplier = len(CHANNELS)
-    # IMAGE_DATA_ORIGINAL = {}
+    page_image = {}
     for chn in CHANNELS_STR:
         if chn == 'Composite':
-            IMAGE_DATA_ORIGINAL[chn] = black_background('RGB', size_multiplier)
+            pass
         else:
-            IMAGE_DATA_ORIGINAL[chn] = black_background('Luminescence', size_multiplier)
+            page_image[chn] = black_background('Luminescence', size_multiplier)
 
-    page_image = black_background('RGB',size_multiplier)
+    # page_image = black_background('RGB',size_multiplier)
     page_status_layer = black_background('RGB',size_multiplier)
     print(f'Adding {len(cells)} cells to viewer... Channels are {CHANNELS} // {CHANNELS_STR}')
     col = 0
     row = 0
+    GRID_TO_ID = {} # Reset this since we could be changing to multichannel mode
     while bool(cells): # coords left
         col = (col%CELLS_PER_ROW)+1
         if col ==1: row+=1 
         # print(f'Next round of while. Still {len(cells)} cells left. Row {row}, Col {col}')
         cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; cell_status = retrieve_status(cell_id,cell)
-        composite = []
         # add the rest of the layers to the viewer
         if RASTERS is not None:
             # Raster channels for qptiffs are saved as subdatasets of the opened raster object
@@ -914,12 +661,6 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 # name cell layer
                 cell_name = f'Cell {cell_id} {fluor}'
 
-                # Shortcut if we have seen the cell before and done the work
-                # if not composite_only and cell_name in IMAGE_DATA_ADJUSTED:
-                #     # Have to apply a 255 multiplier since it's saved with a range of 0-1 (used for the composite calculations)
-                #     add_layer(viewer,IMAGE_DATA_ADJUSTED[cell_name]*255, cell_name, colormap= cell_colors[i])
-                #     continue # go on to the next
-
                 # print(f'Adding cell {cell_x},{cell_y} - layer {i}')
                 # Save record of what colormap is chosen for what fluor. Useful for 
                 #   altering the composite image later (white-in / black-in). 
@@ -927,145 +668,45 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 # print(f'Testing if raster used: {RASTERS}') # YES can see subdatasets.
                 if RASTERS is not None:
                     with rasterio.open(RASTERS[pos]) as channel:
-                        cell_punchout_raw = channel.read(1,window=Window(cell_x-offset,cell_y-offset, offset*2,offset*2)).astype('float64')
+                        cell_punchout = channel.read(1,window=Window(cell_x-offset,cell_y-offset, offset*2,offset*2)).astype(np.uint8)
                 else:
                     # rasterio reading didn't work, so entire image should be in memory as np array
-                    cell_punchout_raw = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i].astype('float64')
-                # print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{cell_colors[i]}')
-                
-                # normalize to 1.0
-
-                # print(f'My types are as follows: \n cell raw {cell_punchout_raw.dtype}\n min {type(cell_punchout_raw.min())}\n max {type(cell_punchout_raw.max())}')
-                # should be floats now
-                # Normalize to range of 0.0 , 1.0 BEFORE passing through color map
-
-                # print(f' MIN / MAX output {np.min(cell_punchout_raw)} / {np.max(cell_punchout_raw)}')
-                cell_punchout_raw = cell_punchout_raw #- cell_punchout_raw.min()
-                cell_punchout_raw = cell_punchout_raw / 255.0 #cell_punchout_raw.max()
-
-                # custom_map = vpc.get_colormap('single_hue',hue=40, saturation_range=[0.1,0.8], value=0.5)
-                # cell_punchout = custom_map(cell_punchout_raw)*255
-                # print(f'color chosen is |{cell_colors[i]}|')
-
-                # print(f'len of channels is {len(CHANNELS)}')
-                # STORING in global dicts
-                #TODO should be pre-RGB mapping intensities so that white-in / black-in threshold
-                #   can be properly applied. Need to copy that code again somewhere I guess
-
-                cp_save = cell_punchout_raw 
-                # ido_key = fluor
-                # if ido_key not in ["DAPI","Composite"]:
-                #     ido_key = 'OPAL'+ ido_key
-                s = IMAGE_DATA_ORIGINAL[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
-                                                  (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1].shape
-                print(f'fluor {fluor} IMAGEDATAORIGINAL shape: {IMAGE_DATA_ORIGINAL[fluor].shape} punch shape: {s} | row {row}, col {col} | cpsave shape {cp_save.shape}')
-                IMAGE_DATA_ORIGINAL[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
-                                                  (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cp_save #; IMAGE_DATA_ADJUSTED[cell_name] = cp_save
-
-                # #TODO Gamma correct right here since there's a bug that doesn't allow passing to the viewer
-                # cell_punchout_raw = np.asarray([x**0.5 for x in cell_punchout_raw])
-                # print(f'\n\n Type before color mapping is {cell_punchout_raw.dtype}, shape is {cell_punchout_raw.shape}|| there are {len(np.unique(cell_punchout_raw))} unique elements. Min/max is {np.min(cell_punchout_raw)} |{np.max(cell_punchout_raw)}\n\n')
-                cell_punchout = _convert_to_rgb(cell_punchout_raw, CHANNEL_ORDER[fluor], divisor=1)#len(CHANNELS)-1) # subtract one bc it contains the composite
+                    cell_punchout = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,pos].astype(np.uint8)
+                # print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{CHANNEL_ORDER[fluor]}')
 
                 # print(f'fluor {fluor} pageimage shape: {pageimage.shape} | row {row}, col {col} | cpsave shape {cp_save.shape}')
                 if not composite_only: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
                     if col ==1:
                         page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
                                           (col-1)*(PUNCHOUT_SIZE+2):] = generate_status_box(status_colors[cell_status], cell_id, composite_only)
-                    page_image[(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
-                                (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout * 255.0
+                    # multichannel mode: individual image
+                    page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
+                                (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout
+                    # multichannel mode: composite image
+                    page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
+                                (CELLS_PER_ROW-1)*(PUNCHOUT_SIZE+2)+1:CELLS_PER_ROW*(PUNCHOUT_SIZE+2)-1] = cell_punchout
                     GRID_TO_ID[f'{row},{col}'] = cell_id
                     GRID_TO_ID[f'{row},{CELLS_PER_ROW}'] = cell_id
-                    # Do this next one to assemble the composite image 
-                    IMAGE_DATA_ORIGINAL[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, 
-                                                  (CELLS_PER_ROW-1)*(PUNCHOUT_SIZE+2)+1:CELLS_PER_ROW*(PUNCHOUT_SIZE+2)-1] = cp_save
+
                     col+=1 # so that next luminescence image is tiled 
                     continue
 
-                # print(f'raw np shape is {cell_punchout_raw.shape}') # (100,100)
-                # print(f'colormapped np shape is {cell_punchout.shape}') # (100,100,4)
-                # composite = np.vstack([composite, cell_punchout]')
-                composite.append([cell_punchout])
-
-        if composite_only: # This stuff is only necessary in composite mode   
-                    # Confirmation that values are 0-255
-                    # mymax = np.max(pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,i])
-                    # print(f'For cell number {cell_id}, channel {i}, the max value is {mymax}')
-            # add composite
-            cell_name = f'Cell {cell_id} Composite'
-            # This will add the cell to the viewer if it has been calculated already
-            # if cell_name in IMAGE_DATA_ADJUSTED:
-            #     add_layer(viewer, IMAGE_DATA_ADJUSTED[cell_name], cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
-            #     add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
-            #     continue
-            composite = np.asarray(composite)[:,0,:,:] # it's nested right now, so extract the values. Shape after this should be (#channels, pixelwidth, pixelheight, 4) 4 for rgba
-            # print(f'shape before summing is {composite.shape}')
-            # print(f'trying to pull out some rgba data: black {composite[0,45,45,:]}\n blue {composite[1,45,45,:]}\n red {composite[2,45,45,:]}')
-
-            composite = np.sum(composite, axis=0)
-            composite = np.clip(composite,0,np.max(composite)) # ensures 0-1 scaling 
-            # print(f'\n!!! Shape after summing is {composite.shape}')
-            # print(f'same pixel added: {composite [45,45,:]}')
-            composite[:,:,3] = 1.0 # Restore Alpha value to 1.0 (possibly redundant)
-            # print(f'same pixel averaged by 3: {composite [45,45,:]}')
-
-
-            rgb_mins = [] ## Axis here?
-            rgb_maxes = []
-            for i in range(3):
-                temp = np.ndarray.flatten(composite[:,:,i])
-                # print(f'Shape of intermediate is {temp.shape}')
-                rgb_mins.append(np.min(temp))
-                rgb_maxes.append(np.max(temp))
-            # print(f'Using axis {1}, here are the mins: {rgb_mins}')
-            # print(f'Here are the maxes: {rgb_maxes}')
-
-            # rgb_mins = np.amin(composite, axis=2) ## Axis here?
-            # rgb_maxes = np.amax(composite, axis = 2)
-            # print(f'\n \nUsing axis {2}, here are the mins: {rgb_mins}')
-            # print(f'\n Here are the maxes: {rgb_maxes}')
-            # for j in range(3):
-            #     print(f'My j is {j}. 0 should be black channel, one is blue, 2 is red ')
-            # print(f'\n \n Beginning the min/max normalization loop.')
-            for i in range(3):
-                # Map values back to normal range of 0, 255.0 before passing as RGB. Napari does a shitty job of displaying without this.
-                # print(f'My i is {i}. RGB maps to 012 min/max is {rgb_mins[i]}/{rgb_maxes[i]}')
-                # continue
-                #TODO decide what to do here
-                ##### try to colormap a 255 and use that as a max ... It's 1 
-
-                composite[:,:,i] = composite[:,:,i] - float(rgb_mins[i])
-                                                        #rgb_maxes[i]
-                composite[:,:,i] = composite[:,:,i] /(float(1.0) - float(rgb_mins[i]))
-                composite[:,:,i] = composite[:,:,i] * 255.0
-
-                # composite[:,:,i] -= np.min(composite[:,:,i])
-                # composite[:,:,i] *= 255.0/np.max(composite[:,:,i])
-            # print(f'same pixel multiplied / normalized to 0,255 range: {composite [45,45,:]}')
-            # print(f'For cell number {cell_id} the datatype is {composite.dtype}, max value is {np.max(composite[:,:,0])} and the min is {np.min(composite[:,:,0])}')
-            # print(f'also the shape is {composite.shape}') # (100,100,4)
-            
-            # IMAGE_DATA_ADJUSTED[cell_name] = composite.astype('int')
-            # add_layer(viewer, composite.astype('int'), cell_name, colormap=None) #!!! NEEDS TO BE AN INT ARRAY!
-            # add_status_bar(viewer, f'Cell {cell_id} status', cell_status)
-            # print(f"PAGEIMAGE is {type(page_image)} and shape {page_image.shape} and dtype {page_image.dtype}")
-            # print(f"COMPOSITE is {type(composite)} and shape {composite.shape} and dtype {composite.dtype}")
-            GRID_TO_ID[f'{row},{col}'] = cell_id
-
-
-            page_image[(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = composite
-            IMAGE_DATA_ORIGINAL['Composite'][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = composite
-            # box = generate_status_box(status_colors[cell_status])
-            # print(f'\n {box.shape}')
-            # exit(0)
-            page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[cell_status], cell_id, composite_only)
-        
-    IMAGE_DATA_ORIGINAL['All'] = page_image.astype('int')
-    IMAGE_DATA_ADJUSTED = copy.copy(IMAGE_DATA_ORIGINAL)
-    # IMAGE_DATA_ADJUSTED['Composite'] = page_image.astype('int')
-    composite_layer = viewer.add_image(page_image.astype('int'), name = "Composite", gamma = 0.5)
+                if composite_only: # This stuff is only necessary in composite mode 
+                    GRID_TO_ID[f'{row},{col}'] = cell_id
+                    page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout
+                    page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[cell_status], cell_id, composite_only)
+    
+    for fluor in list(page_image.keys()):
+        print(f"Adding layers now. fluor is {fluor}")
+        if fluor == 'Composite':
+            continue
+        IMAGE_LAYERS[fluor] = viewer.add_image(page_image[fluor], name = fluor, 
+                                               blending = 'additive', colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]) )
     # if composite_only:
     status_layer = viewer.add_image(page_status_layer.astype('int'), name='Status Layer')
+
+    ##----------------- Live functions that control mouseover behavior on images 
+
     '''Take a pixel coordinate (y,x) and return an (x,y) position for the image that contains the pixel in the image grid'''
     def pixel_coord_to_grid(coords):
         x = coords[0]; y = coords[1]
@@ -1074,50 +715,58 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         col_num = max(ceil((y+1)/(PUNCHOUT_SIZE+2)),1)
         return row_num, col_num
     
+    def multichannel_fetch_val(local_x,global_y, fluor):
+        offset_x = (PUNCHOUT_SIZE+2) * list(CHANNELS_STR).index(fluor)
+        return (global_y, offset_x+local_x)
+    
 
-    def find_mouse(image_layer, pos, scope = 'world'):
-        # data_coordinates = image_layer.world_to_data(pos)
-        # coords = np.round(data_coordinates).astype(int)
-        # val = image_layer.get_value(data_coordinates)
-        for img in VIEWER.layers:
-            if img.name != 'Composite': continue
-
-            data_coordinates = img.world_to_data(pos)
-            val = img.get_value(data_coordinates)
-            if val is not None:
-                image_layer = img
-                break
-        # # val = image_layer.get_value(data_coordinates)
-        # # print(f'val is {val} and type is {type(val)}')
-        if val is None:
-            return "None" , None, None
+    def find_mouse(image_layer, data_coordinates, scope = 'world'):
+        
+                # retrieve cell ID name
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
         try:
             image_name = GRID_TO_ID[f'{row},{col}']
         except KeyError as e:
             return "None" , None, None
-        # adjust output to local coords + RGB without alpha
-        if len(val) > 1: val = val[:-1]
+        
+        vals = {}
+        local_x = coords[1] - (PUNCHOUT_SIZE+2)*(col-1)
+        local_y = coords[0] - (PUNCHOUT_SIZE+2)*(row-1)
+        for fluor in CHANNELS_STR:
+            if fluor == "Composite": continue
+            img_layer = IMAGE_LAYERS[fluor]
+            if not COMPOSITE_MODE:
+                # print(f"data coords: {data_coordinates}  | vs assumed coords for {fluor}: {multichannel_fetch_val(local_x, data_coordinates[0], fluor)}")
+                vals[fluor] = img_layer.get_value(multichannel_fetch_val(local_x, data_coordinates[0], fluor))
+            else:
+                vals[fluor] = img_layer.get_value(data_coordinates)
+            if vals[fluor] is None:
+                return "None" , None, None
+
+        # return either global or local (relative to punchout) coordinates
         if scope == 'world':
-            return str(image_name), coords, val
+            return str(image_name), coords, vals
         else:
-            x = coords[1] - (PUNCHOUT_SIZE+2)*(col-1)
-            y = coords[0] - (PUNCHOUT_SIZE+2)*(row-1)
-            return str(image_name), (x,y), val
+            return str(image_name), (local_x,local_y), vals
 
     @viewer.mouse_move_callbacks.append
     def display_intensity(image_layer, event):
         
-        cell_num,coords,val = find_mouse(image_layer, event.position, scope = 'grid') 
+        cell_num,coords,vals = find_mouse(image_layer, event.position, scope = 'grid') 
         image_name = f'Cell {cell_num}'
         set_notes_label(NOTES_WIDGET, str(cell_num))
-        if val is None:
-            # print('none')
+
+        if (not vals) or (vals is None):
+            # Don't do anything else
             VIEWER.status = 'Out of bounds'
+            return True
+        output_str = ''
+        for fluor in vals.keys():
+            output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">{vals[fluor]} </font>'
         else:
             # print('else')
-            VIEWER.status = f'{image_name} intensity at {coords}: {val[0]}R {val[1]}G {val[2]}B'
+            VIEWER.status = f'{image_name} intensities at {coords}: {output_str}'
 
     @status_layer.bind_key('Space')
     def toggle_status(image_layer):
@@ -1379,7 +1028,7 @@ def set_initial_adjustment_parameters():
         # fluor = fluor.replace("OPAL",'')
         ADJUSTMENT_SETTINGS[fluor+ ' black-in']=0
         ADJUSTMENT_SETTINGS[fluor+ ' white-in']=255
-        ADJUSTMENT_SETTINGS[fluor+ ' gamma']= 1.0
+        ADJUSTMENT_SETTINGS[fluor+ ' gamma']= 0.5
 
 def fetch_notes(cell_set, intensity_col_names):
     '''Grab notes and intensities for each cell in the list and save to global dicts'''
@@ -1759,10 +1408,15 @@ def main(preprocess_class = None):
     _update_status(status)
 
     set_initial_adjustment_parameters() # set defaults: 1.0 gamma, 0 black in, 255 white in
-    add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
-        # Perform adjustments before exiting function
+    try:
+        add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
+    except Exception as e:
+        print(f'\n add layers segfault')
+        print(e)
+        exit()
 
     #TODO
+    # Perform adjustments before exiting function
     reuse_contrast_limits()
     reuse_gamma() # might not need to do both of these... One is enough?
 
