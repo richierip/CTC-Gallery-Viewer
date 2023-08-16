@@ -35,6 +35,31 @@ COLOR_TO_RGB = {'gray': '(170,170,170, 255)', 'purple':'(160,32,240, 255)', 'blu
                     'yellow': '(255,215,0, 255)', 'pink': '(255,105,180, 255)', 'cyan' : '(0,220,255, 255)'}
 WIDGET_SELECTED = None
 
+''' This class will be used for the dropdown menu that can assign a scoring decision to every cell 
+    from an annotation layer or phenotype'''
+class StatusCombo(QComboBox):
+    def __init__(self, parent):
+        super(QComboBox, self).__init__(parent)
+        # self.setVisible(False)
+        self.addItem("Don't assign")
+        self.setItemData(0,QColor(255,255,255,255),Qt.BackgroundRole)
+        self.setItemData(0,QColor(0,0,0,255),Qt.ForegroundRole)
+        for pos,status in enumerate(list(store_and_load.STATUSES.keys())):
+            self.addItem(status)
+            self.setItemData(pos+1,QColor(*store_and_load.STATUSES_RGBA[status]),Qt.BackgroundRole)
+            self.setItemData(pos+1,QColor(0,0,0,255),Qt.ForegroundRole)
+        self.setStyleSheet(f"background-color: rgba(255,255,255,255);color: rgb(0,0,0); selection-background-color: rgba(255,255,255,140);")
+        self.activated.connect(self.set_bg)
+    
+    def set_bg(self):
+        status = self.currentText()
+        if status not in store_and_load.STATUSES_RGBA.keys():
+            self.setStyleSheet(f"background-color: rgba(255,255,255,255);color: rgb(0,0,0); selection-background-color: rgba(255,255,255,140);")
+        else:
+            self.setStyleSheet(f"background-color: rgba{store_and_load.STATUSES_RGBA[status]};color: rgb(0,0,0);selection-background-color: rgba(255,255,255,140);")
+
+''' This class contains the whole dialog box that the user interacts with and all it's widgets. Also contains
+    an instance of the userPresets class, which will be passed to the viewer code. '''
 class ViewerPresets(QDialog):
     def __init__(self, app, parent=None):
         super(ViewerPresets, self).__init__(parent)
@@ -104,7 +129,6 @@ class ViewerPresets(QDialog):
         viewSettingsLabel.setBuddy(self.viewSettingsEntry)
         viewSettingsLabel.setAlignment(Qt.AlignCenter)
         viewSettingsLabel.setMaximumWidth(600)
-        # self.viewSettingsEntry.setAlignment(Qt.AlignCenter)
 
         # Push button to start reading image data and start up napari by remotely executing main method of main script
         self.findDataButton = QPushButton("Load Gallery Images")
@@ -233,6 +257,57 @@ class ViewerPresets(QDialog):
             # Save info to channelOrder
             self.userInfo.channelOrder[colorChannel] = colorWidget.currentText()
 
+    def addAnnotation(self):
+        # Get status and color from combobox
+        status = self.annotationStatuses.currentText()
+        print(f'Status is {status}')
+        if status in store_and_load.STATUSES_RGBA.keys():
+            status_color = store_and_load.STATUSES_RGBA[status][:-1]
+        else: status_color = (0,0,0)
+        # convert to hex
+        status_color = '#%02x%02x%02x' % status_color
+        print(status_color)
+
+        # get annotation layer from appropriate widget
+        if self.annotationCombo.isVisible():
+            anno = self.annotationCombo.currentText()
+            if anno == '': return None
+            self.annotationCombo.removeItem(0)
+        else:
+            anno = self.annotationEdit.text()
+            if anno == '': return None
+            self.annotationEdit.clear()
+
+        # Pass to label
+        current = self.annotationDisplay.text()
+        current = current.replace("All",'')
+        self.annotationDisplay.setText(current + f'<font color="{status_color}">{anno}<br>')
+    def addPheno(self):
+        # Get status and color from combobox
+        status = self.phenotypeStatuses.currentText()
+        print(f'Status is {status}')
+        if status in store_and_load.STATUSES_RGBA.keys():
+            status_color = store_and_load.STATUSES_RGBA[status][:-1]
+        else: status_color = (0,0,0)
+        # convert to hex
+        status_color = '#%02x%02x%02x' % status_color
+        print(status_color)
+
+        # get annotation layer from appropriate widget
+        if self.phenotypeCombo.isVisible():
+            anno = self.phenotypeCombo.currentText()
+            if anno == '': return None
+            self.phenotypeCombo.removeItem(0)
+        else:
+            anno = self.phenotypeToGrab.text()
+            if anno == '': return None
+            self.phenotypeToGrab.clear()
+
+        # Pass to label
+        current = self.phenoDisplay.text()
+        current = current.replace("All",'')
+        self.phenoDisplay.setText(current + f'<font color="{status_color}">{anno}<br>')
+
     def prefillData(self):
         try:
             res = self._prefillData()
@@ -270,12 +345,42 @@ class ViewerPresets(QDialog):
             self.status_label.setText(status)
             self.previewDataButton.setEnabled(False)
             self.previewDataButton.setStyleSheet(f"color: #ffa000")
-
+    
     def _prefillData(self):
         path = self.dataEntry.text().strip('"')
         if ".csv" not in path:
             return None
-        headers = pd.read_csv(path, index_col=False, nrows=0).columns.tolist()  
+        headers = pd.read_csv(path, index_col=False, nrows=0).columns.tolist() 
+        possible_fluors = ['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence']
+        suffixes = ['Positive Classification', 'Positive Nucleus Classification','Positive Cytoplasm Classification',
+                    'Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity', '% Nucleus Completeness', '% Cytoplasm Completeness',
+                    '% Cell Completeness', '% Completeness']
+        exclude = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
+                  'Image Location', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
+
+        for fl in possible_fluors:
+            for sf in suffixes:
+                exclude.append(f'{fl} {sf}')
+        include = [x for x in headers if x not in exclude]
+        
+        self.phenotypeToGrab.setVisible(False) #; self.explanationLabel0.setVisible(False)
+        self.phenotypeCombo.setVisible(True) #; self.phenotypeButton.setVisible(True)
+        # self.phenotypeStatuses.setVisible(True); self.annotationStatuses.setVisible(True)
+        self.phenotypeCombo.addItems(include)
+        # Assess annotation regions in csv
+        try:
+            regions = list(pd.read_csv(path, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique()) 
+            print(regions)
+            self.annotationCombo.setVisible(True); self.annotationEdit.setVisible(False)
+            # self.explanationLabel0.setVisible(False); 
+            # self.annotationButton.setVisible(True)
+            self.annotationCombo.addItems(regions)
+            # self.annotationCombo.setCurrentText(regions[0])
+        except Exception as e:
+            print(e)
+            exit()
+            pass
+
 
         # Check if image location in CSV matches with image given to viewer
         im_location_csv = pd.read_csv(path, index_col=False, nrows=1, usecols=['Image Location']).iloc[0,0]
@@ -296,9 +401,13 @@ class ViewerPresets(QDialog):
         for i in range(0,len(raw),2):
             fluors[raw[i]] = raw[i+1]
         
+        def rename_key(key):
+            af_possibilities = ["SampleAF", 'Sample AF', 'Autofluorescence']
+            if key in af_possibilities: key = 'AF'
+            return key.replace(" ", '').upper()
         # rename keys 
         for key in list(fluors.keys()):
-            fluors[key.replace(" ", '').replace('SampleAF','AF').upper()] = fluors.pop(key).lower().replace('white', 'gray').replace('lime','green').replace('pink','Pink')
+            fluors[rename_key(key)] = fluors.pop(key).lower().replace('white', 'gray').replace('lime','green').replace('pink','Pink')
         print(fluors)
         unused_colors = copy.copy(AVAILABLE_COLORS)
         for col in fluors.values():
@@ -352,7 +461,7 @@ class ViewerPresets(QDialog):
         self._620Check = QCheckBox("Opal 620"); self._620Check.setObjectName('OPAL620')
         self._690Check = QCheckBox("Opal 690"); self._690Check.setObjectName('OPAL690')
         self._780Check = QCheckBox("Opal 780"); self._780Check.setObjectName('OPAL780')
-        self.autofluorescenceCheck = QCheckBox("Autofluorescence"); self.autofluorescenceCheck.setObjectName('AF')
+        self.autofluorescenceCheck = QCheckBox("AF"); self.autofluorescenceCheck.setObjectName('AF')
         self.mycheckbuttons= [self.dapiCheck, self._480Check, self._520Check, self._570Check,self._620Check, self._690Check, self._780Check, self.autofluorescenceCheck]
         
         layout = QGridLayout()
@@ -446,16 +555,30 @@ class ViewerPresets(QDialog):
             colorWidget.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[colorWidget.currentText()]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
 
         self.topLeftGroupBox.setLayout(layout)    
-
+    
     def createTopRightGroupBox(self):
         self.topRightGroupBox = QGroupBox("Cells to Read")
 
-        explanationLabel0 = QLabel("Custom object data <b>phenotype<b>")
-        explanationLabel1 = QLabel("Cell image size in <b>pixels</b>")
-        explanationLabel2 = QLabel("Load the page with this <b>Cell ID<b>")
-        explanationLabel3 = QLabel("Number of cells <b>per page<b>")
-        explanationLabel4 = QLabel("Number of cells <b>per row<b>")
+        # self.explanationLabel0 = QLabel("Custom object data <b>phenotype<b>")
+        # self.explanationLabel1 = QLabel("Pull from an <b>annotation layer<b>")
+        explanationLabel2 = QLabel("Cell image size in <b>pixels</b>")
+        explanationLabel3 = QLabel("Load the page with this <b>Cell ID<b>")
+        explanationLabel4 = QLabel("Number of cells <b>per page<b>")
+        explanationLabel5 = QLabel("Number of cells <b>per row<b>")
+        # self.explanationLabel0.setAlignment(Qt.AlignRight)
+        # self.explanationLabel1.setAlignment(Qt.AlignRight)
+        # explanationLabel2.setAlignment(Qt.AlignRight)
+        # explanationLabel3.setAlignment(Qt.AlignRight)
+        # explanationLabel4.setAlignment(Qt.AlignRight)
+        # explanationLabel5.setAlignment(Qt.AlignRight)
         # explanationLabel5 = QLabel("Number of cells <b>per row<b>")
+        self.phenotypeButton = QPushButton("Add Phenotype")
+        # self.phenotypeButton.setVisible(False)
+        self.phenotypeButton.pressed.connect(self.addPheno)
+        self.phenotypeButton.setStyleSheet(f"QPushButton {{ font-size: 18px}}")
+        self.annotationButton = QPushButton("Add Annotation Layer")
+        self.annotationButton.pressed.connect(self.addAnnotation)
+        # self.annotationButton.setVisible(False)
 
 
         #TODO attach previous choice here
@@ -465,8 +588,27 @@ class ViewerPresets(QDialog):
             self.phenotypeToGrab.insert(self.userInfo.phenotype)
         self.phenotypeToGrab.setFixedWidth(220)
         self.phenotypeToGrab.textEdited.connect(self.savePhenotype)
-        # phenotypeToGrab.set
-        self.annotationLayers = QComboBox
+        self.phenotypeCombo = QComboBox(self.topRightGroupBox)
+        self.phenotypeCombo.setVisible(False)
+        self.phenotypeStatuses = StatusCombo(self.topRightGroupBox)
+        
+
+        # Annotation layer select
+        self.annotationEdit = QLineEdit(self.topRightGroupBox)
+        self.annotationEdit.setPlaceholderText('Single layer only')
+        self.annotationEdit.setFixedWidth(220)
+        self.annotationCombo = QComboBox(self.topRightGroupBox)
+        self.annotationCombo.setVisible(False)
+        self.annotationStatuses = StatusCombo(self.topRightGroupBox)
+
+        # Pheno / annotation selection display label
+        self.phenoDisplay = QLabel(self.topRightGroupBox)
+        self.phenoDisplay.setText(f'<u>Phenotype</u><br>All')
+        self.phenoDisplay.setAlignment(Qt.AlignTop)
+
+        self.annotationDisplay = QLabel(self.topRightGroupBox)
+        self.annotationDisplay.setText(f'<u>Annotation Layer</u><br>All')
+        self.annotationDisplay.setAlignment(Qt.AlignTop)
 
         self.imageSize = QSpinBox(self.topRightGroupBox)
         self.imageSize.setRange(50,200)
@@ -502,17 +644,26 @@ class ViewerPresets(QDialog):
         self.global_sort_widget.currentTextChanged.connect(self.saveGlobalSort)
 
         layout = QGridLayout()
-        layout.addWidget(explanationLabel0,0,0)
-        layout.addWidget(self.phenotypeToGrab,0,1)
-        layout.addWidget(explanationLabel1,1,0)
-        layout.addWidget(self.imageSize,1,1)
-        layout.addWidget(explanationLabel2,2,0)
-        layout.addWidget(self.specificCellChoice,2,1)
-        layout.addWidget(explanationLabel3,3,0)
-        layout.addWidget(self.page_size_widget,3,1)
-        layout.addWidget(explanationLabel4,4,0)
-        layout.addWidget(self.row_size_widget,4,1)
-        layout.addWidget(self.global_sort_widget,5,0)
+        layout.addWidget(self.phenotypeButton,0,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel0,0,0)
+        layout.addWidget(self.phenotypeToGrab,0,1,Qt.AlignTop) ; layout.addWidget(self.phenotypeCombo,0,1,Qt.AlignTop)
+        layout.addWidget(self.phenotypeStatuses,0,2,Qt.AlignTop)
+        layout.addWidget(self.annotationButton,1,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel1,1,0)
+        layout.addWidget(self.annotationEdit,1,1,Qt.AlignTop); layout.addWidget(self.annotationCombo,1,1,Qt.AlignTop)
+        layout.addWidget(self.annotationStatuses,1,2,Qt.AlignTop)
+        layout.addWidget(explanationLabel2,2,0,Qt.AlignTop)
+        layout.addWidget(self.imageSize,2,1,Qt.AlignTop)
+        layout.addWidget(explanationLabel3,3,0,Qt.AlignTop)
+        layout.addWidget(self.specificCellChoice,3,1,Qt.AlignTop)
+        layout.addWidget(explanationLabel4,4,0,Qt.AlignTop)
+        layout.addWidget(self.page_size_widget,4,1,Qt.AlignTop)
+        layout.addWidget(explanationLabel5,5,0,Qt.AlignTop)
+        layout.addWidget(self.row_size_widget,5,1,Qt.AlignTop)
+        layout.addWidget(self.global_sort_widget,6,0,Qt.AlignTop)
+        layout.addWidget(self.phenoDisplay,0,3,7,1)
+        layout.addWidget(self.annotationDisplay,0,4,7,1)
+        # layout.setColumnStretch(3,6)
+        # layout.setColumnStretch(4,6)
+
 
         # layout.addWidget(self.findDataButton)
         layout.rowStretch(-100)

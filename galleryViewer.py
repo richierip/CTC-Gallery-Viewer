@@ -211,13 +211,13 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            hdata.loc[2,f"Validation - {PHENOTYPE} - Unseen"]
+            hdata.loc[2,f"Validation | Unseen"]
         except KeyError:
             for call_type in reversed(STATUS_COLORS.keys()):
                 if call_type == 'Unseen':
-                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 1)
+                    hdata.insert(8,f"Validation | {call_type}", 1)
                 else:
-                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 0) 
+                    hdata.insert(8,f"Validation | {call_type}", 0) 
         try:
             hdata.loc[2,"Notes"]
         except KeyError:
@@ -230,8 +230,8 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
             try:
                 # reset all validation cols to zero before assigning a 1 to the appropriate status col
                 for call_type in STATUS_COLORS.keys():
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {call_type}"] = 0
-                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {status}"] = 1
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
+                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
@@ -314,13 +314,13 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
         print(f'reading from {OBJECT_DATA}')
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            hdata.loc[2,f"Validation - {PHENOTYPE} - Unseen"]
+            hdata.loc[2,f"Validation | Unseen"]
         except KeyError:
             for call_type in reversed(STATUS_COLORS.keys()):
                 if call_type == 'Unseen':
-                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 1)
+                    hdata.insert(8,f"Validation | {call_type}", 1)
                 else:
-                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 0) 
+                    hdata.insert(8,f"Validation | {call_type}", 0) 
         try:
             hdata.loc[2,"Notes"]
         except KeyError:
@@ -332,8 +332,8 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
             try:
                 # reset all validation cols to zero before assigning a 1 to the appropriate status col
                 for call_type in STATUS_COLORS.keys():
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {call_type}"] = 0
-                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {status}"] = 1
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
+                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
@@ -483,10 +483,6 @@ def set_notes_label(display_note_widget, ID):
         fluor = list(CHANNEL_ORDER.keys())[pos]
         if fluor == 'Composite':
             continue
-        print(f'current fluor is {fluor}')
-        if fluor == 'AF':
-            print('\nexamining AF now')
-            print(intensity_series)
         # fluor = str(cell).replace(" Cell Intensity","")
         fluor = str(fluor)
         intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">{fluor.replace("OPAL","Opal ")}'
@@ -514,11 +510,9 @@ def set_notes_label(display_note_widget, ID):
         intensity_str, error = add_values(intensity_str, fluor,fluor)
         possible_af_strings = ['AF', 'Autofluorescence', 'Sample AF']
         if error and fluor in possible_af_strings:
-            print("error! trying next")
             possible_af_strings.remove(fluor)
             while possible_af_strings:
                 new = possible_af_strings.pop()
-                print(f"Looking at {new}")
                 intensity_str, error = add_values(intensity_str,"AF", new)
                 if not error: 
                     break
@@ -917,13 +911,13 @@ def sv_wrapper(viewer):
         viewer.status = 'Saving ...'
         hdata = pd.read_csv(OBJECT_DATA)
         try:
-            hdata.loc[2,f"Validation - {PHENOTYPE} - Unseen"]
+            hdata.loc[2,f"Validation | Unseen"]
         except KeyError:
             for call_type in reversed(STATUS_COLORS.keys()):
                 if call_type == 'Unseen':
-                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 1)
+                    hdata.insert(8,f"Validation | {call_type}", 1)
                 else:
-                    hdata.insert(8,f"Validation - {PHENOTYPE} - {call_type}", 0) 
+                    hdata.insert(8,f"Validation | {call_type}", 0) 
         try:
             hdata.loc[2,"Notes"]
         except KeyError:
@@ -936,8 +930,8 @@ def sv_wrapper(viewer):
             try:
                 # reset all validation cols to zero before assigning a 1 to the appropriate status col
                 for call_type in STATUS_COLORS.keys():
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {call_type}"] = 0
-                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation - {PHENOTYPE} - {status}"] = 1
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
+                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
                 hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
             except:
                 print("There's an issue... ")
@@ -1077,13 +1071,13 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
         raise KeyError
     # Add columns w/defaults if they aren't there to avoid runtime issues
     try:
-        halo_export.loc[2,f"Validation - {phenotype} - Unseen"]
+        halo_export.loc[2,f"Validation | Unseen"]
     except KeyError:
         for call_type in reversed(STATUS_COLORS.keys()):
             if call_type == 'Unseen':
-                halo_export.insert(8,f"Validation - {phenotype} - {call_type}", 1)
+                halo_export.insert(8,f"Validation | {call_type}", 1)
             else:
-                halo_export.insert(8,f"Validation - {phenotype} - {call_type}", 0) 
+                halo_export.insert(8,f"Validation | {call_type}", 0) 
     try:
         halo_export.loc[2,"Notes"]
     except KeyError:
@@ -1107,7 +1101,7 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
             'Autofluorescence Nucleus Intensity','Autofluorescence Cytoplasm Intensity','Autofluorescence Cell Intensity',
             "Sample AF Nucleus Intensity", "Sample AF Cytoplasm Intensity", "Sample AF Cell Intensity"] # not sure what the correct nomenclature is here
     v = list(STATUS_COLORS.keys())
-    validation_cols = [f"Validation - {PHENOTYPE} - " + s for s in v]
+    validation_cols = [f"Validation | " + s for s in v]
     cols_to_keep = ["Object Id", "Notes", "XMin","XMax","YMin", "YMax", phenotype] + all_possible_intensities + validation_cols
     cols_to_keep = halo_export.columns.intersection(cols_to_keep)
     halo_export = halo_export.loc[:, cols_to_keep]
@@ -1179,7 +1173,7 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
             center_x = int((row['XMax']+row['XMin'])/2)
             center_y = int((row['YMax']+row['YMin'])/2)
             vals = row[validation_cols]
-            validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation - {phenotype} - ", "")
+            validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation | ", "")
             tumor_cell_XYs.append([center_x, center_y, row["Object Id"], validation_call])
     except Exception as e:
         print(e)
