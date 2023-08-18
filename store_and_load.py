@@ -58,7 +58,11 @@ class userPresets:
         self.cells_per_row = cells_per_row
         self.statuses = copy.copy(STATUSES)
         self.view_settings = view_settings
-        self.view_settings_path = ""
+        self.view_settings_path = ''
+        self.phenotype_mappings = {}
+        self.phenotype_mappings_label = '<u>Phenotype</u><br>All'
+        self.annotation_mappings = {}
+        self.annotation_mappings_label = '<u>Annotation Layer</u><br>All'
 
 
     '''

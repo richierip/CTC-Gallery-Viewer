@@ -81,6 +81,7 @@ class ViewerPresets(QDialog):
         self.originalPalette = QApplication.palette()
         self.setWindowIcon(QIcon('data/mghiconwhite.png'))
 
+        # Set title area / logo
         cc_logo = QLabel()
         pixmap = QPixmap('data/mgh-mgb-cc-logo2 (Custom).png')
         cc_logo.setPixmap(pixmap)
@@ -91,6 +92,24 @@ class ViewerPresets(QDialog):
         # titleLabel.setFont(QFont('MS Gothic',38))
         titleLabel.setAlignment(Qt.AlignCenter)
 
+
+        # reset status mappings for selected annotations and phenotypes
+        new_pheno_label = '<u>Phenotype</u><br>'
+        if not self.userInfo.phenotype_mappings.keys(): new_pheno_label +='All'
+        for key in self.userInfo.phenotype_mappings:
+            self.userInfo.phenotype_mappings[key] = "Don't assign"
+            new_pheno_label += f'{key}<br>'
+        self.userInfo.phenotype_mappings_label = new_pheno_label
+
+        new_anno_label = '<u>Annotation Layer</u><br>'
+        if not self.userInfo.annotation_mappings.keys(): new_anno_label +='All'
+        for key in self.userInfo.annotation_mappings:
+            self.userInfo.annotation_mappings[key] = "Don't assign"
+            new_anno_label += f'{key}<br>'
+        self.userInfo.annotation_mappings_label = new_anno_label
+
+
+        # entry box for .qptiff        
         self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
         if self.userInfo.qptiff is not None:
             self.qptiffEntry.insert(self.userInfo.qptiff)
@@ -115,10 +134,15 @@ class ViewerPresets(QDialog):
         dataEntryLabel.setAlignment(Qt.AlignCenter)
         dataEntryLabel.setMaximumWidth(600)
 
-        self.previewDataButton = QPushButton("Fetch metadata")
-        self.previewDataButton.setDefault(False)
-        if "csv" not in self.dataEntry.text() and ((".qptiff" not in self.qptiffEntry.text()) or (".tif" not in self.qptiffEntry.text())):
-            self.previewDataButton.setEnabled(False)
+        self.previewObjectDataButton = QPushButton("Fetch CSV metadata")
+        if "csv" not in self.dataEntry.text() :
+            self.previewObjectDataButton.setEnabled(False)
+
+        self.previewImageDataButton = QPushButton("Fetch image metadata")
+        self.previewObjectDataButton.setDefault(True)
+        if (".qptiff" not in self.qptiffEntry.text()) and (".tif" not in self.qptiffEntry.text()):
+            self.previewImageDataButton.setEnabled(False)
+
         
         self.viewSettingsEntry = QLineEdit()
         self.viewSettingsEntry.insert(self.userInfo.view_settings_path)
@@ -147,7 +171,8 @@ class ViewerPresets(QDialog):
         self.qptiffEntry.textEdited.connect(self.saveQptiff)
         self.dataEntry.textEdited.connect(self.saveObjectData)
         # self.viewSettingsEntry.textEdited.connect(self.saveViewSettings)
-        self.previewDataButton.pressed.connect(self.prefillData)
+        self.previewObjectDataButton.pressed.connect(self.prefillObjectData)
+        self.previewImageDataButton.pressed.connect(self.prefillImageData)
 
         topLayout = QGridLayout()
         # topLayout.addStretch(1)
@@ -156,10 +181,11 @@ class ViewerPresets(QDialog):
         topLayout.setSpacing(20)
         topLayout.addWidget(entryLabel,1,0,1,0)
         topLayout.addWidget(self.qptiffEntry,1,1)
+        topLayout.addWidget(self.previewImageDataButton,1,2)
         topLayout.addWidget(dataEntryLabel,2,0,1,0)
         topLayout.addWidget(self.dataEntry,2,1)
         topLayout.addWidget(viewSettingsLabel,3,0,1,0)
-        topLayout.addWidget(self.previewDataButton,2,2)
+        topLayout.addWidget(self.previewObjectDataButton,2,2)
         topLayout.addWidget(self.viewSettingsEntry,3,1)
         # topLayout.addWidget(self.findDataButton,2,1)
 
@@ -182,16 +208,16 @@ class ViewerPresets(QDialog):
 
     def saveQptiff(self):
         self.userInfo.qptiff = os.path.normpath(self.qptiffEntry.text().strip('"'))
-        if "csv" in self.dataEntry.text() and ((".qptiff" in self.qptiffEntry.text()) or (".tif" in self.qptiffEntry.text())):
-            self.previewDataButton.setEnabled(True)
+        if (".qptiff" in self.qptiffEntry.text()) or (".tif" in self.qptiffEntry.text()):
+            self.previewImageDataButton.setEnabled(True)
         else:
-            self.previewDataButton.setEnabled(False)
+            self.previewImageDataButton.setEnabled(False)
     def saveObjectData(self):
         self.userInfo.objectData = os.path.normpath(self.dataEntry.text().strip('"'))
-        if "csv" in self.dataEntry.text() and ((".qptiff" in self.qptiffEntry.text()) or (".tif" in self.qptiffEntry.text())):
-            self.previewDataButton.setEnabled(True)
+        if ".csv" in self.dataEntry.text():
+            self.previewObjectDataButton.setEnabled(True)
         else:
-            self.previewDataButton.setEnabled(False)
+            self.previewObjectDataButton.setEnabled(False)
     def saveViewSettings(self):
         self.userInfo.view_settings_path = os.path.normpath(self.viewSettingsEntry.text().strip('"'))
         try:
@@ -282,6 +308,9 @@ class ViewerPresets(QDialog):
         current = self.annotationDisplay.text()
         current = current.replace("All",'')
         self.annotationDisplay.setText(current + f'<font color="{status_color}">{anno}<br>')
+        self.userInfo.annotation_mappings_label = self.annotationDisplay.text()
+        self.userInfo.annotation_mappings[anno] = status
+    
     def addPheno(self):
         # Get status and color from combobox
         status = self.phenotypeStatuses.currentText()
@@ -295,58 +324,116 @@ class ViewerPresets(QDialog):
 
         # get annotation layer from appropriate widget
         if self.phenotypeCombo.isVisible():
-            anno = self.phenotypeCombo.currentText()
-            if anno == '': return None
+            pheno = self.phenotypeCombo.currentText()
+            if pheno == '': return None
             self.phenotypeCombo.removeItem(0)
         else:
-            anno = self.phenotypeToGrab.text()
-            if anno == '': return None
+            pheno = self.phenotypeToGrab.text()
+            if pheno == '': return None
             self.phenotypeToGrab.clear()
 
         # Pass to label
         current = self.phenoDisplay.text()
         current = current.replace("All",'')
-        self.phenoDisplay.setText(current + f'<font color="{status_color}">{anno}<br>')
+        self.phenoDisplay.setText(current + f'<font color="{status_color}">{pheno}<br>')
+        self.userInfo.phenotype_mappings_label = self.phenoDisplay.text()
+        self.userInfo.phenotype_mappings[pheno] = status
 
-    def prefillData(self):
+    def reset_mappings(self):
+        self.userInfo.phenotype_mappings = {}
+        self.userInfo.phenotype_mappings_label = '<u>Phenotype</u><br>All'
+        self.phenoDisplay.setText('<u>Phenotype</u><br>All')
+        self.userInfo.annotation_mappings = {}
+        self.userInfo.annotation_mappings_label = '<u>Annotation Layer</u><br>All'
+        self.annotationDisplay.setText('<u>Annotation Layer</u><br>All')
+
+        # Refresh comboboxes
+        self.phenotypeCombo.clear()
+        self.annotationCombo.clear()
+        self.prefillObjectData()
+        
+
+
+    def save_status_mappings_to_file(self):
+        print('----------')
+        print(self.userInfo.annotation_mappings)
+        print(self.userInfo.phenotype_mappings)
+        # exit()
+
+    def _log_problem(self, logpath, e):
+        # Log the crash and report key variables
+
+        params = f"\nImage path: {self.userInfo.qptiff} \nData path: {self.userInfo.objectData}\n"
+        params += f"Punchout size: {self.userInfo.imageSize} \nUser selected channels: {self.userInfo.channels}\n"
+        params += f"Available colors: {store_and_load.CELL_COLORS} \nChosen phenotype: {self.userInfo.phenotype}\n"
+        params += f"Batch/page size: {self.userInfo.page_size} \nSort: {self.userInfo.global_sort}\n"
+        params += f"Specific cell chosen?: {self.userInfo.specific_cell} \nExpected order of multichannel data: {self.userInfo.channelOrder}\n"
+        params += f"Phenotype mappings: {self.userInfo.phenotype_mappings}\n"
+        params += f"Annotation mappings: {self.userInfo.annotation_mappings}\n"
+        params += f"View settings path: {self.userInfo.view_settings_path}\n"
+        params += f"View settings: {self.userInfo.view_settings}\n"
+        params += f"Available statuses: {self.userInfo.statuses}"
+        logging.basicConfig(filename=logpath, encoding='utf-8', level=logging.DEBUG)
+        logging.exception(f"{params}\n ------ Crash report autogenerated after trying to load from GUI------ \n{e}")
+
+    def prefillObjectData(self):
+        def _generate_no_anno_string(phenos):
+            status = ''
+            if phenos == 0:
+                    status = f'<font color="#4c9b8f">Successfully processed <i>.csv</i> metadata! No annotations or phenotypes found, check your headers.</font>'
+            elif phenos ==1:
+                status = f'<font color="#4c9b8f">Successfully processed <i>.csv</i> metadata! Found one phenotype</font>'
+            else:
+                status = f'<font color="#4c9b8f">Successfully processed <i>.csv</i> metadata! Found {phenos} phenotypes</font>'
+            return status
+        def _generate_typical_string(annos,phenos):
+            status = ''
+            if annos !=1 and phenos == 0:
+                    status = f'<font color="#4c9b8f">Successfully processed <i>.csv</i> metadata! Found {annos} annotations</font>'
+            elif annos ==1 and phenos ==0:
+                status = f'<font color="#4c9b8f">Successfully processed <i>.csv</i> metadata! Found one annotation</font>'
+            else:
+                status = f'<font color="#4c9b8f">Successfully processed <i>.csv</i> metadata! Found {annos} annotations and {phenos} phenotypes</font>'
+            return status
+        
         try:
-            res = self._prefillData()
-            if res == 'passed':
-                self.status_label.setVisible(True)
-                status = f'<font color="#4c9b8f">Successfully processed metadata! {len(self.userInfo.channelOrder)} channel image is ready for viewing. </font>'
+            res = self._prefillObjectData()
+            annos = self.annotationCombo.count()
+            phenos = self.phenotypeCombo.count()
+            self.previewObjectDataButton.setEnabled(False)
+            self.status_label.setVisible(True)
+
+
+            if res == 'no annotations':
+                status = _generate_no_anno_string(phenos)
                 self.status_label.setText(status)
-                self.previewDataButton.setEnabled(False)
-                self.previewDataButton.setStyleSheet(f"color: #4c9b8f")
+                self.previewObjectDataButton.setStyleSheet(f"color: #4c9b8f") 
+            elif res == 'passed':
+                status = _generate_typical_string(annos,phenos)
+                self.status_label.setText(status)
+                self.previewObjectDataButton.setStyleSheet(f"color: #4c9b8f")
             elif res == 'name conflict':
-                self.status_label.setVisible(True)
-                status='<font color="#ffa000">Warning - the image given has a different name than what was used to generate the object data</font>'
+                if annos == 0:
+                    status = _generate_no_anno_string(phenos)
+                else: status = _generate_typical_string(annos,phenos)
+                status +='<br><font color="#ffa000">Warning - the image given has a different name than what was used to generate the object data</font>'
                 self.status_label.setText(status)
-                self.previewDataButton.setEnabled(False)
-                self.previewDataButton.setStyleSheet(f"color: #ffa000")
+                self.previewObjectDataButton.setStyleSheet(f"color: #ffa000")
         except Exception as e:
-            # Log the crash and report key variables
             folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
             if not os.path.exists(folder):
                 os.makedirs(folder)
-            logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_pre-processing_warning_%H%M%S.txt')))
-
-            params = f"Image path: {self.userInfo.qptiff} \nData path: {self.userInfo.objectData}\n"
-            params += f"Punchout size: {self.userInfo.imageSize} \nUser selected channels: {self.userInfo.channels}\n"
-            params += f"Available colors: {store_and_load.CELL_COLORS} \nChosen phenotype: {self.userInfo.phenotype}\n"
-            params += f"Batch/page size: {self.userInfo.page_size} \nSort: {self.userInfo.global_sort}\n"
-            params += f"Specific cell chosen?: {self.userInfo.specific_cell} \nExpected order of multichannel data: {self.userInfo.channelOrder}\n"
-            logging.basicConfig(filename=logpath, encoding='utf-8', level=logging.DEBUG)
-            logging.exception(f"{params}\n ------ Crash report autogenerated after trying to load from GUI------ \n{e}")
-
+            logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_csv_metadata_warning_%H%M%S.txt')))
+            self._log_problem(logpath,e)
             # Inform user of possible issue
             self.status_label.setVisible(True)
             status = '<font color="#ffa000">Warning: Failed to properly ingest the files\' metadata.\
               The viewer expects a QPTIFF from an Akoya Polaris,<br> and an object data <i>.csv</i> generated by a Halo analysis app</font>'
             self.status_label.setText(status)
-            self.previewDataButton.setEnabled(False)
-            self.previewDataButton.setStyleSheet(f"color: #ffa000")
+            self.previewObjectDataButton.setEnabled(False)
+            self.previewObjectDataButton.setStyleSheet(f"color: #ffa000")
     
-    def _prefillData(self):
+    def _prefillObjectData(self):
         path = self.dataEntry.text().strip('"')
         if ".csv" not in path:
             return None
@@ -377,18 +464,42 @@ class ViewerPresets(QDialog):
             self.annotationCombo.addItems(regions)
             # self.annotationCombo.setCurrentText(regions[0])
         except Exception as e:
-            print(e)
-            exit()
-            pass
-
-
+            return 'no annotations'
         # Check if image location in CSV matches with image given to viewer
         im_location_csv = pd.read_csv(path, index_col=False, nrows=1, usecols=['Image Location']).iloc[0,0]
         im_name_csv = sub(r'.*?\\',"", im_location_csv)
         path = self.qptiffEntry.text().strip('"')
         if im_name_csv != sub(r'.*?\\',"", path):
             return 'name conflict'
-        
+        return 'passed'
+
+    def prefillImageData(self):
+        try:
+            res = self._prefillImageData()
+            if res == 'passed':
+                self.status_label.setVisible(True)
+                status = f'<font color="#4c9b8f">Successfully processed image metadata! {len(self.userInfo.channelOrder)} channel image is ready for viewing. </font>'
+                self.status_label.setText(status)
+                self.previewImageDataButton.setEnabled(False)
+                self.previewImageDataButton.setStyleSheet(f"color: #4c9b8f")
+            elif res == 'name conflict':
+                pass #TODO something here
+        except Exception as e:
+            folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+            logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_image_metadata_warning_%H%M%S.txt')))
+            self._log_problem(logpath,e)
+            # Inform user of possible issue
+            self.status_label.setVisible(True)
+            status = '<font color="#ffa000">Warning: Failed to properly ingest the files\' metadata.\
+              The viewer expects a QPTIFF from an Akoya Polaris,<br> and an object data <i>.csv</i> generated by a Halo analysis app</font>'
+            self.status_label.setText(status)
+            self.previewImageDataButton.setEnabled(False)
+            self.previewImageDataButton.setStyleSheet(f"color: #ffa000")
+
+    def _prefillImageData(self):
+        path = self.qptiffEntry.text().strip('"')
         # Parse annoying TIF metadata
         # It seems to be stored in XML format under the 'ImageDescription' TIF tag. 
         description = tifffile.TiffFile(path).pages[0].tags['ImageDescription'].value
@@ -603,12 +714,18 @@ class ViewerPresets(QDialog):
 
         # Pheno / annotation selection display label
         self.phenoDisplay = QLabel(self.topRightGroupBox)
-        self.phenoDisplay.setText(f'<u>Phenotype</u><br>All')
+        self.phenoDisplay.setText(self.userInfo.phenotype_mappings_label)
         self.phenoDisplay.setAlignment(Qt.AlignTop)
 
         self.annotationDisplay = QLabel(self.topRightGroupBox)
-        self.annotationDisplay.setText(f'<u>Annotation Layer</u><br>All')
+        self.annotationDisplay.setText(self.userInfo.annotation_mappings_label)
         self.annotationDisplay.setAlignment(Qt.AlignTop)
+
+        # Reset button 
+        self.resetButton = QPushButton('Reset choices',self.topRightGroupBox)
+        self.resetButton.pressed.connect(self.reset_mappings)
+        self.resetButton.setStyleSheet(f"QPushButton {{ font-size: 14px}}")
+
 
         self.imageSize = QSpinBox(self.topRightGroupBox)
         self.imageSize.setRange(50,200)
@@ -652,6 +769,7 @@ class ViewerPresets(QDialog):
         layout.addWidget(self.annotationStatuses,1,2,Qt.AlignTop)
         layout.addWidget(explanationLabel2,2,0,Qt.AlignTop)
         layout.addWidget(self.imageSize,2,1,Qt.AlignTop)
+        layout.addWidget(self.resetButton,2,2,Qt.AlignTop)
         layout.addWidget(explanationLabel3,3,0,Qt.AlignTop)
         layout.addWidget(self.specificCellChoice,3,1,Qt.AlignTop)
         layout.addWidget(explanationLabel4,4,0,Qt.AlignTop)
@@ -673,6 +791,7 @@ class ViewerPresets(QDialog):
         # self.status_label.setVisible(True)
         # self.app.processEvents()
         self.saveViewSettings()
+        self.save_status_mappings_to_file()
         self.findDataButton.setEnabled(False) # disable load button after click
         store_and_load.storeObject(self.userInfo, 'data/presets')
 
@@ -683,27 +802,14 @@ class ViewerPresets(QDialog):
         # print(f'QPTIFF: {self.userInfo.qptiff}')
         # print(f'OBJECTDATA : {self.userInfo.objectData}')
         print(f'CHANNELS : {self.userInfo.channels}')
-        # self.app.run(max_loop_level=2) # This isn't a thing apparently
-        # self.app.processEvents()
-
-        # self.createProgressBar()
-        # self.mainLayout.addWidget(self.progressBar, 3, 0, 1, 2)
-        # self.startProgressBar()
-
-        # t = threading.Thread(target = self.startProgressBar, name = "Testing thread capabilities")
-        # t.daemon = True
-        # t.start()
-        # print(f'progress bar thread w/daemon should be started now...')
 
         folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
         if not os.path.exists(folder):
             os.makedirs(folder)
-        logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_crashlog_%H%M%S.txt')))
+        logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_runtime_crash_%H%M%S.txt')))
 
         # self.app.setStyleSheet('')
         try:
-            # for i in range(15):
-            #     time.sleep(1)
             print('Calling GUI execute...')
             # Reset stylesheet
             newStyle = ''
@@ -716,22 +822,9 @@ class ViewerPresets(QDialog):
             #         exec(f'newStyle += "{elem}{{font-size: {FONT_SIZE-10}pt;}}"')
             # self.app.setStyleSheet(newStyle)
             # self.processEvents()
-            # close this window
-            # self.close()
             GUI_execute(self)
-            # time.sleep(5)
-            # print("done")
         except Exception as e:
-            params = f"Image path: {self.userInfo.qptiff} \nData path: {self.userInfo.objectData}\n"
-            params += f"Punchout size: {self.userInfo.imageSize} \nUser selected channels: {self.userInfo.channels}\n"
-            params += f"Avaliable color: {store_and_load.CELL_COLORS} \nChosen phenotype: {self.userInfo.phenotype}\n"
-            params += f"Batch/page size: {self.userInfo.page_size} \nSort: {self.userInfo.global_sort}\n"
-            params += f"Specific cell chosen?: {self.userInfo.specific_cell} \nExpected order of multichannel data: {self.userInfo.channelOrder}\n"
-            logging.basicConfig(filename=logpath, encoding='utf-8', level=logging.DEBUG)
-            logging.exception(f"{params}\n ------ Crash report autogenerated after trying to load from GUI------ \n{e}")
-
-        # GUI_execute(self.userInfo)
-        # exit(0)
+            self._log_problem(logpath,e)
 
 
 if __name__ == '__main__':
