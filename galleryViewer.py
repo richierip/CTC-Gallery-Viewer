@@ -98,7 +98,7 @@ def adjust_composite_gamma(layer, gamma):
     # print(f'\nin fuxn adjustment settings are {ADJUSTMENT_SETTINGS}')
     # print(f'My datatype is {type(ADJUSTMENT_SETTINGS["DAPI gamma"])} while my value is {ADJUSTMENT_SETTINGS["DAPI gamma"]} and the value of\
     #       gamma is {gamma} and the image current gamma for {layer.name} is {layer.gamma}')
-    layer.gamma = gamma
+    layer.gamma = 2-(2*gamma)
     # print(f'The new gamma is now {layer.gamma}')
 
 def adjust_composite_limits(layer, limits):
@@ -120,7 +120,7 @@ def reuse_contrast_limits():
 ## --- Bottom bar functions and GUI elements 
 
 @magicgui(auto_call=True,
-        Gamma={"widget_type": "FloatSlider", "max":1.5, "min":0.01},
+        Gamma={"widget_type": "FloatSlider", "max":1.0, "min":0.01},
         layout = 'horizontal')
 def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData: 
     def _update_dictionary(name, val):
@@ -574,7 +574,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         new = Image.new("RGBA", (int(upsample*im_length),int(upsample*cb_size)), (0,0,0,255))
         font = ImageFont.truetype("arial.ttf",48)
         editable_image = ImageDraw.Draw(new)
-        editable_image.text((55,1), str(cid), color, font = font)
+        editable_image.text((60,1), str(cid), color, font = font)
         resized = np.array(new.resize((im_length,cb_size), Image.Resampling.LANCZOS))
         resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
         return resized
