@@ -48,7 +48,8 @@ PUNCHOUT_SIZE = 90 # microns or pixels? Probably pixels
 PAGE_SIZE = 15 # How many cells will be shown in next page
 CELLS_PER_ROW = 8
 SPECIFIC_CELL = None # Will be an int if the user wants to load the page with that cell
-PHENOTYPE = 'Tumor' #'CTC 488pos'
+PHENOTYPES = ['Tumor'] #'CTC 488pos'
+ANNOTATIONS = []
 GLOBAL_SORT = None
 DAPI = 0; OPAL480 = 3; OPAL520 = 6; OPAL570 = 1; OPAL620 = 4; OPAL690 = 2; OPAL780 = 5; AF=7; Composite = 8
 
@@ -351,7 +352,7 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
         VIEWER.status = 'Done saving!'
     # Take note of new starting point
     global PAGE_SIZE
-    page_number = int(page_cb_widget.currentText().split()[-1])
+    page_number = int(page_cb_widget.currentText().split()[-1]) - 1
     cell_choice = single_cell_lineEdit.text()
     if cell_choice == '': cell_choice = None
     print(f"CURRENT WIDG POSITION IS {intensity_sort_widget.currentIndex()} and type is {type(intensity_sort_widget.currentIndex())}")
@@ -573,7 +574,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         new = Image.new("RGBA", (int(upsample*im_length),int(upsample*cb_size)), (0,0,0,255))
         font = ImageFont.truetype("arial.ttf",48)
         editable_image = ImageDraw.Draw(new)
-        editable_image.text((70,1), str(cid), color, font = font)
+        editable_image.text((55,1), str(cid), color, font = font)
         resized = np.array(new.resize((im_length,cb_size), Image.Resampling.LANCZOS))
         resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
         return resized
@@ -588,7 +589,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         else: # assume 'gray'
             color_tuple = (180,180,180,255)
         
-        upsample = {True : 3, False: 3.5 }
+        upsample = {True : 3.5, False: 3.5 }
 
         corner_box_size = 16
         edge_width = 1
@@ -651,7 +652,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         col = (col%CELLS_PER_ROW)+1
         if col ==1: row+=1 
         # print(f'Next round of while. Still {len(cells)} cells left. Row {row}, Col {col}')
-        cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; cell_status = retrieve_status(cell_id,cell)
+        cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; 
+        cell_status = retrieve_status(cell_id,cell) ; cell_anno = cell[4]
         # add the rest of the layers to the viewer
         if RASTERS is not None:
             # Raster channels for qptiffs are saved as subdatasets of the opened raster object
@@ -687,7 +689,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                     GRID_TO_ID[f'{row},{col}'] = cell_id
                     GRID_TO_ID[f'{row},{CELLS_PER_ROW}'] = cell_id
                     if col ==1:
-                        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),:] = generate_status_box(status_colors[cell_status], cell_id, composite_only)
+                        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),:] = generate_status_box(status_colors[cell_status], f'{cell_id} {cell_anno}', composite_only)
 
                     col+=1 # so that next luminescence image is tiled 
                     continue
@@ -695,7 +697,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 if composite_only: # This stuff is only necessary in composite mode 
                     GRID_TO_ID[f'{row},{col}'] = cell_id
                     page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout
-                    page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[cell_status], cell_id, composite_only)
+                    page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[cell_status], f'{cell_id} {cell_anno}', composite_only)
     
     for fluor in list(page_image.keys()):
         print(f"Adding layers now. fluor is {fluor}")
@@ -1049,7 +1051,7 @@ def fetch_notes(cell_set, intensity_col_names):
     # print(f'dumping dict {SAVED_NOTES}')
 
 '''Get object data from csv and parse.''' 
-def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1, 
+def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None, page_number = 0, 
                             specific_cell = None, sort_by_intensity = None, combobox_widget = None):
     
     # 'OPAL520' # None means 'don't do it', while a channel name means 'put highest at the top'
@@ -1063,12 +1065,20 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
 
     # get defaults from global space
     if page_size is None: page_size=PAGE_SIZE # Number of cells to be shown
-    if phenotype is None: phenotype=PHENOTYPE # Name of phenotype of interest
+    if phenotypes is None: phenotypes=PHENOTYPES
+    if annotations is None: annotations=ANNOTATIONS  # Name of phenotype of interest
     # print(f'ORDERING PARAMS: id start: {cell_id_start}, page size: {page_size}, direction: {direction}, change?: {change_startID}')
     halo_export = pd.read_csv(OBJECT_DATA)
     
-    if phenotype not in list(halo_export.columns):
+    # Check for errors:
+    for ph in phenotypes:
+        if ph not in list(halo_export.columns):
+            raise KeyError
+    if len(annotations) >0 and ('Analysis Region' not in list(halo_export.columns)):
         raise KeyError
+
+
+
     # Add columns w/defaults if they aren't there to avoid runtime issues
     try:
         halo_export.loc[2,f"Validation | Unseen"]
@@ -1090,19 +1100,15 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
 
     # Get relevant columns for intensity sorting
     # TODO make this conditional, and in a try except format
-    all_possible_intensities = ['DAPI Nucleus Intensity','DAPI Cytoplasm Intensity','DAPI Cell Intensity', 
-                                'Opal 480 Nucleus Intensity','Opal 480 Cytoplasm Intensity','Opal 480 Cell Intensity',
-                                'Opal 520 Nucleus Intensity','Opal 520 Cytoplasm Intensity','Opal 520 Cell Intensity',
-            'Opal 570 Nucleus Intensity','Opal 570 Cytoplasm Intensity','Opal 570 Cell Intensity',
-              'Opal 620 Nucleus Intensity','Opal 620 Cytoplasm Intensity','Opal 620 Cell Intensity',
-                'Opal 690 Nucleus Intensity','Opal 690 Cytoplasm Intensity','Opal 690 Cell Intensity',
-                'Opal 780 Nucleus Intensity','Opal 780 Cytoplasm Intensity','Opal 780 Cell Intensity',
-            'AF Nucleus Intensity','AF Cytoplasm Intensity','AF Cell Intensity',
-            'Autofluorescence Nucleus Intensity','Autofluorescence Cytoplasm Intensity','Autofluorescence Cell Intensity',
-            "Sample AF Nucleus Intensity", "Sample AF Cytoplasm Intensity", "Sample AF Cell Intensity"] # not sure what the correct nomenclature is here
+    possible_fluors = ['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence']
+    suffixes = ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity']
+    all_possible_intensities =[]
+    for fl in possible_fluors:
+            for sf in suffixes:
+                all_possible_intensities.append(f'{fl} {sf}')
     v = list(STATUS_COLORS.keys())
     validation_cols = [f"Validation | " + s for s in v]
-    cols_to_keep = ["Object Id", "Notes", "XMin","XMax","YMin", "YMax", phenotype] + all_possible_intensities + validation_cols
+    cols_to_keep = ["Object Id","Analysis Region", "Notes", "XMin","XMax","YMin", "YMax"] + phenotypes + all_possible_intensities + validation_cols
     cols_to_keep = halo_export.columns.intersection(cols_to_keep)
     halo_export = halo_export.loc[:, cols_to_keep]
 
@@ -1116,19 +1122,36 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
             GLOBAL_SORT = None
             global_sort_status = False
             VIEWER.status = 'Global sort failed. Will sort by Cell Id instead.'
+            if annotations:
+                halo_export = halo_export.sort_values(by = ["Analysis Region","Object Id"], ascending = False, kind = 'mergesort')
+    else:
+        if annotations:
+            halo_export = halo_export.sort_values(by = ["Analysis Region","Object Id"], ascending = False, kind = 'mergesort')
     
+    # Helper to construct query string that will subset dataframe down to cells that 
+    #   are positive for a phenotype in the list, or a member of an annotation layer in the list
+    def _create_anno_pheno_query(anno_list, pheno_list):
+        query = ''
+        for anno in anno_list:
+            query += f"(`Analysis Region` == '{anno}') | "
+        for pheno in pheno_list:
+            query += f"(`{pheno}` == 1) |"
+        print(query)
+        return query.rstrip(" |")
+
     # #acquire 
     print('page code start')
     # Figure out which range of cells to get based on page number and size
-    phen_only_df = halo_export[halo_export[phenotype]==1].reset_index()
+    phen_only_df = halo_export.query(_create_anno_pheno_query(annotations,phenotypes)).reset_index()
     last_page = len(phen_only_df.index) // page_size
     print(f"last page is {last_page}")
     global ALL_CUSTOM_WIDGETS
     combobox_widget =  ALL_CUSTOM_WIDGETS['page combobox']
+    # combobox_widget.addItem('Page 1')
     # If page numbers haven't been added to the widget, do it now   
     if combobox_widget.currentIndex() == -1: # This means it's empty
         for i in range(1,last_page+1):
-            bname = f'{phenotype} page {i}'
+            bname = f'Page {i}'
             combobox_widget.addItem(bname)
 
     # If a certain cell is desired, find its page
@@ -1140,15 +1163,15 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
             page_number = (sc_index//page_size)+1
             #TODO set the combobox widget to the current page number
         except (KeyError,IndexError, ValueError):
-            print(f'The cell ID {specific_cell} is not in my list of {phenotype}. Loading default page instead ')
-            VIEWER.status = f'The cell ID {specific_cell} is not in my list of {phenotype}. Loaded default page instead'
+            print(f'The cell ID {specific_cell} is not in my list of cells. Loading default page instead')
+            VIEWER.status = f'The cell ID {specific_cell} is not in my list of cells. Loaded default page instead'
 
     # set widget to current page number 
-    combobox_widget.setCurrentIndex(page_number-1)
+    combobox_widget.setCurrentIndex(page_number)
     SAVED_NOTES['page'] = combobox_widget.currentText()
     # Get the appropriate set
     if page_number != last_page:
-        cell_set = phen_only_df[(page_number-1)*page_size: page_number*page_size]
+        cell_set = phen_only_df[page_number*page_size: (page_number+1)*page_size]
     else:
         cell_set = phen_only_df[(page_number)*page_size:]
     
@@ -1174,7 +1197,7 @@ def extract_phenotype_xldata(page_size=None, phenotype=None, page_number = 1,
             center_y = int((row['YMax']+row['YMin'])/2)
             vals = row[validation_cols]
             validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation | ", "")
-            tumor_cell_XYs.append([center_x, center_y, row["Object Id"], validation_call])
+            tumor_cell_XYs.append([center_x, center_y, row["Object Id"], validation_call, row["Analysis Region"]])
     except Exception as e:
         print(e)
         exit()
@@ -1204,12 +1227,14 @@ def replace_note(cell_widget, note_widget):
 ''' Reset globals and proceed to main '''
 def GUI_execute(preprocess_class):
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
-    global qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER
-    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPE, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
+    global qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER, STATUS_COLORS
+    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
 
     qptiff = userInfo.qptiff
     PUNCHOUT_SIZE = userInfo.imageSize
-    PHENOTYPE = userInfo.phenotype
+    PHENOTYPES = list(userInfo.phenotype_mappings.keys())
+    ANNOTATIONS = list(userInfo.annotation_mappings.keys())
+    STATUS_COLORS = userInfo.statuses
     PAGE_SIZE = userInfo.page_size
     SPECIFIC_CELL = userInfo.specific_cell
     OBJECT_DATA = userInfo.objectData
@@ -1319,7 +1344,7 @@ def main(preprocess_class = None):
     viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
 
     NOTES_WIDGET = QLabel('Placeholder note'); NOTES_WIDGET.setAlignment(Qt.AlignCenter)
-    print(f'Notes widget is {NOTES_WIDGET}\n type is {type(NOTES_WIDGET)}')
+    # print(f'Notes widget is {NOTES_WIDGET}\n type is {type(NOTES_WIDGET)}')
 
     #TODO arrange these more neatly
     #TODO these dock widgets cause VERY strange behavior when trying to clear all layers / load more
@@ -1407,7 +1432,11 @@ def main(preprocess_class = None):
     except KeyError as e:
         print(e)
         # If the user has given bad input, the function will raise a KeyError. Fail gracefully and inform the user
-        status+=f'<font color="#f5551a">  Failed.<br> The phenotype "{PHENOTYPE}" might not exist in the data, or other column names may have changed!</font>'
+        status+=f'<font color="#f5551a">  Failed.</font>'
+        if PHENOTYPES:
+            status+=f'<br><font color="#f5551a">The phenotype(s) {", ".join(str(x) for x in PHENOTYPES)} might not exist in the data, or other column names may have changed!</font>'
+        if ANNOTATIONS:
+            status+=f'<br><font color="#f5551a">The annotations(s) {", ".join(str(x) for x in ANNOTATIONS)} might not exist in the data, or other column names may have changed!</font>'
         _update_status(status)
         viewer.close()
         return None # allows the input GUI to continue running
@@ -1415,13 +1444,7 @@ def main(preprocess_class = None):
     _update_status(status)
 
     set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 1.0 gamma, 0 black in, 255 white in
-    try:
-        add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
-    except Exception as e:
-        print(f'\n add layers segfault')
-        print(e)
-        exit()
-
+    add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
     #TODO
     # Perform adjustments before exiting function
     reuse_contrast_limits()

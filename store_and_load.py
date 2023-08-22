@@ -51,7 +51,6 @@ class userPresets:
         self.channels = channels # String array - user choice for channels to read and display
         self.UI_color_display = copy.copy(CELL_COLORS) # keep track of user selected colors for fluors
         self.specific_cell = specific_cell # Int if USER wants to load the page containing this cell, None otherwise
-        self.phenotype = phenotype # String - Label for the column name of interest in the object data file
         self.channelOrder = channelOrder #String array - Order of multichannel data found in the image
         self.page_size = page_size # Integer - How many cells should be displayed per page
         self.global_sort = global_sort # String - Header to use to sort the object data. Default is cell ID (sheet is usually pre-sorted like this)
