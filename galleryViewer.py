@@ -68,7 +68,7 @@ TEMP = None
 ADJUSTMENT_SETTINGS={"DAPI gamma": 0.5}; 
 SAVED_NOTES={} ; STATUS_LIST={}; SAVED_INTENSITIES={}; XY_STORE = [1,2,3]
 RAW_PYRAMID=None
-NOTES_WIDGET = None; ALL_CUSTOM_WIDGETS = {}
+ALL_CUSTOM_WIDGETS = {}
 COMPOSITE_MODE = True # Start in composite mode
 RASTERS = None
 NO_LABEL_BOX = False
@@ -498,7 +498,7 @@ def set_notes_label(display_note_widget, ID):
     if cell_anno == 'All':
         image_name = f'Cell {cell_num}'
     else:
-        image_name = f'Cell {cell_num} from layer {cell_anno}'
+        image_name = f'Cell {cell_num} from {cell_anno}'
     try:
         note = str(SAVED_NOTES[ID])
     except KeyError: # in case the name was off
@@ -803,8 +803,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         if cell_anno == 'All':
             image_name = f'Cell {cell_num}'
         else:
-            image_name = f'Cell {cell_num} from layer {cell_anno}'
-        set_notes_label(NOTES_WIDGET, str(cell_name))
+            image_name = f'Cell {cell_num} from {cell_anno}'
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
         output_str = ''
         for fluor in vals.keys():
             output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {vals[fluor]}   </font>'
@@ -826,7 +826,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         cur_index = list(status_colors.keys()).index(cur_status)
         next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
         STATUS_LIST[str(cell_name)] = next_status
-        set_notes_label(NOTES_WIDGET, str(cell_name)) 
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
         if COMPOSITE_MODE: 
@@ -839,7 +839,13 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
     @status_layer.mouse_drag_callbacks.append
     def trigger_toggle_status(image_layer, event):
-        toggle_status(image_layer)
+        # toggle_status(image_layer) #TODO decide on the behavior for clicking on a cell
+        
+        # Allow user to click on a cell to get it's name into the entry box  
+        widget = ALL_CUSTOM_WIDGETS['notes cell entry']
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        widget.setText(cell_name)
+
 
     @status_layer.bind_key('c')
     def set_unseen(image_layer):
@@ -850,7 +856,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
         STATUS_LIST[str(cell_name)] = next_status
-        set_notes_label(NOTES_WIDGET, str(cell_name)) 
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
         if COMPOSITE_MODE: 
@@ -870,7 +876,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
         STATUS_LIST[str(cell_name)] = next_status
-        set_notes_label(NOTES_WIDGET, str(cell_name)) 
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
         if COMPOSITE_MODE: 
@@ -890,7 +896,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
         STATUS_LIST[str(cell_name)] = next_status
-        set_notes_label(NOTES_WIDGET, str(cell_name)) 
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
         if COMPOSITE_MODE: 
@@ -910,7 +916,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
         STATUS_LIST[str(cell_name)] = next_status
-        set_notes_label(NOTES_WIDGET, str(cell_name)) 
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
         if COMPOSITE_MODE: 
@@ -930,7 +936,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
         STATUS_LIST[str(cell_name)] = next_status
-        set_notes_label(NOTES_WIDGET, str(cell_name)) 
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
         if COMPOSITE_MODE: 
@@ -1286,11 +1292,11 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
 def replace_note(cell_widget, note_widget):
     global SAVED_NOTES
     cellID = cell_widget.text(); note = note_widget.text()
-    try: 
-        cellID = int(cellID)
-    except ValueError:
-        VIEWER.status = 'Error recording note: non-numeric Cell Id given'
-        return None 
+    # try: 
+    #     cellID = int(cellID)
+    # except ValueError:
+    #     VIEWER.status = 'Error recording note: non-numeric Cell Id given'
+    #     return None 
     try:
         SAVED_NOTES[str(cellID)] # to trigger exception
         SAVED_NOTES[str(cellID)] = note
@@ -1356,7 +1362,7 @@ def main(preprocess_class = None):
         if preprocess_class is not None:
             preprocess_class.status_label.setText(status)
             preprocess_class.app.processEvents()
-    global RAW_PYRAMID, RASTERS, VIEWER,NOTES_WIDGET, ALL_CUSTOM_WIDGETS
+    global RAW_PYRAMID, RASTERS, VIEWER, ALL_CUSTOM_WIDGETS
     if preprocess_class is not None: preprocess_class.status_label.setVisible(True)
     status = "Loading image as raster..."
     _update_status(status)
@@ -1423,14 +1429,13 @@ def main(preprocess_class = None):
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
     viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
 
-    NOTES_WIDGET = QLabel('Placeholder note'); NOTES_WIDGET.setAlignment(Qt.AlignCenter)
-    # print(f'Notes widget is {NOTES_WIDGET}\n type is {type(NOTES_WIDGET)}')
+    notes_label = QLabel('Placeholder note'); notes_label.setAlignment(Qt.AlignCenter)
 
     #TODO arrange these more neatly
     #TODO these dock widgets cause VERY strange behavior when trying to clear all layers / load more
     note_text_entry = QLineEdit()
     note_cell_entry = QLineEdit()
-    note_button = QPushButton("Replace note for cell")
+    note_button = QPushButton("Add note for cell")
     note_text_entry.setPlaceholderText('Enter new note')
     note_text_entry.setFixedWidth(200)
     note_cell_entry.setPlaceholderText("Cell Id")
@@ -1457,7 +1462,7 @@ def main(preprocess_class = None):
 
     next_page_button = QPushButton("Change Page")
     next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry, intensity_sort_box))
-    notes_container = viewer.window.add_dock_widget([NOTES_WIDGET,note_text_entry, note_cell_entry, note_button], name = 'Annotation', area = 'right')
+    notes_container = viewer.window.add_dock_widget([notes_label,note_text_entry, note_cell_entry, note_button], name = 'Annotation', area = 'right')
     page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, intensity_sort_box, next_page_button], name = 'Page selection', area = 'right')
 
     all_channels_rb = QRadioButton("Multichannel Mode")
@@ -1489,7 +1494,7 @@ def main(preprocess_class = None):
     # viewer.window.add_dock_widget(show_next_cell_group,name = 'Test2', area = 'right')
     # viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test3', area = 'right')
     # print(f'\n {dir()}') # prints out the namespace variables 
-    ALL_CUSTOM_WIDGETS['notes label']=NOTES_WIDGET; ALL_CUSTOM_WIDGETS['notes text entry']=note_text_entry
+    ALL_CUSTOM_WIDGETS['notes label']=notes_label; ALL_CUSTOM_WIDGETS['notes text entry']=note_text_entry
     ALL_CUSTOM_WIDGETS['notes cell entry']= note_cell_entry;ALL_CUSTOM_WIDGETS['notes button']=note_button
     ALL_CUSTOM_WIDGETS['next page button']=next_page_button
     ALL_CUSTOM_WIDGETS['channels mode radio']=all_channels_rb; ALL_CUSTOM_WIDGETS['composite mode radio']=composite_only_rb

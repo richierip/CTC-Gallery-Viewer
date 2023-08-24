@@ -854,7 +854,7 @@ class ViewerPresets(QDialog):
         df = self.assign_phenotype_statuses_to_sheet(df)
         df = self.assign_annotation_statuses_to_sheet(df)
         if self._validate_names():
-            df.to_csv("test.csv",index=False)
+            df.to_csv(self.userInfo.objectData,index=False)
             return True
         else:
             return False
