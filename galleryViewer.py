@@ -74,9 +74,11 @@ RASTERS = None
 NO_LABEL_BOX = False
 GRID_TO_ID = {}
 STATUS_COLORS = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red" }
-STATUS_TO_HEX = {'Confirmed':'#00ff00', 'Rejected':'#ff0000', 'Needs review':'#ffa000', "Unseen":'#ffffff'}
+STATUSES_TO_HEX = store_and_load.STATUSES_HEX
+STATUSES_RGBA = {}
 IMAGE_LAYERS = {}
 UPDATED_CHECKBOXES = []
+ANNOTATIONS_PRESENT = False # Track whether there is an 'Analysis Regions' field in the data (duplicate CIDs possible)
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
 #TODO merge some of the GUI elements into the same container to prevent strange spacing issues
@@ -225,23 +227,37 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
             hdata.insert(8,"Notes","-")
             hdata.fillna("")
         global XY_STORE, STATUS_LIST
-        for cell_id in STATUS_LIST.keys():
-            status = STATUS_LIST[cell_id]
+        for cell_name in STATUS_LIST.keys():
+            status = STATUS_LIST[cell_name]
+            cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
             
             try:
                 # reset all validation cols to zero before assigning a 1 to the appropriate status col
-                for call_type in STATUS_COLORS.keys():
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
-                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
-                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
+                if cell_anno == 'All':
+                    for call_type in STATUS_COLORS.keys():
+                        hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
+                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_name)]
+                else:
+                    for call_type in STATUS_COLORS.keys():
+                        hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {call_type}"] = 0
+                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {status}"] = 1
+                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SAVED_NOTES[cell_name]
             except:
                 print("There's an issue... ")
             # Now do it for the saved cache
             try:
                 for i,row in enumerate(XY_STORE):
-                    if str(row[2]) == cell_id: 
-                        XY_STORE[i][3] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
-                        STATUS_LIST[str(cell_id)] = status
+                    if ANNOTATIONS_PRESENT:
+                        if str(row['Object Id']) == cell_id and row["Analysis Region"] == cell_anno: 
+                            XY_STORE[i][3] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
+                            STATUS_LIST[cell_name] = status
+                    else:
+                        if str(row['Object Id']) == cell_id: 
+                            XY_STORE[i][3] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
+                            STATUS_LIST[cell_name] = status
+                            
+
             except:
                 print("XY_Store saving issue.")
         try:
@@ -328,14 +344,22 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
             hdata.insert(8,"Notes","-")
             hdata.fillna("")
 
-        for cell_id in STATUS_LIST.keys():
-            status = STATUS_LIST[cell_id]
+        for cell_name in STATUS_LIST.keys():
+            status = STATUS_LIST[cell_name]
+            cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
+            
             try:
                 # reset all validation cols to zero before assigning a 1 to the appropriate status col
-                for call_type in STATUS_COLORS.keys():
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
-                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
-                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
+                if cell_anno == 'All':
+                    for call_type in STATUS_COLORS.keys():
+                        hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
+                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_name)]
+                else:
+                    for call_type in STATUS_COLORS.keys():
+                        hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {call_type}"] = 0
+                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {status}"] = 1
+                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SAVED_NOTES[cell_name]
             except:
                 print("There's an issue... ")
         try:
@@ -470,12 +494,17 @@ def sort_by_intensity():
     pass
 
 def set_notes_label(display_note_widget, ID):
+    cell_num = ID.split()[-1]; cell_anno = ID.replace(' '+cell_num,'')
+    if cell_anno == 'All':
+        image_name = f'Cell {cell_num}'
+    else:
+        image_name = f'Cell {cell_num} from layer {cell_anno}'
     try:
         note = str(SAVED_NOTES[ID])
     except KeyError: # in case the name was off
         return False
     status = STATUS_LIST[str(ID)]
-    prefix = f'{SAVED_NOTES["page"]}<br><font color="{STATUS_TO_HEX[status]}">CID: {ID}</font>'
+    prefix = f'{SAVED_NOTES["page"]}<br><font color="{STATUSES_TO_HEX[status]}">{image_name}</font>'
 
     # Add intensities
     intensity_series = SAVED_INTENSITIES[ID]
@@ -538,7 +567,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     print(f'\n---------\n \n Entering the add_layers function')
     print(f"pyramid shape is {pyramid.shape}")
     # Make the color bar that appears to the left of the composite image
-    status_colors = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red" }
+    status_colors = STATUS_COLORS
     global CELLS_PER_ROW
     if not composite_only:
         CELLS_PER_ROW = len(CHANNELS_STR) #+1
@@ -546,7 +575,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     else: # composite_only = True
         CELLS_PER_ROW = userInfo.cells_per_row
 
-    def retrieve_status(cell_id, cell):
+    def retrieve_status(cell_id, cell, annotation):
         ''' Kind of an anachronistic function at this point.'''
         # print(f'Getting status for {cell_id}')
         if new_page:
@@ -560,6 +589,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             if type(status) is not str or status not in status_colors.keys():
                 status = "Unseen"
             # Save to dict to make next retrieval faster
+            # If there are annotations, need to track a separate list for each one
             STATUS_LIST[str(cell_id)] = status
             return status
         else:
@@ -574,20 +604,19 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         new = Image.new("RGBA", (int(upsample*im_length),int(upsample*cb_size)), (0,0,0,255))
         font = ImageFont.truetype("arial.ttf",48)
         editable_image = ImageDraw.Draw(new)
+
+        # switch CID order
+        i = cid.split()[-1]; anno = cid.replace(' '+i,'')
+        cid = i + " " + anno
         editable_image.text((60,1), str(cid), color, font = font)
         resized = np.array(new.resize((im_length,cb_size), Image.Resampling.LANCZOS))
         resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
         return resized
 
-    def generate_status_box(color, cid, composite_only):
-        if color == 'red':
-            color_tuple = (255,0,0,255)
-        elif color == 'green':
-            color_tuple = (0,255,0,255)
-        elif color =='bop orange':
-            color_tuple = (255,160,0,255)
-        else: # assume 'gray'
-            color_tuple = (180,180,180,255)
+    def generate_status_box(status, cid, composite_only):
+
+        color_tuple = STATUSES_RGBA[status]
+        # print(f'STATUSES {STATUSES_RGBA} \n status {status}, color tup {color_tuple}')
         
         upsample = {True : 3.5, False: 3.5 }
 
@@ -630,6 +659,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW, 4))
         elif color_space == 'Luminescence':
             return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW))
+        
+    def white_background(mult):  
+        a = np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW))
+        a[a == 0] = 255
+        return a
 
 
     # Starting to add
@@ -653,7 +687,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         if col ==1: row+=1 
         # print(f'Next round of while. Still {len(cells)} cells left. Row {row}, Col {col}')
         cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; 
-        cell_status = retrieve_status(cell_id,cell) ; cell_anno = cell[4]
+        cell_anno = cell[4]
+        cell_status = retrieve_status(cell_anno +' '+ str(cell_id),cell, cell_anno)
         # add the rest of the layers to the viewer
         if RASTERS is not None:
             # Raster channels for qptiffs are saved as subdatasets of the opened raster object
@@ -686,19 +721,20 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                     # multichannel mode: composite image
                     page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
                                 (CELLS_PER_ROW-1)*(PUNCHOUT_SIZE+2)+1:CELLS_PER_ROW*(PUNCHOUT_SIZE+2)-1] = cell_punchout
-                    GRID_TO_ID[f'{row},{col}'] = cell_id
-                    GRID_TO_ID[f'{row},{CELLS_PER_ROW}'] = cell_id
+                    GRID_TO_ID[f'{row},{col}'] = cell_anno + ' ' + str(cell_id)
+                    GRID_TO_ID[f'{row},{CELLS_PER_ROW}'] = cell_anno + ' ' + str(cell_id)
                     if col ==1:
-                        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),:] = generate_status_box(status_colors[cell_status], f'{cell_id} {cell_anno}', composite_only)
+                        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), composite_only)
 
                     col+=1 # so that next luminescence image is tiled 
                     continue
 
                 if composite_only: # This stuff is only necessary in composite mode 
-                    GRID_TO_ID[f'{row},{col}'] = cell_id
+                    GRID_TO_ID[f'{row},{col}'] = cell_anno + ' ' + str(cell_id)
                     page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout
-                    page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[cell_status], f'{cell_id} {cell_anno}', composite_only)
+                    page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), composite_only)
     
+    # absorption = viewer.add_image(white_background(size_multiplier).astype('int'), name = "Absorption")
     for fluor in list(page_image.keys()):
         print(f"Adding layers now. fluor is {fluor}")
         if fluor == 'Composite':
@@ -758,43 +794,47 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     @viewer.mouse_move_callbacks.append
     def display_intensity(image_layer, event):
         
-        cell_num,coords,vals = find_mouse(image_layer, event.position, scope = 'grid') 
-        image_name = f'Cell {cell_num}'
-        set_notes_label(NOTES_WIDGET, str(cell_num))
-
+        cell_name,coords,vals = find_mouse(image_layer, event.position, scope = 'grid') 
         if (not vals) or (vals is None):
             # Don't do anything else
             VIEWER.status = 'Out of bounds'
             return True
+        cell_num = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_num,'')
+        if cell_anno == 'All':
+            image_name = f'Cell {cell_num}'
+        else:
+            image_name = f'Cell {cell_num} from layer {cell_anno}'
+        set_notes_label(NOTES_WIDGET, str(cell_name))
         output_str = ''
         for fluor in vals.keys():
             output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {vals[fluor]}   </font>'
         else:
             # print('else')
-            sc = STATUS_TO_HEX[STATUS_LIST[str(cell_num)]]
+            sc = STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]]
             VIEWER.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
 
     @status_layer.bind_key('Space')
     def toggle_status(image_layer):
         
-        cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
         if val is None:
             return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
 
-        cur_status = STATUS_LIST[str(cell_num)]
+        cur_status = STATUS_LIST[str(cell_name)]
         cur_index = list(status_colors.keys()).index(cur_status)
         next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
-        STATUS_LIST[str(cell_num)] = next_status
+        STATUS_LIST[str(cell_name)] = next_status
+        set_notes_label(NOTES_WIDGET, str(cell_name)) 
 
         imdata = image_layer.data
         if COMPOSITE_MODE: 
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name), True)
         else:
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                :] = generate_status_box(status_colors[next_status],str(cell_num), False)
+                :] = generate_status_box(next_status,str(cell_name), False)
         image_layer.data = imdata.astype('int')
 
     @status_layer.mouse_drag_callbacks.append
@@ -804,77 +844,101 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     @status_layer.bind_key('c')
     def set_unseen(image_layer):
         next_status = 'Unseen'
-        cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
         if val is None:
             return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        STATUS_LIST[str(cell_num)] = next_status
+        STATUS_LIST[str(cell_name)] = next_status
+        set_notes_label(NOTES_WIDGET, str(cell_name)) 
 
         imdata = image_layer.data
         if COMPOSITE_MODE: 
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name), True)
         else:
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                :] = generate_status_box(status_colors[next_status],str(cell_num), False)
+                :] = generate_status_box(next_status,str(cell_name), False)
         image_layer.data = imdata.astype('int')
 
     @status_layer.bind_key('v')
     def set_nr(image_layer):
         next_status = 'Needs review'
-        cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
         if val is None:
             return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        STATUS_LIST[str(cell_num)] = next_status
+        STATUS_LIST[str(cell_name)] = next_status
+        set_notes_label(NOTES_WIDGET, str(cell_name)) 
 
         imdata = image_layer.data
         if COMPOSITE_MODE: 
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name), True)
         else:
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                :] = generate_status_box(status_colors[next_status],str(cell_num), False)
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+                :] = generate_status_box(next_status,str(cell_name), False)
         image_layer.data = imdata.astype('int')
 
     @status_layer.bind_key('b')
     def set_confirmed(image_layer):
         next_status = 'Confirmed'
-        cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
         if val is None:
             return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        STATUS_LIST[str(cell_num)] = next_status
+        STATUS_LIST[str(cell_name)] = next_status
+        set_notes_label(NOTES_WIDGET, str(cell_name)) 
 
-        imdata = image_layer.data   
+        imdata = image_layer.data
         if COMPOSITE_MODE: 
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name), True)
         else:
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                :] = generate_status_box(status_colors[next_status],str(cell_num), False)
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+                :] = generate_status_box(next_status,str(cell_name), False)
         image_layer.data = imdata.astype('int')
     
     @status_layer.bind_key('n')
     def set_rejected(image_layer):
         next_status = 'Rejected'
-        cell_num,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position) 
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
         if val is None:
             return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        STATUS_LIST[str(cell_num)] = next_status
+        STATUS_LIST[str(cell_name)] = next_status
+        set_notes_label(NOTES_WIDGET, str(cell_name)) 
 
-        imdata = image_layer.data   
+        imdata = image_layer.data
         if COMPOSITE_MODE: 
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(status_colors[next_status],str(cell_num), True)
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name), True)
         else:
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+                :] = generate_status_box(next_status,str(cell_name), False)
+        image_layer.data = imdata.astype('int')
+
+    @status_layer.bind_key('m')
+    def set_interesting(image_layer):
+        next_status = 'Interesting'
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        if val is None:
+            return None
+        coords = np.round(data_coordinates).astype(int)
+        row,col = pixel_coord_to_grid(coords)
+        STATUS_LIST[str(cell_name)] = next_status
+        set_notes_label(NOTES_WIDGET, str(cell_name)) 
+
+        imdata = image_layer.data
+        if COMPOSITE_MODE: 
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                :] = generate_status_box(status_colors[next_status],str(cell_num), False)
+                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name), True)
+        else:
+            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+                :] = generate_status_box(next_status,str(cell_name), False)
         image_layer.data = imdata.astype('int')
 
     #TODO make a page label... 
@@ -926,17 +990,25 @@ def sv_wrapper(viewer):
             hdata.insert(8,"Notes","-")
             hdata.fillna("")
 
-        for cell_id in STATUS_LIST.keys():
-            status = STATUS_LIST[cell_id]
-            # print(f"\nSave status {status}, cid {cell_id}")
+        for cell_name in STATUS_LIST.keys():
+            status = STATUS_LIST[cell_name]
+            cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
+            
             try:
                 # reset all validation cols to zero before assigning a 1 to the appropriate status col
-                for call_type in STATUS_COLORS.keys():
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
-                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
-                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_id)]
-            except:
+                if cell_anno == 'All':
+                    for call_type in STATUS_COLORS.keys():
+                        hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
+                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
+                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_name)]
+                else:
+                    for call_type in STATUS_COLORS.keys():
+                        hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {call_type}"] = 0
+                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {status}"] = 1
+                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SAVED_NOTES[cell_name]
+            except Exception as e:
                 print("There's an issue... ")
+                print(e)
         try:
             hdata.to_csv(OBJECT_DATA, index=False)
             viewer.status = 'Done saving!'
@@ -1039,15 +1111,17 @@ def set_initial_adjustment_parameters(viewsettings):
         ADJUSTMENT_SETTINGS[key] = viewsettings[key]
     return True
 
-def fetch_notes(cell_set, intensity_col_names):
+def fetch_notes(cell_row, intensity_col_names):
     '''Grab notes and intensities for each cell in the list and save to global dicts'''
-    for index,row in cell_set.iterrows():
-        ID = str(row['Object Id'])
-        SAVED_NOTES[ID] = row['Notes']
-        # Find out which columns are present in the Series and subset to those
-        present_intensities = sorted(list(set(list(row.index)).intersection(set(intensity_col_names))))
-        row = row.loc[present_intensities]
-        SAVED_INTENSITIES[ID] = row
+    if not ANNOTATIONS_PRESENT:
+        ID = "All " + str(cell_row['Object Id'])
+    else:
+        ID = str(cell_row['Analysis Region']) + ' ' + str(cell_row['Object Id'])
+    SAVED_NOTES[ID] = cell_row['Notes']
+    # Find out which columns are present in the Series and subset to those
+    present_intensities = sorted(list(set(list(cell_row.index)).intersection(set(intensity_col_names))))
+    cell_row = cell_row.loc[present_intensities]
+    SAVED_INTENSITIES[ID] = cell_row
     # print(f'dumping dict {SAVED_NOTES}')
 
 '''Get object data from csv and parse.''' 
@@ -1076,8 +1150,6 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
             raise KeyError
     if len(annotations) >0 and ('Analysis Region' not in list(halo_export.columns)):
         raise KeyError
-
-
 
     # Add columns w/defaults if they aren't there to avoid runtime issues
     try:
@@ -1142,7 +1214,10 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     # #acquire 
     print('page code start')
     # Figure out which range of cells to get based on page number and size
-    phen_only_df = halo_export.query(_create_anno_pheno_query(annotations,phenotypes)).reset_index()
+    if annotations or phenotypes:
+        phen_only_df = halo_export.query(_create_anno_pheno_query(annotations,phenotypes)).reset_index()
+    else:
+        phen_only_df = halo_export
     last_page = len(phen_only_df.index) // page_size
     print(f"last page is {last_page}")
     global ALL_CUSTOM_WIDGETS
@@ -1189,15 +1264,18 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
             else:
                 VIEWER.status = f"Unable to sort everything by '{sort_by_intensity}', will use ID instead. Check your data headers."
             cell_set = cell_set.sort_values(by = 'Object Id', ascending = False, kind = 'mergesort')
-    fetch_notes(cell_set, all_possible_intensities)
     tumor_cell_XYs = []
     try:
         for index,row in cell_set.iterrows():
+            fetch_notes(row, all_possible_intensities)
             center_x = int((row['XMax']+row['XMin'])/2)
             center_y = int((row['YMax']+row['YMin'])/2)
             vals = row[validation_cols]
             validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation | ", "")
-            tumor_cell_XYs.append([center_x, center_y, row["Object Id"], validation_call, row["Analysis Region"]])
+            if ANNOTATIONS_PRESENT:
+                tumor_cell_XYs.append([center_x, center_y, row["Object Id"], validation_call, row["Analysis Region"]])
+            else:
+                tumor_cell_XYs.append([center_x, center_y, row["Object Id"], validation_call, "All"])
     except Exception as e:
         print(e)
         exit()
@@ -1227,14 +1305,16 @@ def replace_note(cell_widget, note_widget):
 ''' Reset globals and proceed to main '''
 def GUI_execute(preprocess_class):
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
-    global qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER, STATUS_COLORS
+    global qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
     global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
+    global ANNOTATIONS_PRESENT
 
     qptiff = userInfo.qptiff
     PUNCHOUT_SIZE = userInfo.imageSize
     PHENOTYPES = list(userInfo.phenotype_mappings.keys())
     ANNOTATIONS = list(userInfo.annotation_mappings.keys())
-    STATUS_COLORS = userInfo.statuses
+    ANNOTATIONS_PRESENT = userInfo.analysisRegionsInData
+    STATUS_COLORS = userInfo.statuses ; STATUSES_RGBA = userInfo.statuses_rgba ; STATUSES_TO_HEX = userInfo.statuses_hex
     PAGE_SIZE = userInfo.page_size
     SPECIFIC_CELL = userInfo.specific_cell
     OBJECT_DATA = userInfo.objectData

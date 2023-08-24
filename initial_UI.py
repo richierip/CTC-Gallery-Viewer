@@ -38,7 +38,7 @@ WIDGET_SELECTED = None
 ''' This class will be used for the dropdown menu that can assign a scoring decision to every cell 
     from an annotation layer or phenotype'''
 class StatusCombo(QComboBox):
-    def __init__(self, parent):
+    def __init__(self, parent, userInfo):
         super(QComboBox, self).__init__(parent)
         # self.setVisible(False)
         self.addItem("Don't assign")
@@ -46,17 +46,17 @@ class StatusCombo(QComboBox):
         self.setItemData(0,QColor(0,0,0,255),Qt.ForegroundRole)
         for pos,status in enumerate(list(store_and_load.STATUSES.keys())):
             self.addItem(status)
-            self.setItemData(pos+1,QColor(*store_and_load.STATUSES_RGBA[status]),Qt.BackgroundRole)
+            self.setItemData(pos+1,QColor(*userInfo.statuses_rgba[status]),Qt.BackgroundRole)
             self.setItemData(pos+1,QColor(0,0,0,255),Qt.ForegroundRole)
         self.setStyleSheet(f"background-color: rgba(255,255,255,255);color: rgb(0,0,0); selection-background-color: rgba(255,255,255,140);")
-        self.activated.connect(self.set_bg)
+        self.activated.connect(lambda: self.set_bg(userInfo))
     
-    def set_bg(self):
+    def set_bg(self, userInfo):
         status = self.currentText()
-        if status not in store_and_load.STATUSES_RGBA.keys():
+        if status not in userInfo.statuses_rgba.keys():
             self.setStyleSheet(f"background-color: rgba(255,255,255,255);color: rgb(0,0,0); selection-background-color: rgba(255,255,255,140);")
         else:
-            self.setStyleSheet(f"background-color: rgba{store_and_load.STATUSES_RGBA[status]};color: rgb(0,0,0);selection-background-color: rgba(255,255,255,140);")
+            self.setStyleSheet(f"background-color: rgba{userInfo.statuses_rgba[status]};color: rgb(0,0,0);selection-background-color: rgba(255,255,255,140);")
 
 ''' This class contains the whole dialog box that the user interacts with and all it's widgets. Also contains
     an instance of the userPresets class, which will be passed to the viewer code. '''
@@ -207,29 +207,33 @@ class ViewerPresets(QDialog):
         self.setWindowTitle(f"GalleryViewer v{VERSION_NUMBER}")
 
     def saveQptiff(self):
-        self.userInfo.qptiff = os.path.normpath(self.qptiffEntry.text().strip('"')).replace('.','')
+        self.userInfo.qptiff = os.path.normpath(self.qptiffEntry.text().strip('"')).strip('.')
         if (".qptiff" in self.qptiffEntry.text()) or (".tif" in self.qptiffEntry.text()):
             self.previewImageDataButton.setEnabled(True)
         else:
             self.previewImageDataButton.setEnabled(False)
     def saveObjectData(self):
-        self.userInfo.objectData = os.path.normpath(self.dataEntry.text().strip('"')).replace('.','')
+        self.userInfo.objectData = os.path.normpath(self.dataEntry.text().strip('"')).strip('.')
         if ".csv" in self.dataEntry.text():
             self.previewObjectDataButton.setEnabled(True)
         else:
             self.previewObjectDataButton.setEnabled(False)
+
     def saveViewSettings(self):
-        self.userInfo.view_settings_path = os.path.normpath(self.viewSettingsEntry.text().strip('"')).replace('.','')
+        self.userInfo.view_settings_path = os.path.normpath(self.viewSettingsEntry.text().strip('"')).strip('.')
         try:
-            df = pd.read_xml(self.userInfo.view_settings_path)
-            self.userInfo.transfer_view_settings(df)
-            print("Success!")
-            print(self.userInfo.view_settings)
+            if self.userInfo.view_settings_path:
+                df = pd.read_xml(self.userInfo.view_settings_path)
+                self.userInfo.transfer_view_settings(df)
+            # print("Success!")
+            # print(self.userInfo.view_settings)
         except Exception as e:
-            print("Failed to transfer viewsettings")
-            print(e)
-            self.userInfo.view_settings = store_and_load.VIEW_SETTINGS
-            # exit()
+            folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+            logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_silent_viewsettings_issue_%H%M%S.txt')))
+            self.userInfo.view_settings = store_and_load.VIEW_SETTINGS # use defaults
+            self._log_problem(logpath,e)
 
     def saveSpecificCell(self):
         try:
@@ -284,9 +288,8 @@ class ViewerPresets(QDialog):
     def addAnnotation(self):
         # Get status and color from combobox
         status = self.annotationStatuses.currentText()
-        print(f'Status is {status}')
-        if status in store_and_load.STATUSES_RGBA.keys():
-            status_color = store_and_load.STATUSES_RGBA[status][:-1]
+        if status in self.userInfo.statuses_rgba.keys():
+            status_color = self.userInfo.statuses_rgba[status][:-1]
         else: status_color = (0,0,0)
         # convert to hex
         status_color = '#%02x%02x%02x' % status_color
@@ -313,8 +316,8 @@ class ViewerPresets(QDialog):
         # Get status and color from combobox
         status = self.phenotypeStatuses.currentText()
         print(f'Status is {status}')
-        if status in store_and_load.STATUSES_RGBA.keys():
-            status_color = store_and_load.STATUSES_RGBA[status][:-1]
+        if status in self.userInfo.statuses_rgba.keys():
+            status_color = self.userInfo.statuses_rgba[status][:-1]
         else: status_color = (0,0,0)
         # convert to hex
         status_color = '#%02x%02x%02x' % status_color
@@ -350,14 +353,6 @@ class ViewerPresets(QDialog):
             self.phenotypeCombo.clear()
             self.annotationCombo.clear()
             self.prefillObjectData()
-        
-
-
-    def save_status_mappings_to_file(self):
-        print('----------')
-        print(self.userInfo.annotation_mappings)
-        print(self.userInfo.phenotype_mappings)
-        # exit()
 
     def _log_problem(self, logpath, e):
         # Log the crash and report key variables
@@ -685,7 +680,7 @@ class ViewerPresets(QDialog):
         self.phenotypeButton = QPushButton("Add Phenotype")
         # self.phenotypeButton.setVisible(False)
         self.phenotypeButton.pressed.connect(self.addPheno)
-        self.phenotypeButton.setStyleSheet(f"QPushButton {{ font-size: 18px}}")
+        # self.phenotypeButton.setStyleSheet(f"QPushButton {{ font-size: 18px}}")
         self.annotationButton = QPushButton("Add Annotation Layer")
         self.annotationButton.pressed.connect(self.addAnnotation)
         # self.annotationButton.setVisible(False)
@@ -697,7 +692,7 @@ class ViewerPresets(QDialog):
         self.phenotypeToGrab.setFixedWidth(220)
         self.phenotypeCombo = QComboBox(self.topRightGroupBox)
         self.phenotypeCombo.setVisible(False)
-        self.phenotypeStatuses = StatusCombo(self.topRightGroupBox)
+        self.phenotypeStatuses = StatusCombo(self.topRightGroupBox, self.userInfo)
         
 
         # Annotation layer select
@@ -706,7 +701,7 @@ class ViewerPresets(QDialog):
         self.annotationEdit.setFixedWidth(220)
         self.annotationCombo = QComboBox(self.topRightGroupBox)
         self.annotationCombo.setVisible(False)
-        self.annotationStatuses = StatusCombo(self.topRightGroupBox)
+        self.annotationStatuses = StatusCombo(self.topRightGroupBox, self.userInfo)
 
         # Pheno / annotation selection display label
         self.phenoDisplay = QLabel(self.topRightGroupBox)
@@ -784,6 +779,8 @@ class ViewerPresets(QDialog):
         self.topRightGroupBox.setLayout(layout)
 
     def _check_validation_cols(self,df):
+        # Check to see if validation columns are in the data (won't be on first run)
+        #   Put them in place if needed
         try:
             df.loc[2,f"Validation | Unseen"]
         except KeyError:
@@ -819,7 +816,7 @@ class ViewerPresets(QDialog):
     def assign_phenotype_statuses_to_sheet(self,df):
         l = list(set(self.userInfo.phenotype_mappings.keys()))
         if (not self.userInfo.phenotype_mappings):
-            return df # break if user wants "All" for each
+            return df # break if user wants "All" 
         
         elif (len(l) == 1) and (l[0] == "Don't assign"):
             return df # Also break if there are no status mappings for any annotation
@@ -836,21 +833,53 @@ class ViewerPresets(QDialog):
             df.loc[df[phenotype]==1,f"Validation | {status}"] = 1
         return df
 
-    
+    def _validate_names(self):
+        # Get headers and unique annotations
+        path = self.userInfo.objectData
+        headers = pd.read_csv(path, index_col=False, nrows=0).columns.tolist() 
+        true_annotations = list(pd.read_csv(path, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique())
+        valid = True
+        annotations = list(self.userInfo.annotation_mappings.keys())
+        phenotypes = list(self.userInfo.phenotype_mappings.keys())
+        # perform checks
+        for anno in annotations:
+            if anno not in true_annotations: valid = False
+        for pheno in phenotypes:
+            if pheno not in headers: valid = False
+        return valid
+         
+
     def assign_statuses_to_sheet(self):
         df = pd.read_csv(self.userInfo.objectData)
         df = self.assign_phenotype_statuses_to_sheet(df)
         df = self.assign_annotation_statuses_to_sheet(df)
-        df.to_csv("test.csv",index=False)
+        if self._validate_names():
+            df.to_csv("test.csv",index=False)
+            return True
+        else:
+            return False
+        
+    def _locate_annotations_col(self):
+        headers = pd.read_csv(self.userInfo.objectData, index_col=False, nrows=0).columns.tolist() 
+        if 'Analysis Region' in headers:
+            self.userInfo.analysisRegionsInData = True
+        else:
+            self.userInfo.analysisRegionsInData = False
+
     
     def loadGallery(self):
         # self.status_label.setVisible(True)
         # self.app.processEvents()
-        self.assign_statuses_to_sheet()
+        self.findDataButton.setEnabled(False) # disable load button after click
+        if not self.assign_statuses_to_sheet():
+            # Will execute if the phenotypes / annotations given do not match to object data
+            self.status_label.setVisible(True)
+            status = '<font color="#f5551a">  Failed to assign status mappings</font><br>Check your annotations and phenotypes before trying again'
+            self.status_label.setText(status)
+            return None
         # exit()
         self.saveViewSettings()
-        self.save_status_mappings_to_file()
-        self.findDataButton.setEnabled(False) # disable load button after click
+        self._locate_annotations_col() # Lets viewer app know if it needs to look out for multiple cell IDs in the sheet
         store_and_load.storeObject(self.userInfo, 'data/presets')
 
         # If user fetched metadata, save changes to color mappings
@@ -860,11 +889,6 @@ class ViewerPresets(QDialog):
         # print(f'QPTIFF: {self.userInfo.qptiff}')
         # print(f'OBJECTDATA : {self.userInfo.objectData}')
         print(f'CHANNELS : {self.userInfo.channels}')
-
-        folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
-        if not os.path.exists(folder):
-            os.makedirs(folder)
-        logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_runtime_crash_%H%M%S.txt')))
 
         # self.app.setStyleSheet('')
         try:
@@ -882,6 +906,10 @@ class ViewerPresets(QDialog):
             # self.processEvents()
             GUI_execute(self)
         except Exception as e:
+            folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+            logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_runtime_crash_%H%M%S.txt')))
             self._log_problem(logpath,e)
 
 
