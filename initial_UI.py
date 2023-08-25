@@ -124,8 +124,8 @@ class ViewerPresets(QDialog):
         entryLabel.setMaximumWidth(600)
 
         self.dataEntry = QLineEdit()  # Put retrieved previous answer here
-        if self.userInfo.objectData is not None:
-            self.dataEntry.insert(self.userInfo.objectData)
+        if self.userInfo.objectDataPath is not None:
+            self.dataEntry.insert(self.userInfo.objectDataPath)
         self.dataEntry.setPlaceholderText('Enter path to .csv')
         self.dataEntry.setFixedWidth(800)
         # dataEntry.setAlignment(Qt.AlignLeft)
@@ -213,7 +213,7 @@ class ViewerPresets(QDialog):
         else:
             self.previewImageDataButton.setEnabled(False)
     def saveObjectData(self):
-        self.userInfo.objectData = os.path.normpath(self.dataEntry.text().strip('"')).strip('.')
+        self.userInfo.objectDataPath = os.path.normpath(self.dataEntry.text().strip('"')).strip('.')
         if ".csv" in self.dataEntry.text():
             self.previewObjectDataButton.setEnabled(True)
         else:
@@ -237,7 +237,14 @@ class ViewerPresets(QDialog):
 
     def saveSpecificCell(self):
         try:
-            self.userInfo.specific_cell = int(self.specificCellChoice.text())
+            if self.specificCellChoice.text() == '':
+                self.userInfo.specific_cell = None
+            elif self.specificCellAnnotationCombo.isVisible():
+                self.userInfo.specific_cell = {'ID': str(int(self.specificCellChoice.text())),
+                                            'Annotation Layer': self.specificCellAnnotationCombo.currentText()}
+            else:
+                self.userInfo.specific_cell = {'ID': str(int(self.specificCellChoice.text())),
+                                           'Annotation Layer': self.specificCellAnnotationEdit.text()}
         except:
             print('Bad input to "Specific Cell" widget. Saving as NoneType')
             self.userInfo.specific_cell = None
@@ -357,7 +364,7 @@ class ViewerPresets(QDialog):
     def _log_problem(self, logpath, e):
         # Log the crash and report key variables
 
-        params = f"\nImage path: {self.userInfo.qptiff} \nData path: {self.userInfo.objectData}\n"
+        params = f"\nImage path: {self.userInfo.qptiff} \nData path: {self.userInfo.objectDataPath}\n"
         params += f"Punchout size: {self.userInfo.imageSize} \nUser selected channels: {self.userInfo.channels}\n"
         params += f"Available colors: {store_and_load.CELL_COLORS} \n"
         params += f"Batch/page size: {self.userInfo.page_size} \nSort: {self.userInfo.global_sort}\n"
@@ -444,19 +451,17 @@ class ViewerPresets(QDialog):
                 exclude.append(f'{fl} {sf}')
         include = [x for x in headers if x not in exclude]
         
-        self.phenotypeToGrab.setVisible(False) #; self.explanationLabel0.setVisible(False)
-        self.phenotypeCombo.setVisible(True) #; self.phenotypeButton.setVisible(True)
-        # self.phenotypeStatuses.setVisible(True); self.annotationStatuses.setVisible(True)
+        self.phenotypeToGrab.setVisible(False) #
+        self.phenotypeCombo.setVisible(True) 
         self.phenotypeCombo.addItems(include)
         # Assess annotation regions in csv
         try:
             regions = list(pd.read_csv(path, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique()) 
             print(regions)
             self.annotationCombo.setVisible(True); self.annotationEdit.setVisible(False)
-            # self.explanationLabel0.setVisible(False); 
-            # self.annotationButton.setVisible(True)
             self.annotationCombo.addItems(regions)
-            # self.annotationCombo.setCurrentText(regions[0])
+            self.specificCellAnnotationCombo.setVisible(True); self.specificCellAnnotationEdit.setVisible(False)
+            self.specificCellAnnotationCombo.addItems(regions)
         except Exception as e:
             return 'no annotations'
         # Check if image location in CSV matches with image given to viewer
@@ -667,9 +672,9 @@ class ViewerPresets(QDialog):
         # self.explanationLabel0 = QLabel("Custom object data <b>phenotype<b>")
         # self.explanationLabel1 = QLabel("Pull from an <b>annotation layer<b>")
         explanationLabel2 = QLabel("Cell image size in <b>pixels</b>")
-        explanationLabel3 = QLabel("Load the page with this <b>Cell ID<b>")
-        explanationLabel4 = QLabel("Number of cells <b>per page<b>")
-        explanationLabel5 = QLabel("Number of cells <b>per row<b>")
+        explanationLabel3 = QLabel("Number of cells <b>per page<b>")
+        explanationLabel4 = QLabel("Number of cells <b>per row<b>")
+        explanationLabel5 = QLabel("Load the page with this <b>Cell ID<b>")
         # self.explanationLabel0.setAlignment(Qt.AlignRight)
         # self.explanationLabel1.setAlignment(Qt.AlignRight)
         # explanationLabel2.setAlignment(Qt.AlignRight)
@@ -678,13 +683,11 @@ class ViewerPresets(QDialog):
         # explanationLabel5.setAlignment(Qt.AlignRight)
         # explanationLabel5 = QLabel("Number of cells <b>per row<b>")
         self.phenotypeButton = QPushButton("Add Phenotype")
-        # self.phenotypeButton.setVisible(False)
+        self.phenotypeButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
         self.phenotypeButton.pressed.connect(self.addPheno)
-        # self.phenotypeButton.setStyleSheet(f"QPushButton {{ font-size: 18px}}")
         self.annotationButton = QPushButton("Add Annotation Layer")
+        self.annotationButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
         self.annotationButton.pressed.connect(self.addAnnotation)
-        # self.annotationButton.setVisible(False)
-
 
         #TODO attach previous choice here
         self.phenotypeToGrab = QLineEdit(self.topRightGroupBox)
@@ -726,10 +729,17 @@ class ViewerPresets(QDialog):
 
         self.specificCellChoice = QLineEdit(self.topRightGroupBox)
         self.specificCellChoice.setPlaceholderText('Leave blank for page 1')
-        if self.userInfo.specific_cell is not None:
-            self.specificCellChoice.insert(str(self.userInfo.specific_cell))
         self.specificCellChoice.setFixedWidth(220)
         self.specificCellChoice.textEdited.connect(self.saveSpecificCell)
+
+        # Widgets to select annotation layer
+        self.specificCellAnnotationEdit = QLineEdit(self.topRightGroupBox)
+        self.specificCellAnnotationEdit.setPlaceholderText('Annotation layer')
+        self.specificCellAnnotationEdit.setFixedWidth(220)
+        self.specificCellAnnotationEdit.textEdited.connect(self.saveSpecificCell)
+        self.specificCellAnnotationCombo = QComboBox(self.topRightGroupBox)
+        self.specificCellAnnotationCombo.setVisible(False)
+        self.specificCellAnnotationCombo.activated.connect(self.saveSpecificCell)
 
         self.page_size_widget = QSpinBox(self.topRightGroupBox)
         self.page_size_widget.setRange(5,4000)
@@ -762,12 +772,14 @@ class ViewerPresets(QDialog):
         layout.addWidget(self.imageSize,2,1,Qt.AlignTop)
         layout.addWidget(self.resetButton,2,2,Qt.AlignTop)
         layout.addWidget(explanationLabel3,3,0,Qt.AlignTop)
-        layout.addWidget(self.specificCellChoice,3,1,Qt.AlignTop)
+        layout.addWidget(self.page_size_widget,3,1,Qt.AlignTop)
         layout.addWidget(explanationLabel4,4,0,Qt.AlignTop)
-        layout.addWidget(self.page_size_widget,4,1,Qt.AlignTop)
+        layout.addWidget(self.row_size_widget,4,1,Qt.AlignTop)
         layout.addWidget(explanationLabel5,5,0,Qt.AlignTop)
-        layout.addWidget(self.row_size_widget,5,1,Qt.AlignTop)
-        layout.addWidget(self.global_sort_widget,6,0,Qt.AlignTop)
+        layout.addWidget(self.specificCellChoice,5,1,Qt.AlignTop)
+        layout.addWidget(self.specificCellAnnotationEdit,5,2,Qt.AlignTop)
+        layout.addWidget(self.specificCellAnnotationCombo,5,2,Qt.AlignTop)
+        layout.addWidget(self.global_sort_widget,6,0,1,2)
         layout.addWidget(self.phenoDisplay,0,3,7,1)
         layout.addWidget(self.annotationDisplay,0,4,7,1)
         # layout.setColumnStretch(3,6)
@@ -835,7 +847,7 @@ class ViewerPresets(QDialog):
 
     def _validate_names(self):
         # Get headers and unique annotations
-        path = self.userInfo.objectData
+        path = self.userInfo.objectDataPath
         headers = pd.read_csv(path, index_col=False, nrows=0).columns.tolist() 
         true_annotations = list(pd.read_csv(path, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique())
         valid = True
@@ -850,17 +862,21 @@ class ViewerPresets(QDialog):
          
 
     def assign_statuses_to_sheet(self):
-        df = pd.read_csv(self.userInfo.objectData)
+        df = pd.read_csv(self.userInfo.objectDataPath)
         df = self.assign_phenotype_statuses_to_sheet(df)
         df = self.assign_annotation_statuses_to_sheet(df)
         if self._validate_names():
-            df.to_csv(self.userInfo.objectData,index=False)
-            return True
+            try:
+                df.to_csv(self.userInfo.objectDataPath,index=False)
+                self.userInfo.objectDataFrame = df
+                return 'Passed'
+            except PermissionError:
+                return 'PermissionError'
         else:
-            return False
+            return 'Bad input'
         
     def _locate_annotations_col(self):
-        headers = pd.read_csv(self.userInfo.objectData, index_col=False, nrows=0).columns.tolist() 
+        headers = pd.read_csv(self.userInfo.objectDataPath, index_col=False, nrows=0).columns.tolist() 
         if 'Analysis Region' in headers:
             self.userInfo.analysisRegionsInData = True
         else:
@@ -871,13 +887,18 @@ class ViewerPresets(QDialog):
         # self.status_label.setVisible(True)
         # self.app.processEvents()
         self.findDataButton.setEnabled(False) # disable load button after click
-        if not self.assign_statuses_to_sheet():
+        res = self.assign_statuses_to_sheet()
+        if res == 'Bad input':
             # Will execute if the phenotypes / annotations given do not match to object data
             self.status_label.setVisible(True)
             status = '<font color="#f5551a">  Failed to assign status mappings</font><br>Check your annotations and phenotypes before trying again'
             self.status_label.setText(status)
             return None
-        # exit()
+        elif res == 'PermissionError':
+             self.status_label.setVisible(True)
+             self.status_label.setText('<font color="#f5551a">Access to object data file was denied</font><br>Close the sheet before trying again')
+             return None
+
         self.saveViewSettings()
         self._locate_annotations_col() # Lets viewer app know if it needs to look out for multiple cell IDs in the sheet
         store_and_load.storeObject(self.userInfo, 'data/presets')

@@ -43,11 +43,12 @@ class userPresets:
     variables above.) '''
 
     def __init__(self, channels = copy.copy(CHANNELS_STR), qptiff = None, 
-                objectData = None, phenotype = None, imageSize = 100, specific_cell = None, 
+                phenotype = None, imageSize = 100, specific_cell = None, 
                 channelOrder = CHANNEL_ORDER, page_size = 56, global_sort = "Sort object table by Cell Id",
                 cells_per_row = 8, statuses = None, view_settings = copy.copy(VIEW_SETTINGS)):
         self.qptiff = qptiff #String - image path
-        self.objectData = objectData # String - object data path
+        self.objectDataPath = '' # String - object data path
+        self.objectDataFrame = None
         self.imageSize = imageSize # Int - size of EACH punchout around a cell
         self.channels = channels # String array - user choice for channels to read and display
         self.UI_color_display = copy.copy(CELL_COLORS) # keep track of user selected colors for fluors

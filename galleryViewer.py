@@ -24,6 +24,7 @@ import store_and_load
 import custom_maps # Necessary, do not remove
 from math import ceil
 from PIL import Image, ImageFont, ImageDraw
+from re import sub
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
@@ -42,12 +43,12 @@ for colormap in cell_colors:
 cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink', 'cyan'] # for local execution
 CHANNEL_ORDER = {}
 qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
-OBJECT_DATA = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv"
-# OBJECT_DATA = r"N:\CNY_Polaris\2021-11(Nov)\Haber Lab\Leukopak_Liver_NegDep_Slide1\Scan1\PMR_test_Results.csv"
+OBJECT_DATA_PATH = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv" # path to halo export
+OBJECT_DATA = None # Pandas Dataframe containing the original object data
 PUNCHOUT_SIZE = 90 # microns or pixels? Probably pixels
 PAGE_SIZE = 15 # How many cells will be shown in next page
 CELLS_PER_ROW = 8
-SPECIFIC_CELL = None # Will be an int if the user wants to load the page with that cell
+SPECIFIC_CELL = None # Dictionary with the format {'ID': (int),'Annotation Layer': (str) }
 PHENOTYPES = ['Tumor'] #'CTC 488pos'
 ANNOTATIONS = []
 GLOBAL_SORT = None
@@ -63,9 +64,7 @@ CHANNELS_STR = list(userInfo.channelOrder.keys()) #["DAPI", "OPAL520", "OPAL690"
 CHANNELS_STR.append("Composite") # Seems like this has to happen on a separate line
 ADJUSTED = copy.copy(CHANNELS_STR)
 VIEWER = None
-SC_DATA = None # Using this to store data to coerce the exec function into doing what I want
-TEMP = None
-ADJUSTMENT_SETTINGS={"DAPI gamma": 0.5}; 
+ADJUSTMENT_SETTINGS={"DAPI gamma": 0.5}; ORIGINAL_ADJUSTMENT_SETTINGS = {}
 SAVED_NOTES={} ; STATUS_LIST={}; SAVED_INTENSITIES={}; XY_STORE = [1,2,3]
 RAW_PYRAMID=None
 ALL_CUSTOM_WIDGETS = {}
@@ -79,6 +78,7 @@ STATUSES_RGBA = {}
 IMAGE_LAYERS = {}
 UPDATED_CHECKBOXES = []
 ANNOTATIONS_PRESENT = False # Track whether there is an 'Analysis Regions' field in the data (duplicate CIDs possible)
+ABSORPTION = False
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
 #TODO merge some of the GUI elements into the same container to prevent strange spacing issues
@@ -89,25 +89,14 @@ def validate_adjustment(chn): # grab last part of label
     else:
         return False
 
-# @magicgui(auto_call=True,
-#             datapoint={"label":"N/A"})
-# def show_intensity(datapoint: str):
-#     datapoint = str(VIEWER.Layers.Image.get_value() )
-#     show_intensity.show()
-
 ## --- Composite functions 
 def adjust_composite_gamma(layer, gamma):
-    # print(f'\nin fuxn adjustment settings are {ADJUSTMENT_SETTINGS}')
-    # print(f'My datatype is {type(ADJUSTMENT_SETTINGS["DAPI gamma"])} while my value is {ADJUSTMENT_SETTINGS["DAPI gamma"]} and the value of\
-    #       gamma is {gamma} and the image current gamma for {layer.name} is {layer.gamma}')
-    layer.gamma = 2-(2*gamma)
-    # print(f'The new gamma is now {layer.gamma}')
+    layer.gamma = 2-(2*gamma) + 0.001 # avoid gamma = 0 which causes an exception
 
 def adjust_composite_limits(layer, limits):
     layer.contrast_limits = limits
 
 def reuse_gamma():
-    # print(f'\nREUSE adjustment settings are {ADJUSTMENT_SETTINGS}')
     for fluor in ADJUSTED:
         if fluor == 'Composite':
             continue
@@ -162,6 +151,31 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         _update_dictionary(fluor,black_in)
         adjust_composite_limits(IMAGE_LAYERS[fluor], [black_in,ADJUSTMENT_SETTINGS[fluor+" white-in"]])
 
+def toggle_absorption():
+    global ABSORPTION
+    if ABSORPTION ==True:
+        ABSORPTION = False
+        for fluor,layer in IMAGE_LAYERS.items():
+            if fluor == 'Status':continue
+            elif fluor == 'Absorption':
+                layer.visible = False
+                continue
+            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor])
+            layer.blending = 'Additive'
+    else:
+        ABSORPTION = True
+        for fluor,layer in IMAGE_LAYERS.items():
+            if fluor == 'Status':continue
+            elif fluor == 'Absorption':
+                layer.visible = True
+                im = layer.data
+                im[:,:] = [255,255,255,255]
+                layer.data = im.astype(np.uint8)
+                continue
+            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse')
+            layer.blending = 'Minimum'
+    change_statuslayer_color(copy.copy(XY_STORE))
+
 def tally_checked_widgets():
     # keep track of visible channels in global list and then toggle layer visibility
     global ADJUSTED
@@ -211,12 +225,13 @@ def fix_default_composite_adj():
 #         "choices": [("Multichannel Mode", 1), ("Composite Mode", 2)]})#,layout = 'horizontal')
 def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     def _save_validation(VIEWER, Mode):
-        print(f'reading from {OBJECT_DATA}')
-        hdata = pd.read_csv(OBJECT_DATA)
-        try:
-            hdata.loc[2,f"Validation | Unseen"]
-        except KeyError:
-            for call_type in reversed(STATUS_COLORS.keys()):
+        print(f'Using stored dataframe for saving')
+        global OBJECT_DATA
+        hdata = OBJECT_DATA
+        for call_type in reversed(STATUS_COLORS.keys()):
+            try:
+                hdata.loc[2,f"Validation | {call_type}"]
+            except KeyError:
                 if call_type == 'Unseen':
                     hdata.insert(8,f"Validation | {call_type}", 1)
                 else:
@@ -262,7 +277,8 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
                 print("XY_Store saving issue.")
         try:
             VIEWER.status = 'Saving ...'
-            hdata.to_csv(OBJECT_DATA, index=False)
+            hdata.to_csv(OBJECT_DATA_PATH, index=False)
+            OBJECT_DATA = hdata
             if Mode == 1:
                 VIEWER.status = 'Channels Mode enabled. Decisions loaded successfully.'
             elif Mode ==2:
@@ -328,16 +344,17 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
 #         "max":1000,"min":5})
 def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_widget):
     def _save_validation(VIEWER,numcells):
-        print(f'reading from {OBJECT_DATA}')
-        hdata = pd.read_csv(OBJECT_DATA)
-        try:
-            hdata.loc[2,f"Validation | Unseen"]
-        except KeyError:
-            for call_type in reversed(STATUS_COLORS.keys()):
+        print(f'Using stored dataframe for saving')
+        global OBJECT_DATA
+        hdata = OBJECT_DATA
+        for call_type in reversed(STATUS_COLORS.keys()):
+            try:
+                hdata.loc[2,f"Validation | {call_type}"]
+            except KeyError:
                 if call_type == 'Unseen':
                     hdata.insert(8,f"Validation | {call_type}", 1)
                 else:
-                    hdata.insert(8,f"Validation | {call_type}", 0) 
+                    hdata.insert(8,f"Validation | {call_type}", 0)  
         try:
             hdata.loc[2,"Notes"]
         except KeyError:
@@ -364,7 +381,8 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
                 print("There's an issue... ")
         try:
             VIEWER.status = 'Saving ...'
-            hdata.to_csv(OBJECT_DATA, index=False)
+            hdata.to_csv(OBJECT_DATA_PATH, index=False)
+            OBJECT_DATA = hdata
             VIEWER.status = f'Saved to file! Next {numcells} cells loaded.'
             return True
         except:
@@ -559,6 +577,97 @@ def set_notes_label(display_note_widget, ID):
     return True
 ######------------------------- Image loading and processing functions ---------------------######
 
+def change_statuslayer_color(cells):
+    status_colors = STATUS_COLORS
+    composite_only=COMPOSITE_MODE
+    def retrieve_status(cell_id, cell, annotation):
+        try:
+            return STATUS_LIST[str(cell_id)]
+        except:
+            raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {STATUS_LIST}")
+
+    ''' Expects a numpy array of shape PUNCHOUT_SIZE x 16, with a 16x16 box taking up the left-hand side'''    
+    def write_cid_text_to_array(cb_size, im_length, upsample, color, cid):
+        if ABSORPTION: bg_color = (255,255,255,255)
+        else: bg_color = (0,0,0,255)
+        new = Image.new("RGBA", (int(upsample*im_length),int(upsample*cb_size)), bg_color)
+        font = ImageFont.truetype("arial.ttf",48)
+        editable_image = ImageDraw.Draw(new)
+
+        # switch CID order
+        i = cid.split()[-1]; anno = cid.replace(' '+i,'')
+        cid = i + " " + anno
+        editable_image.text((60,1), str(cid), color, font = font)
+        resized = np.array(new.resize((im_length,cb_size), Image.Resampling.LANCZOS))
+        np.save("lanczos", resized)
+        if ABSORPTION:
+            resized[:,:,0]
+            resized[:,:,3] = (255* (resized[:,:,:3] <240).any(axis=2)).astype(np.uint8)
+        else:
+            resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
+        return resized
+
+    def generate_status_box(status, cid, composite_only):
+        color_tuple = STATUSES_RGBA[status]
+        upsample = {True : 3.5, False: 3.5 }
+
+        corner_box_size = 16
+        edge_width = 1
+        if composite_only:
+            layer_length = (PUNCHOUT_SIZE+(edge_width*2))
+        else:
+            layer_length = (PUNCHOUT_SIZE+(edge_width*2)) * CELLS_PER_ROW
+
+        if NO_LABEL_BOX:
+            number_only = write_cid_text_to_array(PUNCHOUT_SIZE+(edge_width*2), layer_length, upsample[COMPOSITE_MODE], color_tuple, cid)
+            return number_only
+
+        top_or_bottom = [color_tuple, ] *layer_length
+        if ABSORPTION:
+            x = np.array([[color_tuple, (255,255,255,0), color_tuple]])
+        else:
+            x = np.array([[color_tuple, (0,0,0,0), color_tuple]])
+        y = np.repeat(x,[edge_width,layer_length - (2*edge_width),edge_width],axis=1)
+        mid = np.repeat(y,PUNCHOUT_SIZE+edge_width-(corner_box_size), axis=0)
+        z = np.repeat(x,[corner_box_size,(layer_length-(2*edge_width))+edge_width-(corner_box_size),edge_width],axis=1)
+        top = write_cid_text_to_array(corner_box_size, layer_length, upsample[COMPOSITE_MODE], color_tuple, cid)
+        top[0:corner_box_size,0:corner_box_size,:] = color_tuple
+        top[0,:,:] = color_tuple
+        top[:,-1,:] = color_tuple
+        tm = np.append(top,mid, axis=0)
+        return np.append(tm,[top_or_bottom],axis=0)
+
+    def black_background(color_space, mult):
+        if color_space == 'RGB':
+            return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW, 4))
+        elif color_space == 'Luminescence':
+            return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW))
+
+    # Starting to add
+    if composite_only: size_multiplier = 1
+    else: size_multiplier = len(CHANNELS)
+ 
+    page_status_layer = black_background('RGB',size_multiplier)
+    col = 0
+    row = 0
+    while bool(cells): # coords left
+        col = (col%CELLS_PER_ROW)+1
+        if col ==1: row+=1 
+        cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; 
+        cell_anno = cell[4]
+        cell_status = retrieve_status(cell_anno +' '+ str(cell_id),cell, cell_anno)
+        for pos, fluor in enumerate(CHANNEL_ORDER): # loop through channels
+            if pos in CHANNELS and fluor != 'Composite':
+                if not composite_only: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
+                    if col ==1:
+                        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), composite_only)
+                    col+=1 # so that next luminescence image is tiled 
+                    continue
+                if composite_only: # This stuff is only necessary in composite mode 
+                   page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), composite_only)
+    # if composite_only:
+    IMAGE_LAYERS['Status'].data = page_status_layer.astype(np.uint8)
+
 #TODO consider combining numpy arrays before adding layers? So that we create ONE image, and have ONE layer
 #   for the ctc cells. Gallery mode might end up being a pain for downstream.
 #   Counterpoint - how to apply filters to only some channels if they are in same image?
@@ -601,7 +710,9 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
     ''' Expects a numpy array of shape PUNCHOUT_SIZE x 16, with a 16x16 box taking up the left-hand side'''    
     def write_cid_text_to_array(cb_size, im_length, upsample, color, cid):
-        new = Image.new("RGBA", (int(upsample*im_length),int(upsample*cb_size)), (0,0,0,255))
+        if ABSORPTION: bg_color = (255,255,255,255)
+        else: bg_color = (0,0,0,255)
+        new = Image.new("RGBA", (int(upsample*im_length),int(upsample*cb_size)), bg_color)
         font = ImageFont.truetype("arial.ttf",48)
         editable_image = ImageDraw.Draw(new)
 
@@ -610,7 +721,13 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         cid = i + " " + anno
         editable_image.text((60,1), str(cid), color, font = font)
         resized = np.array(new.resize((im_length,cb_size), Image.Resampling.LANCZOS))
-        resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
+        np.save("lanczos", resized)
+        if ABSORPTION:
+            resized[:,:,0]
+            resized[:,:,3] = (255* (resized[:,:,:3] <240).any(axis=2)).astype(np.uint8)
+            # resized[fade]
+        else:
+            resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
         return resized
 
     def generate_status_box(status, cid, composite_only):
@@ -660,9 +777,8 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         elif color_space == 'Luminescence':
             return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW))
         
-    def white_background(mult):  
-        a = np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW))
-        a[a == 0] = 255
+    def white_background(mult): 
+        a = np.tile([255,255,255,255] , (ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW,1))
         return a
 
 
@@ -734,15 +850,21 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                     page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout
                     page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), composite_only)
     
-    # absorption = viewer.add_image(white_background(size_multiplier).astype('int'), name = "Absorption")
+    
+    IMAGE_LAYERS['Absorption'] = viewer.add_image(white_background(size_multiplier).astype(np.uint8), name = "Absorption", blending = 'translucent', visible = ABSORPTION)
     for fluor in list(page_image.keys()):
         print(f"Adding layers now. fluor is {fluor}")
         if fluor == 'Composite':
             continue
-        IMAGE_LAYERS[fluor] = viewer.add_image(page_image[fluor], name = fluor, 
-                                               blending = 'additive', colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]) )
+        if ABSORPTION:
+            IMAGE_LAYERS[fluor] = viewer.add_image(page_image[fluor], name = fluor, 
+                                                blending = 'minimum', colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse') )
+        else:
+             IMAGE_LAYERS[fluor] = viewer.add_image(page_image[fluor], name = fluor, 
+                                                blending = 'additive', colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]) )
     # if composite_only:
-    status_layer = viewer.add_image(page_status_layer.astype('int'), name='Status Layer')
+    IMAGE_LAYERS['Status'] = viewer.add_image(page_status_layer.astype(np.uint8), name='Status Layer')
+    status_layer = IMAGE_LAYERS['Status']
 
     ##----------------- Live functions that control mouseover behavior on images 
 
@@ -836,6 +958,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
                 :] = generate_status_box(next_status,str(cell_name), False)
         image_layer.data = imdata.astype('int')
+        # change color of viewer status
+        vstatus_list = copy.copy(VIEWER.status).split('>')
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        VIEWER.status = ">".join(vstatus_list)
 
     @status_layer.mouse_drag_callbacks.append
     def trigger_toggle_status(image_layer, event):
@@ -866,6 +992,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
                 :] = generate_status_box(next_status,str(cell_name), False)
         image_layer.data = imdata.astype('int')
+        # change color of viewer status
+        vstatus_list = copy.copy(VIEWER.status).split('>')
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        VIEWER.status = ">".join(vstatus_list)
 
     @status_layer.bind_key('v')
     def set_nr(image_layer):
@@ -886,6 +1016,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
                 :] = generate_status_box(next_status,str(cell_name), False)
         image_layer.data = imdata.astype('int')
+        # change color of viewer status
+        vstatus_list = copy.copy(VIEWER.status).split('>')
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        VIEWER.status = ">".join(vstatus_list)
 
     @status_layer.bind_key('b')
     def set_confirmed(image_layer):
@@ -906,7 +1040,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
                 :] = generate_status_box(next_status,str(cell_name), False)
         image_layer.data = imdata.astype('int')
-    
+        # change color of viewer status
+        vstatus_list = copy.copy(VIEWER.status).split('>')
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        VIEWER.status = ">".join(vstatus_list)
+
     @status_layer.bind_key('n')
     def set_rejected(image_layer):
         next_status = 'Rejected'
@@ -926,6 +1064,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
                 :] = generate_status_box(next_status,str(cell_name), False)
         image_layer.data = imdata.astype('int')
+        # change color of viewer status
+        vstatus_list = copy.copy(VIEWER.status).split('>')
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        VIEWER.status = ">".join(vstatus_list)
 
     @status_layer.bind_key('m')
     def set_interesting(image_layer):
@@ -946,14 +1088,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
                 :] = generate_status_box(next_status,str(cell_name), False)
         image_layer.data = imdata.astype('int')
+        # change color of viewer status
+        vstatus_list = copy.copy(VIEWER.status).split('>')
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        VIEWER.status = ">".join(vstatus_list)
 
     #TODO make a page label... 
-    # add polygon (just for text label)
-    # text = {'string': 'Page name goes here', 'anchor': 'center', 'size': 8,'color': 'white'}
-    # shapes_layer1 = viewer.add_shapes([[0,0], [40,0], [40,40],[0,40]], shape_type = 'polygon',
-    #                 edge_color = 'green', face_color='transparent',text=text, name='Page Name') 
-    # shapes_layer2 = viewer.add_shapes([[0,0], [40,0], [40,40],[0,40]], shape_type = 'polygon',
-    #                 edge_color = 'green', face_color='transparent',text=text, name='Page Name') 
 
     return True
 
@@ -979,17 +1119,18 @@ def add_custom_colors():
 def sv_wrapper(viewer):
     @viewer.bind_key('s')
     def save_validation(viewer):
-        print(f'reading from {OBJECT_DATA}')
+        print(f'Using stored dataframe')
         viewer.status = 'Saving ...'
-        hdata = pd.read_csv(OBJECT_DATA)
-        try:
-            hdata.loc[2,f"Validation | Unseen"]
-        except KeyError:
-            for call_type in reversed(STATUS_COLORS.keys()):
+        global OBJECT_DATA
+        hdata = OBJECT_DATA
+        for call_type in reversed(STATUS_COLORS.keys()):
+            try:
+                hdata.loc[2,f"Validation | {call_type}"]
+            except KeyError:
                 if call_type == 'Unseen':
                     hdata.insert(8,f"Validation | {call_type}", 1)
                 else:
-                    hdata.insert(8,f"Validation | {call_type}", 0) 
+                    hdata.insert(8,f"Validation | {call_type}", 0)  
         try:
             hdata.loc[2,"Notes"]
         except KeyError:
@@ -1016,7 +1157,8 @@ def sv_wrapper(viewer):
                 print("There's an issue... ")
                 print(e)
         try:
-            hdata.to_csv(OBJECT_DATA, index=False)
+            hdata.to_csv(OBJECT_DATA_PATH, index=False)
+            OBJECT_DATA = hdata
             viewer.status = 'Done saving!'
             return None
         except:
@@ -1091,6 +1233,17 @@ def tsv_wrapper(viewer):
     @viewer.bind_key('Control-Down')   
     def zoom_out(viewer):
         viewer.camera.zoom /= 1.3  
+    
+    @viewer.bind_key('a')
+    def trigger_absorption(viewer):
+        toggle_absorption()
+    
+    @viewer.bind_key('r')
+    def reset_viewsettings(viewer):
+        global ADJUSTMENT_SETTINGS
+        ADJUSTMENT_SETTINGS = copy.copy(ORIGINAL_ADJUSTMENT_SETTINGS)
+        reuse_gamma()
+        reuse_contrast_limits()
 
 def chn_key_wrapper(viewer):
     def create_fun(position,channel):
@@ -1115,6 +1268,9 @@ def set_initial_adjustment_parameters(viewsettings):
     for key in list(viewsettings.keys()):
         # print(f'\n key is {key}')
         ADJUSTMENT_SETTINGS[key] = viewsettings[key]
+    global ORIGINAL_ADJUSTMENT_SETTINGS
+    ORIGINAL_ADJUSTMENT_SETTINGS = copy.copy(ADJUSTMENT_SETTINGS) # save a snapshot in case things get messed up
+
     return True
 
 def fetch_notes(cell_row, intensity_col_names):
@@ -1148,7 +1304,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     if phenotypes is None: phenotypes=PHENOTYPES
     if annotations is None: annotations=ANNOTATIONS  # Name of phenotype of interest
     # print(f'ORDERING PARAMS: id start: {cell_id_start}, page size: {page_size}, direction: {direction}, change?: {change_startID}')
-    halo_export = pd.read_csv(OBJECT_DATA)
+    halo_export = OBJECT_DATA
     
     # Check for errors:
     for ph in phenotypes:
@@ -1171,10 +1327,6 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     except KeyError:
         halo_export.insert(8,"Notes","-")
         halo_export.fillna("")
-    try:
-        halo_export.to_csv(OBJECT_DATA, index=False)
-    except:
-        pass
 
     # Get relevant columns for intensity sorting
     # TODO make this conditional, and in a try except format
@@ -1312,8 +1464,8 @@ def replace_note(cell_widget, note_widget):
 def GUI_execute(preprocess_class):
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
     global qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
-    global CHANNELS, ADJUSTED, OBJECT_DATA, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
-    global ANNOTATIONS_PRESENT
+    global CHANNELS, ADJUSTED, OBJECT_DATA,OBJECT_DATA_PATH, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
+    global ANNOTATIONS_PRESENT, ORIGINAL_ADJUSTMENT_SETTINGS
 
     qptiff = userInfo.qptiff
     PUNCHOUT_SIZE = userInfo.imageSize
@@ -1323,7 +1475,8 @@ def GUI_execute(preprocess_class):
     STATUS_COLORS = userInfo.statuses ; STATUSES_RGBA = userInfo.statuses_rgba ; STATUSES_TO_HEX = userInfo.statuses_hex
     PAGE_SIZE = userInfo.page_size
     SPECIFIC_CELL = userInfo.specific_cell
-    OBJECT_DATA = userInfo.objectData
+    OBJECT_DATA = userInfo.objectDataFrame
+    OBJECT_DATA_PATH = userInfo.objectDataPath
     CELLS_PER_ROW = userInfo.cells_per_row
     CHANNEL_ORDER = userInfo.channelOrder
     if "Composite" not in list(CHANNEL_ORDER.keys()): CHANNEL_ORDER['Composite'] = 'None'
@@ -1486,6 +1639,10 @@ def main(preprocess_class = None):
     status_box_hide.toggled.connect(lambda: toggle_statusbox_visibility(status_box_show))
     vis_container = viewer.window.add_dock_widget([status_layer_show,status_layer_hide],name ="Show/hide overlay",area="right")
     box_container = viewer.window.add_dock_widget([status_box_show,status_box_hide],name ="Show/hide boxes",area="right")
+    absorption_widget = QPushButton("Absorption")
+    absorption_widget.pressed.connect(toggle_absorption)
+    viewer.window.add_dock_widget(absorption_widget,name ="Light/dark mode slider",area="right")
+
 
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
