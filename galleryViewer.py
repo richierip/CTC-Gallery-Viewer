@@ -602,7 +602,7 @@ def change_statuslayer_color(cells):
         np.save("lanczos", resized)
         if ABSORPTION:
             resized[:,:,0]
-            resized[:,:,3] = (255* (resized[:,:,:3] <240).any(axis=2)).astype(np.uint8)
+            resized[:,:,3] = (255* (resized[:,:,:3] <245).any(axis=2)).astype(np.uint8)
         else:
             resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
         return resized
@@ -724,7 +724,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         np.save("lanczos", resized)
         if ABSORPTION:
             resized[:,:,0]
-            resized[:,:,3] = (255* (resized[:,:,:3] <240).any(axis=2)).astype(np.uint8)
+            resized[:,:,3] = (255* (resized[:,:,:3] <245).any(axis=2)).astype(np.uint8)
             # resized[fade]
         else:
             resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
@@ -1244,6 +1244,20 @@ def tsv_wrapper(viewer):
         ADJUSTMENT_SETTINGS = copy.copy(ORIGINAL_ADJUSTMENT_SETTINGS)
         reuse_gamma()
         reuse_contrast_limits()
+    
+    @viewer.bind_key('i')
+    def toggle_interpolation(viewer):
+        current = IMAGE_LAYERS[CHANNELS_STR[0]].interpolation
+        if current == 'nearest':
+            new = 'linear'
+        else:
+            new = 'nearest' 
+        for fluor in CHANNELS_STR:
+            if fluor =='Composite': continue
+            IMAGE_LAYERS[fluor].interpolation = new
+        
+
+
 
 def chn_key_wrapper(viewer):
     def create_fun(position,channel):
