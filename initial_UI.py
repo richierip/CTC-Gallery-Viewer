@@ -25,6 +25,8 @@ import tifffile
 import xml.etree.ElementTree as ET
 from re import sub
 import webbrowser # for opening github
+import warnings
+warnings.catch_warnings
 
 VERSION_NUMBER = '1.1.0'
 FONT_SIZE = 12
@@ -487,7 +489,7 @@ class ViewerPresets(QDialog):
         for fl in possible_fluors:
             for sf in suffixes:
                 exclude.append(f'{fl} {sf}')
-        include = [x for x in headers if x not in exclude]
+        include = [x for x in headers if ((x not in exclude) and not (any(f in x for f in possible_fluors)))]
         
         self.phenotypeToGrab.setVisible(False) #
         self.phenotypeCombo.setVisible(True) 

@@ -97,15 +97,28 @@ def adjust_composite_limits(layer, limits):
     layer.contrast_limits = limits
 
 def reuse_gamma():
+    # Make everything silent
+    for fluor in CHANNELS_STR:
+        if fluor == 'Composite':
+            continue
+        if "Composite" in ADJUSTED: IMAGE_LAYERS[fluor].visible = True
+        else: IMAGE_LAYERS[fluor].visible = False
     for fluor in ADJUSTED:
         if fluor == 'Composite':
             continue
+        IMAGE_LAYERS[fluor].visible = True
         adjust_composite_gamma(IMAGE_LAYERS[fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
 
 def reuse_contrast_limits():
+    for fluor in CHANNELS_STR:
+        if fluor == 'Composite':
+            continue
+        if "Composite" in ADJUSTED: IMAGE_LAYERS[fluor].visible = True
+        else: IMAGE_LAYERS[fluor].visible = False
     for fluor in ADJUSTED:
         if fluor == 'Composite':
             continue
+        IMAGE_LAYERS[fluor].visible = True
         adjust_composite_limits(IMAGE_LAYERS[fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
 
 ## --- Bottom bar functions and GUI elements 
@@ -326,8 +339,8 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     else:
         raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {Mode}. Must be 1 or 2.")
         # Perform adjustments before exiting function
-    reuse_contrast_limits()
-    reuse_gamma() # might not need to do both of these... One is enough?
+    reuse_contrast_limits() # Only checked fluors will be visible
+    reuse_gamma() 
     for widg in ALL_CUSTOM_WIDGETS.values(): # restore widgets
         widg.setVisible(True)
 
@@ -437,8 +450,8 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
     if single_cell_combo: single_cell_combo.setCurrentIndex(0) # reset the widgets
     # Perform adjustments before exiting function
     #TODO
-    reuse_contrast_limits()
-    reuse_gamma() # might not need to do both of these... One is enough?
+    reuse_contrast_limits()# Only checked fluors will be visible
+    reuse_gamma() 
     set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
     for widg in ALL_CUSTOM_WIDGETS.values():
         widg.setVisible(True)
@@ -527,6 +540,7 @@ def set_notes_label(display_note_widget, ID):
 
     # Add intensities
     intensity_series = SAVED_INTENSITIES[ID]
+    names = list(intensity_series.index)
     intensity_str = ''
     for pos in CHANNELS:
         fluor = list(CHANNEL_ORDER.keys())[pos]
@@ -538,24 +552,30 @@ def set_notes_label(display_note_widget, ID):
         def add_values(intensity_str, fluor, intensity_lookup):
             flag = True
             try:
-                # cyto = fluor.replace("OPAL","Opal ")
-                cyto = round(float(intensity_series[f'{intensity_lookup.replace("OPAL","Opal ")} Cytoplasm Intensity']),1)
-                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cyto: {cyto}</font>'
+                cyto = intensity_lookup.replace("OPAL","Opal ")
+                cyto = [x for x in names if (cyto in x and 'Cytoplasm Intensity' in x)][0]
+                val = round(float(intensity_series[cyto]),1)
+                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cyto: {val}</font>'
                 flag = False
+                name = cyto.replace(' Cytoplasm Intensity','')
+            except (KeyError, IndexError): pass
+            try:
+                nuc = intensity_lookup.replace("OPAL","Opal ")
+                nuc = [x for x in names if (nuc in x and 'Nucleus Intensity' in x)][0]
+                val = round(float(intensity_series[nuc]),1)
+                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> nuc: {val}</font>'
+                flag = False
+                name = nuc.replace(' Nucleus Intensity','')
             except KeyError: pass
             try:
-                # nuc = fluor.replace("OPAL","Opal ")
-                nuc = round(float(intensity_series[f'{intensity_lookup.replace("OPAL","Opal ")} Nucleus Intensity']),1)
-                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> nuc: {nuc}</font>'
+                cell = intensity_lookup.replace("OPAL","Opal ")
+                cell = [x for x in names if (cell in x and 'Cell Intensity' in x)][0]
+                val = round(float(intensity_series[cell]),1)
+                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cell: {val}</font>'
                 flag = False
+                name = cell.replace(' Cell Intensity','')
             except KeyError: pass
-            try:
-                # cell = fluor.replace("OPAL","Opal ")
-                cell = round(float(intensity_series[f'{intensity_lookup.replace("OPAL","Opal ")} Cell Intensity']),1)
-                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cell: {cell}</font>'
-                flag = False
-            except KeyError: pass
-            return intensity_str, flag
+            return intensity_str.replace(intensity_lookup.replace("OPAL","Opal "),name), flag
         intensity_str, error = add_values(intensity_str, fluor,fluor)
         possible_af_strings = ['AF', 'Autofluorescence', 'Sample AF']
         if error and fluor in possible_af_strings:
@@ -1340,12 +1360,13 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
 
     # Get relevant columns for intensity sorting
     # TODO make this conditional, and in a try except format
+    headers = pd.read_csv(OBJECT_DATA_PATH, index_col=False, nrows=0).columns.tolist() 
     possible_fluors = ['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence']
     suffixes = ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity']
-    all_possible_intensities =[]
-    for fl in possible_fluors:
-            for sf in suffixes:
-                all_possible_intensities.append(f'{fl} {sf}')
+    all_possible_intensities = [x for x in headers if (any(s in x for s in suffixes) and (any(f in x for f in possible_fluors)))]
+    # for fl in possible_fluors:
+    #         for sf in suffixes:
+    #             all_possible_intensities.append(f'{fl} {sf}')
     v = list(STATUS_COLORS.keys())
     validation_cols = [f"Validation | " + s for s in v]
     cols_to_keep = ["Object Id","Analysis Region", "Notes", "XMin","XMax","YMin", "YMax"] + phenotypes + all_possible_intensities + validation_cols
@@ -1526,12 +1547,6 @@ def GUI_execute(preprocess_class):
     else:
         GLOBAL_SORT = f"Sample AF Cell Intensity"
 
-
-    # fix_default_composite_adj()
-
-    # for checkbox_name in CHANNELS_STR:   
-    #     print(f'checkbox name is {checkbox_name} and type is {type(checkbox_name)}')
-    #     exec(f"globals()[\'{checkbox_name+'_box'}\'].show()") # If doing this is wrong I don't want to be right
     main(preprocess_class)
 
 def main(preprocess_class = None):
@@ -1724,8 +1739,8 @@ def main(preprocess_class = None):
     add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
     #TODO
     # Perform adjustments before exiting function
-    reuse_contrast_limits()
-    reuse_gamma() # might not need to do both of these... One is enough?
+    reuse_contrast_limits() # Only checked fluors will be visible
+    reuse_gamma()
 
     # Filter checkboxes down to relevant ones only and update color
     for i in range(len(all_boxes)):
