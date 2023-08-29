@@ -46,27 +46,27 @@ class userPresets:
                 phenotype = None, imageSize = 100, specific_cell = None, 
                 channelOrder = CHANNEL_ORDER, page_size = 56, global_sort = "Sort object table by Cell Id",
                 cells_per_row = 8, statuses = None, view_settings = copy.copy(VIEW_SETTINGS)):
-        self.qptiff = qptiff #String - image path
+        self.qptiff = qptiff # String - image path
         self.objectDataPath = '' # String - object data path
-        self.objectDataFrame = None
+        self.objectDataFrame = None # Pandas DataFrame created using read_csv. Storing this saves time when wanting the df later
         self.imageSize = imageSize # Int - size of EACH punchout around a cell
         self.channels = channels # String array - user choice for channels to read and display
         self.UI_color_display = copy.copy(CELL_COLORS) # keep track of user selected colors for fluors
-        self.specific_cell = specific_cell # Int if USER wants to load the page containing this cell, None otherwise
+        self.specific_cell = specific_cell # Dictionary of the format {'ID': (int),'Annotation Layer': (str)}, or None 
         self.channelOrder = channelOrder #String array - Order of multichannel data found in the image
         self.page_size = page_size # Integer - How many cells should be displayed per page
         self.global_sort = global_sort # String - Header to use to sort the object data. Default is cell ID (sheet is usually pre-sorted like this)
-        self.cells_per_row = cells_per_row
-        self.statuses = copy.copy(STATUSES)
-        self.statuses_rgba = copy.copy(STATUSES_RGBA)
-        self.statuses_hex = copy.copy(STATUSES_HEX)
-        self.view_settings = view_settings
-        self.view_settings_path = ''
-        self.phenotype_mappings = {}
-        self.phenotype_mappings_label = '<u>Phenotype</u><br>All'
-        self.annotation_mappings = {}
-        self.annotation_mappings_label = '<u>Annotation Layer</u><br>All'
-        self.analysisRegionsInData = False
+        self.cells_per_row = cells_per_row # Int - how many cells should be placed in a row before wrapping to the next (multichannel mode only)
+        self.statuses = copy.copy(STATUSES) # Dict of statuses and string names of color mappings, e.g. {'status A':'red'}
+        self.statuses_rgba = copy.copy(STATUSES_RGBA) # Dict of statuses and RGBA tuples color mappings, e.g. {'status A':(255,0,0,255)}
+        self.statuses_hex = copy.copy(STATUSES_HEX) # Dict of statuses and HEX codes of color mappings, e.g. {'status A':'#ff0000'}
+        self.view_settings = view_settings # Dict of view settings. Can change after reading from file. ex: {fluor A gamma: 0.5}
+        self.view_settings_path = '' # Path to .viewsettings file. The file is a type of HALO export and will use XML formatting
+        self.phenotype_mappings = {} # Dict of user selected phenotypes and their status mappings. Cells in the data of these phenotypes will be kept for viewing and assigned the given status 
+        self.phenotype_mappings_label = '<u>Phenotype</u><br>All' # String representation of the above info for displaying in a QLabel
+        self.annotation_mappings = {} # Dict of user selected annotations and their status mappings. Cells in the data of these annotations will be kept for viewing and assigned the given status 
+        self.annotation_mappings_label = '<u>Annotation Layer</u><br>All'# String representation of the above info for displaying in a QLabel
+        self.analysisRegionsInData = False # Bool that tracks whether the object data has an 'Analysis Region' field with multiple annotations. Useful later
 
 
     '''

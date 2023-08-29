@@ -225,6 +225,7 @@ def fix_default_composite_adj():
 #         "choices": [("Multichannel Mode", 1), ("Composite Mode", 2)]})#,layout = 'horizontal')
 def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     def _save_validation(VIEWER, Mode):
+        VIEWER.status = 'Saving ...'
         print(f'Using stored dataframe for saving')
         global OBJECT_DATA
         hdata = OBJECT_DATA
@@ -262,21 +263,17 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
                 print("There's an issue... ")
             # Now do it for the saved cache
             try:
-                for i,row in enumerate(XY_STORE):
-                    if ANNOTATIONS_PRESENT:
-                        if str(row['Object Id']) == cell_id and row["Analysis Region"] == cell_anno: 
-                            XY_STORE[i][3] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
-                            STATUS_LIST[cell_name] = status
-                    else:
-                        if str(row['Object Id']) == cell_id: 
-                            XY_STORE[i][3] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
-                            STATUS_LIST[cell_name] = status
-                            
+                if ANNOTATIONS_PRESENT:
+                    XY_STORE[cell_name][4] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
+                    STATUS_LIST[cell_name] = status
+                else: 
+                    XY_STORE[cell_name][4] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
+                    STATUS_LIST[cell_name] = status             
 
-            except:
+            except Exception as e:
                 print("XY_Store saving issue.")
+                print(e)
         try:
-            VIEWER.status = 'Saving ...'
             hdata.to_csv(OBJECT_DATA_PATH, index=False)
             OBJECT_DATA = hdata
             if Mode == 1:
@@ -342,7 +339,7 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
 #         "choices": [("Next", 'fwd'), ("Previous", 'bkwd')]},
 #         Amount={"widget_type": "SpinBox", "value":15,
 #         "max":1000,"min":5})
-def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_widget):
+def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo, intensity_sort_widget):
     def _save_validation(VIEWER,numcells):
         print(f'Using stored dataframe for saving')
         global OBJECT_DATA
@@ -394,9 +391,21 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
         VIEWER.status = 'Done saving!'
     # Take note of new starting point
     global PAGE_SIZE
-    page_number = int(page_cb_widget.currentText().split()[-1]) - 1
+    page_number = int(page_cb_widget.currentText().split()[-1])
     cell_choice = single_cell_lineEdit.text()
-    if cell_choice == '': cell_choice = None
+
+    # Ignore annotation if not in data
+    if single_cell_combo:
+        cell_annotation = single_cell_combo.currentText()
+    else:
+        cell_annotation = ''
+
+    # Assemble dict from cell choice if needed
+    if cell_choice == '': 
+        cell_choice = None
+    else:
+        cell_choice = {"ID": cell_choice, "Annotation Layer": cell_annotation}
+
     print(f"CURRENT WIDG POSITION IS {intensity_sort_widget.currentIndex()} and type is {type(intensity_sort_widget.currentIndex())}")
     if intensity_sort_widget.currentIndex() == 0:
         sort_option = None
@@ -417,23 +426,15 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit, intensity_sort_wi
 
 
     # Load into same mode as the current
-    if COMPOSITE_MODE:
-        xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
-        if xydata is False:
-            VIEWER.status="Can't load cells: out of bounds error."
-        else:
-            VIEWER.layers.clear()
-            add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_only=True)
-            
+    xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
+    if xydata is False:
+        VIEWER.status="Can't load cells: out of bounds error."
     else:
-        xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
-        if xydata is False:
-            VIEWER.status="Can't load cells: out of bounds error."
-        else:
-            VIEWER.layers.clear()
-            add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_only=False)
+        VIEWER.layers.clear()
+        add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2), composite_only=COMPOSITE_MODE)
     
-    single_cell_lineEdit.clear() # reset the widget
+    single_cell_lineEdit.clear() # reset the widgets
+    if single_cell_combo: single_cell_combo.setCurrentIndex(0) # reset the widgets
     # Perform adjustments before exiting function
     #TODO
     reuse_contrast_limits()
@@ -580,7 +581,7 @@ def set_notes_label(display_note_widget, ID):
 def change_statuslayer_color(cells):
     status_colors = STATUS_COLORS
     composite_only=COMPOSITE_MODE
-    def retrieve_status(cell_id, cell, annotation):
+    def retrieve_status(cell_id):
         try:
             return STATUS_LIST[str(cell_id)]
         except:
@@ -602,9 +603,9 @@ def change_statuslayer_color(cells):
         np.save("lanczos", resized)
         if ABSORPTION:
             resized[:,:,0]
-            resized[:,:,3] = (255* (resized[:,:,:3] <245).any(axis=2)).astype(np.uint8)
+            resized[:,:,3] = (255* (resized[:,:,:3] <200).any(axis=2)).astype(np.uint8)
         else:
-            resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
+            resized[:,:,3] = (255* (resized[:,:,:3] >50).any(axis=2)).astype(np.uint8)
         return resized
 
     def generate_status_box(status, cid, composite_only):
@@ -650,12 +651,13 @@ def change_statuslayer_color(cells):
     page_status_layer = black_background('RGB',size_multiplier)
     col = 0
     row = 0
+    cells = list(cells.values())
     while bool(cells): # coords left
         col = (col%CELLS_PER_ROW)+1
         if col ==1: row+=1 
-        cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; 
-        cell_anno = cell[4]
-        cell_status = retrieve_status(cell_anno +' '+ str(cell_id),cell, cell_anno)
+        cell = cells.pop(); 
+        cell_anno = cell[0]; cell_id = cell[1]
+        cell_status = retrieve_status(cell_anno +' '+ str(cell_id))
         for pos, fluor in enumerate(CHANNEL_ORDER): # loop through channels
             if pos in CHANNELS and fluor != 'Composite':
                 if not composite_only: # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
@@ -677,24 +679,17 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     print(f"pyramid shape is {pyramid.shape}")
     # Make the color bar that appears to the left of the composite image
     status_colors = STATUS_COLORS
-    global CELLS_PER_ROW
+    global CELLS_PER_ROW, GRID_TO_ID
     if not composite_only:
         CELLS_PER_ROW = len(CHANNELS_STR) #+1
         # print(f"$$$$$$$ ROW SIZE VS CHANSTR: {CELLS_PER_ROW} vs {len(CHANNELS_STR)}")
     else: # composite_only = True
         CELLS_PER_ROW = userInfo.cells_per_row
 
-    def retrieve_status(cell_id, cell, annotation):
+    def retrieve_status(cell_id, status):
         ''' Kind of an anachronistic function at this point.'''
         # print(f'Getting status for {cell_id}')
         if new_page:
-            try:
-                status = cell[3]
-                # print(f'Got it. Status is .{status}.')
-            except:
-                # Column doesn't exist, use default
-                status = "Unseen"
-                # print(f'exception. Could not grab status')
             if type(status) is not str or status not in status_colors.keys():
                 status = "Unseen"
             # Save to dict to make next retrieval faster
@@ -724,10 +719,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         np.save("lanczos", resized)
         if ABSORPTION:
             resized[:,:,0]
-            resized[:,:,3] = (255* (resized[:,:,:3] <245).any(axis=2)).astype(np.uint8)
+            resized[:,:,3] = (255* (resized[:,:,:3] <200).any(axis=2)).astype(np.uint8)
             # resized[fade]
         else:
-            resized[:,:,3] = (255* (resized[:,:,:3] >15).any(axis=2)).astype(np.uint8)
+            resized[:,:,3] = (255* (resized[:,:,:3] >50).any(axis=2)).astype(np.uint8)
         return resized
 
     def generate_status_box(status, cid, composite_only):
@@ -798,13 +793,14 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     col = 0
     row = 0
     GRID_TO_ID = {} # Reset this since we could be changing to multichannel mode
+    cells = list(cells.values())
     while bool(cells): # coords left
         col = (col%CELLS_PER_ROW)+1
         if col ==1: row+=1 
         # print(f'Next round of while. Still {len(cells)} cells left. Row {row}, Col {col}')
-        cell = cells.pop(); cell_x = cell[0]; cell_y = cell[1]; cell_id = cell[2]; 
-        cell_anno = cell[4]
-        cell_status = retrieve_status(cell_anno +' '+ str(cell_id),cell, cell_anno)
+        cell = cells.pop(); 
+        cell_anno = cell[0]; cell_id = cell[1]; cell_x = cell[2]; cell_y = cell[3]
+        cell_status = retrieve_status(cell_anno +' '+ str(cell_id),cell[4])
         # add the rest of the layers to the viewer
         if RASTERS is not None:
             # Raster channels for qptiffs are saved as subdatasets of the opened raster object
@@ -863,7 +859,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
              IMAGE_LAYERS[fluor] = viewer.add_image(page_image[fluor], name = fluor, 
                                                 blending = 'additive', colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]) )
     # if composite_only:
-    IMAGE_LAYERS['Status'] = viewer.add_image(page_status_layer.astype(np.uint8), name='Status Layer')
+    IMAGE_LAYERS['Status'] = viewer.add_image(page_status_layer.astype(np.uint8), name='Status Layer', interpolation='linear')
     status_layer = IMAGE_LAYERS['Status']
 
     ##----------------- Live functions that control mouseover behavior on images 
@@ -1301,7 +1297,7 @@ def fetch_notes(cell_row, intensity_col_names):
     # print(f'dumping dict {SAVED_NOTES}')
 
 '''Get object data from csv and parse.''' 
-def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None, page_number = 0, 
+def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None, page_number = 1, 
                             specific_cell = None, sort_by_intensity = None, combobox_widget = None):
     
     # 'OPAL520' # None means 'don't do it', while a channel name means 'put highest at the top'
@@ -1367,10 +1363,10 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
             global_sort_status = False
             VIEWER.status = 'Global sort failed. Will sort by Cell Id instead.'
             if annotations:
-                halo_export = halo_export.sort_values(by = ["Analysis Region","Object Id"], ascending = False, kind = 'mergesort')
+                halo_export = halo_export.sort_values(by = ["Analysis Region","Object Id"], ascending = True, kind = 'mergesort')
     else:
         if annotations:
-            halo_export = halo_export.sort_values(by = ["Analysis Region","Object Id"], ascending = False, kind = 'mergesort')
+            halo_export = halo_export.sort_values(by = ["Analysis Region","Object Id"], ascending = True, kind = 'mergesort')
     
     # Helper to construct query string that will subset dataframe down to cells that 
     #   are positive for a phenotype in the list, or a member of an annotation layer in the list
@@ -1389,8 +1385,8 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     if annotations or phenotypes:
         phen_only_df = halo_export.query(_create_anno_pheno_query(annotations,phenotypes)).reset_index()
     else:
-        phen_only_df = halo_export
-    last_page = len(phen_only_df.index) // page_size
+        phen_only_df = halo_export.reset_index()
+    last_page = (len(phen_only_df.index) // page_size)+1
     print(f"last page is {last_page}")
     global ALL_CUSTOM_WIDGETS
     combobox_widget =  ALL_CUSTOM_WIDGETS['page combobox']
@@ -1405,38 +1401,52 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     print(f"testing if specific cell {specific_cell} and type {type(specific_cell)}")
     if specific_cell is not None:
         try:
-            singlecell_df = phen_only_df[phen_only_df['Object Id']==int(specific_cell)]
+            specific_cid = specific_cell['ID']
+            specific_layer = specific_cell['Annotation Layer']
+            
+            if ANNOTATIONS_PRESENT and specific_layer:
+                singlecell_df = phen_only_df[(phen_only_df['Object Id']==int(specific_cid)) & (phen_only_df['Analysis Region']==str(specific_layer))]
+            else:
+                singlecell_df = phen_only_df[phen_only_df['Object Id']==int(specific_cid)]
             sc_index = singlecell_df.index[0]
-            page_number = (sc_index//page_size)+1
+            page_number = (sc_index//page_size) + 1
             #TODO set the combobox widget to the current page number
         except (KeyError,IndexError, ValueError):
-            print(f'The cell ID {specific_cell} is not in my list of cells. Loading default page instead')
-            VIEWER.status = f'The cell ID {specific_cell} is not in my list of cells. Loaded default page instead'
+            print(f'The cell ID {specific_layer} {specific_cid} is not in my list of cells. Loading default page instead')
+            VIEWER.status = f'The cell ID {specific_layer} {specific_cid} is not in my list of cells. Loaded default page instead'
 
     # set widget to current page number 
-    combobox_widget.setCurrentIndex(page_number)
+    combobox_widget.setCurrentIndex(page_number-1)
     SAVED_NOTES['page'] = combobox_widget.currentText()
     # Get the appropriate set
     if page_number != last_page:
-        cell_set = phen_only_df[page_number*page_size: (page_number+1)*page_size]
+        cell_set = phen_only_df[(page_number-1)*page_size: page_number*page_size]
     else:
-        cell_set = phen_only_df[(page_number)*page_size:]
+        cell_set = phen_only_df[(page_number-1)*page_size:]
     
     print(f"#$%#$% local sort is {sort_by_intensity}")
 
     # Reorder cells in the page according to user input
-    if sort_by_intensity is not None:
-        if sort_by_intensity == "Object Id": lsort = False
-        else: lsort = True
+    if sort_by_intensity is not None: # should never be none
         try:    
-            cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = lsort, kind = 'mergesort')
+            if sort_by_intensity == "Object Id":
+                if ANNOTATIONS_PRESENT:
+                    cell_set = cell_set.sort_values(by = ["Analysis Region", sort_by_intensity], ascending = False, kind = 'mergesort')
+                else:
+                    cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = False, kind = 'mergesort')
+
+            else:
+                cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = True, kind = 'mergesort')
         except:
             if global_sort_status:
                 VIEWER.status = f"Unable to sort this page by '{sort_by_intensity}', will use ID instead. Check your data headers."
             else:
                 VIEWER.status = f"Unable to sort everything by '{sort_by_intensity}', will use ID instead. Check your data headers."
-            cell_set = cell_set.sort_values(by = 'Object Id', ascending = False, kind = 'mergesort')
-    tumor_cell_XYs = []
+            if ANNOTATIONS_PRESENT:
+                cell_set = cell_set.sort_values(by = ["Analysis Region",'Object Id'], ascending = False, kind = 'mergesort')
+            else:
+                cell_set = cell_set.sort_values(by = 'Object Id', ascending = False, kind = 'mergesort')
+    tumor_cell_XYs = {}
     try:
         for index,row in cell_set.iterrows():
             fetch_notes(row, all_possible_intensities)
@@ -1444,10 +1454,12 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
             center_y = int((row['YMax']+row['YMin'])/2)
             vals = row[validation_cols]
             validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation | ", "")
+            cid = row["Object Id"]
             if ANNOTATIONS_PRESENT:
-                tumor_cell_XYs.append([center_x, center_y, row["Object Id"], validation_call, row["Analysis Region"]])
+                layer = row["Analysis Region"]
+                tumor_cell_XYs[f'{layer} {cid}'] = [layer, cid, center_x, center_y, validation_call]
             else:
-                tumor_cell_XYs.append([center_x, center_y, row["Object Id"], validation_call, "All"])
+                tumor_cell_XYs[f'All {cid}'] = ['All', cid, center_x, center_y, validation_call]
     except Exception as e:
         print(e)
         exit()
@@ -1613,6 +1625,7 @@ def main(preprocess_class = None):
     page_combobox = QComboBox()
     page_cell_entry = QLineEdit(); 
     page_cell_entry.setPlaceholderText("Cell Id (optional)"); page_cell_entry.setFixedWidth(200)
+
     intensity_sort_box = QComboBox()
     intensity_sort_box.addItem("Sort page by Cell Id")
     for i, chn in enumerate(CHANNELS_STR[:-1]):
@@ -1628,9 +1641,17 @@ def main(preprocess_class = None):
         intensity_sort_box.setCurrentText(f"Sort page by Sample {local_sort} Intensity")
 
     next_page_button = QPushButton("Change Page")
-    next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry, intensity_sort_box))
+
     notes_container = viewer.window.add_dock_widget([notes_label,note_text_entry, note_cell_entry, note_button], name = 'Annotation', area = 'right')
-    page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, intensity_sort_box, next_page_button], name = 'Page selection', area = 'right')
+    # Don't include annotation combobox unless it is necessary
+    if ANNOTATIONS_PRESENT:
+        page_cell_combo = QComboBox(); page_cell_combo.addItems(ANNOTATIONS_PRESENT); page_cell_combo.setFixedWidth(200)
+        next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry,page_cell_combo, intensity_sort_box))
+        page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, page_cell_combo, intensity_sort_box, next_page_button], name = 'Page selection', area = 'right')
+    else:
+        next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry, None, intensity_sort_box))
+        page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, intensity_sort_box, next_page_button], name = 'Page selection', area = 'right')
+
 
     all_channels_rb = QRadioButton("Multichannel Mode")
     composite_only_rb = QRadioButton("Composite Mode"); composite_only_rb.setChecked(True) # Start in composite mode

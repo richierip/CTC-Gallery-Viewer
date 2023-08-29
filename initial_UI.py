@@ -2,8 +2,8 @@
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon, QPixmap,QColor,QFont
-from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QGridLayout, 
-                             QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox)
+from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,QMainWindow, QGridLayout, 
+                             QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QMenuBar, QAction)
 
 import sys
 import os
@@ -24,6 +24,7 @@ from random import choice
 import tifffile
 import xml.etree.ElementTree as ET
 from re import sub
+import webbrowser # for opening github
 
 VERSION_NUMBER = '1.1.0'
 FONT_SIZE = 12
@@ -75,10 +76,7 @@ class ViewerPresets(QDialog):
         # For TESTING
         print(f'Initial test print for colors: {self.userInfo.UI_color_display}')
 
-        self.combobox_index = 0 # for combobox color changing
         self.myColors = []
-        # print(f'SP\pinning up ... preset colors are {self.userInfo.cell_colors}')
-        self.originalPalette = QApplication.palette()
         self.setWindowIcon(QIcon('data/mghiconwhite.png'))
 
         # Set title area / logo
@@ -174,6 +172,19 @@ class ViewerPresets(QDialog):
         self.previewObjectDataButton.pressed.connect(self.prefillObjectData)
         self.previewImageDataButton.pressed.connect(self.prefillImageData)
 
+        # Menu bar
+        self.menubar = QMenuBar()
+        pref = self.menubar.addMenu('Preferences')
+        manual = QAction("Open the manual", self)
+        manual.setShortcut("Ctrl+M")
+        reset = QAction("Reset GUI to defaults", self)
+        reset.setShortcut("Ctrl+R")
+        github = QAction("View source code",self)
+        errors = QAction("Check error logs",self)
+        errors.setShortcut("Ctrl+E")
+        pref.addActions((manual,reset, errors, github))
+        pref.triggered[QAction].connect(self.process_menu_action)
+
         topLayout = QGridLayout()
         # topLayout.addStretch(1)
         topLayout.addWidget(cc_logo,0,0)
@@ -190,6 +201,7 @@ class ViewerPresets(QDialog):
         # topLayout.addWidget(self.findDataButton,2,1)
 
         self.mainLayout = QGridLayout()
+        self.mainLayout.setMenuBar(self.menubar)
         self.mainLayout.addLayout(topLayout, 0, 0, 1, 2)
         self.mainLayout.addWidget(self.topLeftGroupBox, 1, 0)
         self.mainLayout.addWidget(self.topRightGroupBox, 1, 1)
@@ -205,6 +217,32 @@ class ViewerPresets(QDialog):
         self.setLayout(self.mainLayout)
 
         self.setWindowTitle(f"GalleryViewer v{VERSION_NUMBER}")
+
+    def process_menu_action(self,q):
+        if 'manual' in q.text().lower():
+            try:
+                os.startfile(r"N:\Imagers\ImageProcessing\GalleryViewer\GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER))
+            except FileNotFoundError:
+                self.status_label.setVisible(True)
+                status ='<font color="#ffa000">Can\'t find a guide for this version!</font><br>Check for old versions in the server\'s Imagers/ImageProcessing/GalleryViewer/ folder.'
+                self.status_label.setText(status)
+        elif 'reset' in q.text().lower():
+            os.remove(os.path.normpath(r'./data/presets'))
+            self.status_label.setVisible(True)
+            status ='<br><font color="#ffa000">Cleared all saved metadata!</font> Close this window to allow the changes to take effect'
+            self.status_label.setText(status)
+        elif 'source code' in q.text().lower():
+            webbrowser.open("https://github.com/richierip/CTC-Gallery-Viewer", new = 2)
+        elif "error logs" in q.text().lower():
+            os.startfile(os.path.normpath(r"./runtime logs"))
+            errors = 0
+            for root, cur, files in os.walk(os.path.normpath(r"./runtime logs")):
+                errors += len(files)
+            self.status_label.setVisible(True)
+            status =f'Found {errors} error logs! If you are having trouble, try resetting the viewer\'s saved preferences (ctrl+R) and restarting the program.<br> '
+            status += 'Previewing image and object csv metadata can fix issues too.<br> If problems persist, share these logs with Peter at prichieri@mgh.harvard.edu.'
+            self.status_label.setText(status)
+
 
     def saveQptiff(self):
         self.userInfo.qptiff = os.path.normpath(self.qptiffEntry.text().strip('"')).strip('.')
@@ -306,7 +344,7 @@ class ViewerPresets(QDialog):
         if self.annotationCombo.isVisible():
             anno = self.annotationCombo.currentText()
             if anno == '': return None
-            self.annotationCombo.removeItem(0)
+            self.annotationCombo.removeItem(self.annotationCombo.findText(anno))
         else:
             anno = self.annotationEdit.text()
             if anno == '': return None
@@ -334,7 +372,7 @@ class ViewerPresets(QDialog):
         if self.phenotypeCombo.isVisible():
             pheno = self.phenotypeCombo.currentText()
             if pheno == '': return None
-            self.phenotypeCombo.removeItem(0)
+            self.phenotypeCombo.removeItem(self.phenotypeCombo.findText(pheno))
         else:
             pheno = self.phenotypeToGrab.text()
             if pheno == '': return None
@@ -356,7 +394,7 @@ class ViewerPresets(QDialog):
         self.annotationDisplay.setText('<u>Annotation Layer</u><br>All')
 
         # Refresh comboboxes
-        if self.phenotypeCombo.isVisible() and self.annotationCombo.isVisible():
+        if self.phenotypeCombo.isVisible() or self.annotationCombo.isVisible():
             self.phenotypeCombo.clear()
             self.annotationCombo.clear()
             self.prefillObjectData()
@@ -428,8 +466,8 @@ class ViewerPresets(QDialog):
             self._log_problem(logpath,e)
             # Inform user of possible issue
             self.status_label.setVisible(True)
-            status = '<font color="#ffa000">Warning: Failed to properly ingest the files\' metadata.\
-              The viewer expects a QPTIFF from an Akoya Polaris,<br> and an object data <i>.csv</i> generated by a Halo analysis app</font>'
+            status = '<font color="#ffa000">Warning: Failed to properly ingest the file\'s metadata.\
+              The viewer expects a QPTIFF from an Akoya Polaris,<br> and an object data <i>.csv</i> generated by a Halo analysis app. It might have problems with this data.</font>'
             self.status_label.setText(status)
             self.previewObjectDataButton.setEnabled(False)
             self.previewObjectDataButton.setStyleSheet(f"color: #ffa000")
@@ -444,7 +482,7 @@ class ViewerPresets(QDialog):
                     'Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity', '% Nucleus Completeness', '% Cytoplasm Completeness',
                     '% Cell Completeness', '% Completeness']
         exclude = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
-                  'Image Location', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
+                  'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
 
         for fl in possible_fluors:
             for sf in suffixes:
@@ -462,6 +500,11 @@ class ViewerPresets(QDialog):
             self.annotationCombo.addItems(regions)
             self.specificCellAnnotationCombo.setVisible(True); self.specificCellAnnotationEdit.setVisible(False)
             self.specificCellAnnotationCombo.addItems(regions)
+            if self.userInfo.specific_cell is not None:
+                try:
+                    self.specificCellAnnotationCombo.setCurrentText(self.userInfo.specific_cell['Annotation Layer'])
+                except:
+                    pass # If the user misspelled and annotation then just do nothing, it's fine
         except Exception as e:
             return 'no annotations'
         # Check if image location in CSV matches with image given to viewer
@@ -729,14 +772,19 @@ class ViewerPresets(QDialog):
 
         self.specificCellChoice = QLineEdit(self.topRightGroupBox)
         self.specificCellChoice.setPlaceholderText('Leave blank for page 1')
+        if self.userInfo.specific_cell is not None:
+            self.specificCellChoice.insert(self.userInfo.specific_cell['ID'])
         self.specificCellChoice.setFixedWidth(220)
         self.specificCellChoice.textEdited.connect(self.saveSpecificCell)
 
         # Widgets to select annotation layer
         self.specificCellAnnotationEdit = QLineEdit(self.topRightGroupBox)
         self.specificCellAnnotationEdit.setPlaceholderText('Annotation layer')
+        if self.userInfo.specific_cell is not None:
+            self.specificCellAnnotationEdit.insert(self.userInfo.specific_cell['Annotation Layer'])
         self.specificCellAnnotationEdit.setFixedWidth(220)
         self.specificCellAnnotationEdit.textEdited.connect(self.saveSpecificCell)
+
         self.specificCellAnnotationCombo = QComboBox(self.topRightGroupBox)
         self.specificCellAnnotationCombo.setVisible(False)
         self.specificCellAnnotationCombo.activated.connect(self.saveSpecificCell)
@@ -760,6 +808,7 @@ class ViewerPresets(QDialog):
             self.global_sort_widget.addItem(f"Sort object table by {chn} Intensity")
         self.global_sort_widget.setCurrentText(self.userInfo.global_sort)
         self.global_sort_widget.currentTextChanged.connect(self.saveGlobalSort)
+
 
         layout = QGridLayout()
         layout.addWidget(self.phenotypeButton,0,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel0,0,0)
@@ -794,18 +843,23 @@ class ViewerPresets(QDialog):
         # Check to see if validation columns are in the data (won't be on first run)
         #   Put them in place if needed
         try:
-            df.loc[2,f"Validation | Unseen"]
+            for status in list(self.userInfo.statuses.keys()):
+                df.loc[2,f"Validation | {status}"]
         except KeyError:
             for call_type in reversed(list(self.userInfo.statuses.keys())):
-                if call_type == 'Unseen':
-                    df.insert(8,f"Validation | {call_type}", 1)
-                else:
-                    df.insert(8,f"Validation | {call_type}", 0) 
-
+                try:
+                    if call_type == 'Unseen':
+                        df.insert(8,f"Validation | {call_type}", 1)
+                    else:
+                        df.insert(8,f"Validation | {call_type}", 0) 
+                except ValueError:
+                    pass # triggered when trying to insert column that already exists
+    
+    ''' Iterate through annotation mappings collected from user and assign new statuses to cells if needed'''
     def assign_annotation_statuses_to_sheet(self,df):
         l = list(set(self.userInfo.annotation_mappings.keys()))
         if (not self.userInfo.annotation_mappings):
-            print("No annotations")
+            print("No annotation assignments")
             return df # break if user wants "All" for each
 
         elif (len(l) == 1) and (l[0] == "Don't assign"):
@@ -845,27 +899,46 @@ class ViewerPresets(QDialog):
             df.loc[df[phenotype]==1,f"Validation | {status}"] = 1
         return df
 
+    def _locate_annotations_col(self, path):
+        try:
+            true_annotations = list(pd.read_csv(path, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique()) 
+            self.userInfo.analysisRegionsInData = true_annotations
+            return true_annotations
+        except (KeyError, ValueError):
+            print("No Analysis regions column in data")
+            self.userInfo.analysisRegionsInData = False
+            return None
+
+
     def _validate_names(self):
         # Get headers and unique annotations
         path = self.userInfo.objectDataPath
         headers = pd.read_csv(path, index_col=False, nrows=0).columns.tolist() 
-        true_annotations = list(pd.read_csv(path, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique())
-        valid = True
+        true_annotations = self._locate_annotations_col(path)
+        if true_annotations is None: 
+            self.annotationButton.setEnabled(False)
+            self.annotationDisplay.setText('<u>Annotation Layer</u><br>All')
+            self.userInfo.annotation_mappings_label = '<u>Annotation Layer</u><br>All'
+            self.userInfo.annotation_mappings = {}
+            self.specificCellAnnotationEdit.setVisible(False)
+            self.specificCellAnnotationCombo.setVisible(False)
+            self.userInfo.specific_cell['Annotation Layer'] = ''
+            return True # It's ok to have no annotation layer
         annotations = list(self.userInfo.annotation_mappings.keys())
         phenotypes = list(self.userInfo.phenotype_mappings.keys())
         # perform checks
         for anno in annotations:
-            if anno not in true_annotations: valid = False
+            if anno not in true_annotations: return False
         for pheno in phenotypes:
-            if pheno not in headers: valid = False
-        return valid
+            if pheno not in headers: return False
+        return True
          
 
     def assign_statuses_to_sheet(self):
         df = pd.read_csv(self.userInfo.objectDataPath)
-        df = self.assign_phenotype_statuses_to_sheet(df)
-        df = self.assign_annotation_statuses_to_sheet(df)
         if self._validate_names():
+            df = self.assign_phenotype_statuses_to_sheet(df)
+            df = self.assign_annotation_statuses_to_sheet(df)
             try:
                 df.to_csv(self.userInfo.objectDataPath,index=False)
                 self.userInfo.objectDataFrame = df
@@ -874,15 +947,7 @@ class ViewerPresets(QDialog):
                 return 'PermissionError'
         else:
             return 'Bad input'
-        
-    def _locate_annotations_col(self):
-        headers = pd.read_csv(self.userInfo.objectDataPath, index_col=False, nrows=0).columns.tolist() 
-        if 'Analysis Region' in headers:
-            self.userInfo.analysisRegionsInData = True
-        else:
-            self.userInfo.analysisRegionsInData = False
-
-    
+ 
     def loadGallery(self):
         # self.status_label.setVisible(True)
         # self.app.processEvents()
@@ -899,8 +964,7 @@ class ViewerPresets(QDialog):
              self.status_label.setText('<font color="#f5551a">Access to object data file was denied</font><br>Close the sheet before trying again')
              return None
 
-        self.saveViewSettings()
-        self._locate_annotations_col() # Lets viewer app know if it needs to look out for multiple cell IDs in the sheet
+        self.saveViewSettings() # Lets viewer app know if it needs to look out for multiple cell IDs in the sheet
         store_and_load.storeObject(self.userInfo, 'data/presets')
 
         # If user fetched metadata, save changes to color mappings
