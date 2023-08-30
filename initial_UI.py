@@ -28,7 +28,7 @@ import webbrowser # for opening github
 import warnings
 warnings.catch_warnings
 
-VERSION_NUMBER = '1.1.0'
+VERSION_NUMBER = '1.2.0'
 FONT_SIZE = 12
 #DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
 CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
@@ -295,6 +295,7 @@ class ViewerPresets(QDialog):
         self.row_size_widget.setRange(2,self.userInfo.page_size)
     def saveRowSize(self):
         self.userInfo.cells_per_row = self.row_size_widget.value()
+        print(f"Row size is now {self.userInfo.cells_per_row}")
     def saveGlobalSort(self):
         print("Saving global sort")
         self.userInfo.global_sort = self.global_sort_widget.currentText()
@@ -767,7 +768,7 @@ class ViewerPresets(QDialog):
 
 
         self.imageSize = QSpinBox(self.topRightGroupBox)
-        self.imageSize.setRange(50,200)
+        self.imageSize.setRange(50,1000)
         self.imageSize.setValue(self.userInfo.imageSize) # Misbehaving?
         self.imageSize.editingFinished.connect(self.saveImageSize)
         self.imageSize.setFixedWidth(100)

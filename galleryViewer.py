@@ -25,6 +25,8 @@ import custom_maps # Necessary, do not remove
 from math import ceil
 from PIL import Image, ImageFont, ImageDraw
 from re import sub
+from initial_UI import VERSION_NUMBER
+
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
@@ -1509,10 +1511,10 @@ def replace_note(cell_widget, note_widget):
 
 ''' Reset globals and proceed to main '''
 def GUI_execute(preprocess_class):
-    userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
-    global qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
+    global userInfo, qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
     global CHANNELS, ADJUSTED, OBJECT_DATA,OBJECT_DATA_PATH, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
     global ANNOTATIONS_PRESENT, ORIGINAL_ADJUSTMENT_SETTINGS
+    userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
 
     qptiff = userInfo.qptiff
     PUNCHOUT_SIZE = userInfo.imageSize
@@ -1617,7 +1619,7 @@ def main(preprocess_class = None):
         print(f'... completed in {end_time-start_time} seconds')
 
     
-    viewer = napari.Viewer(title='CTC Gallery')
+    viewer = napari.Viewer(title=f'GalleryViewer v{VERSION_NUMBER}')
     VIEWER = viewer
     # Get rid of the crap on the left sidebar for a cleaner screen
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
