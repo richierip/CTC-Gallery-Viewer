@@ -1061,11 +1061,15 @@ def _save_validation(gallery):
         hdata.fillna("")
 
     try:
-        import pickle
-        with open('status_list.pkl','wb') as handle:
 
-            pickle.dump(gallery.userInfo.session.status_list, handle)
-        exit()
+        for key, val in gallery.userInfo.session.status_list.items():
+            cid = key.split()[-1]
+            vals = [1 if x == status else 0 for x in list(gallery.userInfo.statuses.keys())]
+            gallery.userInfo.session.status_list[key] = [key.replace(' cid',''), int(cid), *vals]
+
+        calls = [f"Validation | {status}" for status in list(gallery.userInfo.statuses.keys())]
+        df = pd.DataFrame.from_dict(status_list, orient = 'index', columns = ["Analysis Region", "Object Id"] )
+
         for cell_name in gallery.userInfo.session.status_list:
             status = gallery.userInfo.session.status_list[cell_name]
             cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
