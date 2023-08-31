@@ -2,12 +2,12 @@
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon, QPixmap,QColor,QFont
-from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,QMainWindow, QGridLayout, 
+from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,QMainWindow, QGridLayout, QDesktopWidget, 
                              QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QMenuBar, QAction)
 
 import sys
 import os
-# import time
+import time
 import store_and_load
 from galleryViewer import GUI_execute
 import ctypes
@@ -511,11 +511,23 @@ class ViewerPresets(QDialog):
         except Exception as e:
             return 'no annotations'
         # Check if image location in CSV matches with image given to viewer
-        im_location_csv = pd.read_csv(path, index_col=False, nrows=1, usecols=['Image Location']).iloc[0,0]
-        im_name_csv = sub(r'.*?\\',"", im_location_csv)
-        path = self.qptiffEntry.text().strip('"')
-        if im_name_csv != sub(r'.*?\\',"", path):
-            return 'name conflict'
+        try:
+            im_location_csv = pd.read_csv(path, index_col=False, nrows=1, usecols=['Image Location']).iloc[0,0]
+            # get everything after the last / , i.e. the image name.
+            # Do it this way since some people use a mapped drive path, some use CIFS, some use UNC path with IP address
+            im_name_csv = sub(r'.*?\\',"", im_location_csv) 
+            path = self.qptiffEntry.text().strip('"')
+            if im_name_csv != sub(r'.*?\\',"", path):
+                return 'name conflict'
+        except ValueError: 
+            try: # Attempt to check the alternative column name that might be present
+                im_location_csv = pd.read_csv(path, index_col=False, nrows=1, usecols=['Image File Name']).iloc[0,0]
+                path = self.qptiffEntry.text().strip('"')
+                if im_name_csv != sub(r'.*?\\',"", path):
+                    return 'name conflict'
+            except ValueError:
+                pass 
+            pass # No name columns that I know of, move on.
         return 'passed'
 
     def prefillImageData(self):
@@ -870,6 +882,7 @@ class ViewerPresets(QDialog):
             return df # Also break if there are no status mappings for any annotation
         
         print("Assignments to complete")
+        self._append_status('Assigning decisions to annotations...')
         self._check_validation_cols(df)
         sk = list(self.userInfo.statuses.keys())
         validation_cols = [f"Validation | " + s for s in sk]
@@ -880,6 +893,7 @@ class ViewerPresets(QDialog):
             for call_type in sk:
                 df.loc[df["Analysis Region"]==annotation,f"Validation | {call_type}"] = 0
             df.loc[df["Analysis Region"]==annotation,f"Validation | {status}"] = 1
+        self._append_status('<font color="#7dbc39">  Done. </font>') 
         return df
 
     def assign_phenotype_statuses_to_sheet(self,df):
@@ -890,6 +904,7 @@ class ViewerPresets(QDialog):
         elif (len(l) == 1) and (l[0] == "Don't assign"):
             return df # Also break if there are no status mappings for any annotation
         
+        self._append_status('Assigning decisions to phenotypes...')
         self._check_validation_cols(df)
         sk = list(self.userInfo.statuses.keys())
         validation_cols = [f"Validation | " + s for s in sk]
@@ -900,8 +915,10 @@ class ViewerPresets(QDialog):
             for call_type in sk:
                 df.loc[df[phenotype]==1,f"Validation | {call_type}"] = 0
             df.loc[df[phenotype]==1,f"Validation | {status}"] = 1
+        self._append_status('<font color="#7dbc39">  Done. </font>')
         return df
 
+    '''Find all unique annotation layer names, if the column exists in the data, and return the results'''
     def _locate_annotations_col(self, path):
         try:
             true_annotations = list(pd.read_csv(path, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique()) 
@@ -912,7 +929,8 @@ class ViewerPresets(QDialog):
             self.userInfo.analysisRegionsInData = False
             return None
 
-
+    '''Check that annotations and phenotypes chosen by the user match the data. Return False if there is a mismatch. 
+            Allowed to procees if the annotations column does not exist at all in the data.'''
     def _validate_names(self):
         # Get headers and unique annotations
         path = self.userInfo.objectDataPath
@@ -936,21 +954,45 @@ class ViewerPresets(QDialog):
             if pheno not in headers: return False
         return True
          
-
+    '''Read in the object data file and assign user chosen validation calls to the data, if needed'''
     def assign_statuses_to_sheet(self):
+        self._replace_status('Reading object data... ')
         df = pd.read_csv(self.userInfo.objectDataPath)
+        self._append_status('<font color="#7dbc39">  Done. </font>')
+        self._append_status_br('Validating chosen annotations and phenotypes...')
         if self._validate_names():
+            self._append_status('<font color="#7dbc39">  Done. </font>')
             df = self.assign_phenotype_statuses_to_sheet(df)
             df = self.assign_annotation_statuses_to_sheet(df)
             try:
-                df.to_csv(self.userInfo.objectDataPath,index=False)
+                # self._append_status_br('Saving data back to file...')
+                # df.to_csv(self.userInfo.objectDataPath,index=False)
+                # self._append_status('<font color="#7dbc39">  Done. </font>')
                 self.userInfo.objectDataFrame = df
+
                 return 'Passed'
             except PermissionError:
                 return 'PermissionError'
         else:
             return 'Bad input'
- 
+    
+    def _replace_status(self, status):
+        self.status_label.setVisible(True)
+        self.status_label.setText(status)
+        self.app.processEvents()
+
+    def _append_status_br(self, status):
+        self.status_label.setVisible(True)
+        current = self.status_label.text()
+        self.status_label.setText(current +'<br>'+ status)
+        self.app.processEvents()
+
+    def _append_status(self, status):
+        self.status_label.setVisible(True)
+        current = self.status_label.text()
+        self.status_label.setText(current + status)
+        self.app.processEvents()
+
     def loadGallery(self):
         # self.status_label.setVisible(True)
         # self.app.processEvents()
@@ -999,6 +1041,88 @@ class ViewerPresets(QDialog):
                 os.makedirs(folder)
             logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_runtime_crash_%H%M%S.txt')))
             self._log_problem(logpath,e)
+        
+
+
+def _save_validation(gallery):
+    hdata = gallery.userInfo.objectDataFrame
+    for call_type in reversed(gallery.userInfo.statuses.keys()):
+        try:
+            hdata.loc[2,f"Validation | {call_type}"]
+        except KeyError:
+            if call_type == 'Unseen':
+                hdata.insert(8,f"Validation | {call_type}", 1)
+            else:
+                hdata.insert(8,f"Validation | {call_type}", 0)  
+    try:
+        hdata.loc[2,"Notes"]
+    except KeyError:
+        hdata.insert(8,"Notes","-")
+        hdata.fillna("")
+
+    try:
+        import pickle
+        with open('status_list.pkl','wb') as handle:
+
+            pickle.dump(gallery.userInfo.session.status_list, handle)
+        exit()
+        for cell_name in gallery.userInfo.session.status_list:
+            status = gallery.userInfo.session.status_list[cell_name]
+            cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
+            
+            
+            # reset all validation cols to zero before assigning a 1 to the appropriate status col
+            calls = list(gallery.userInfo.statuses.keys())
+            if cell_anno == 'All':
+                # reset calls
+                hdata.loc[hdata["Object Id"]==int(cell_id),calls] = 0
+
+                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
+                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = gallery.userInfo.session.saved_notes[str(cell_name)]
+            else:
+               # reset calls
+                hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),calls] = 0
+
+                hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {status}"] = 1
+                hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = gallery.userInfo.session.saved_notes[cell_name]
+
+        hdata.to_csv(gallery.userInfo.objectDataPath, index=False)
+        return True
+    except Exception as e:
+        print('final save issue!')
+        folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_finalSavingError_%H%M%S.txt')))
+        gallery._log_problem(logpath,e)
+        return False
+
+def ensure_saving(gallery : ViewerPresets, app) -> None:
+    app.exec()
+    # old app has exited now
+    if gallery.userInfo.session.saving_required:
+        app = QApplication([])
+
+        window = QLabel()
+        window.setWindowTitle('Save Data')
+        window.setGeometry(500,500,1400,300) # 3rd and 4th args are width and height
+        window.frameGeometry().moveCenter(QDesktopWidget().availableGeometry().center()) # center this window
+        window.setStyleSheet('color:#075cbf ; font-size: 30pt')
+        window.show()
+        window.setText('Saving data back to disk, <font color="#a05459">do NOT modify or open the file!</font>')
+        app.processEvents()
+        print('\nShould be saving data now...')
+        if _save_validation(gallery):
+            window.setText('<br><font color="#7dbc39">  Done. </font>')
+        else:
+            window.setText('<br><font color="#a05459">  Error! </font>')
+        window.setAlignment(Qt.AlignCenter)
+        app.processEvents()
+        print('Done saving.')
+        time.sleep(2)
+        window.close()
+    return None
+
 
 
 if __name__ == '__main__':
@@ -1024,4 +1148,5 @@ if __name__ == '__main__':
     app.setStyle('Fusion')
     gallery = ViewerPresets(app)
     gallery.show()
-    sys.exit(app.exec())
+    sys.exit(ensure_saving(gallery,app))
+    print("\nI should only see this after I close the viewer")

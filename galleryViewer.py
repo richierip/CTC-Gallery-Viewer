@@ -25,7 +25,7 @@ import custom_maps # Necessary, do not remove
 from math import ceil
 from PIL import Image, ImageFont, ImageDraw
 from re import sub
-from initial_UI import VERSION_NUMBER
+# from initial_UI import VERSION_NUMBER
 
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
@@ -57,6 +57,7 @@ GLOBAL_SORT = None
 DAPI = 0; OPAL480 = 3; OPAL520 = 6; OPAL570 = 1; OPAL620 = 4; OPAL690 = 2; OPAL780 = 5; AF=7; Composite = 8
 
 userInfo = store_and_load.loadObject('data/presets')
+SESSION = userInfo.session # will store non-persistent global variables that need to be accessible
 
 # CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690,OPAL780,AF,Composite] # Default. Not really that useful info since channel order was added.
 CHANNELS = [DAPI, OPAL520,OPAL690, Composite] # for local execution / debugging
@@ -67,7 +68,7 @@ CHANNELS_STR.append("Composite") # Seems like this has to happen on a separate l
 ADJUSTED = copy.copy(CHANNELS_STR)
 VIEWER = None
 ADJUSTMENT_SETTINGS={"DAPI gamma": 0.5}; ORIGINAL_ADJUSTMENT_SETTINGS = {}
-SAVED_NOTES={} ; STATUS_LIST={}; SAVED_INTENSITIES={}; XY_STORE = [1,2,3]
+SAVED_INTENSITIES={}; XY_STORE = [1,2,3]
 RAW_PYRAMID=None
 ALL_CUSTOM_WIDGETS = {}
 COMPOSITE_MODE = True # Start in composite mode
@@ -81,6 +82,7 @@ IMAGE_LAYERS = {}
 UPDATED_CHECKBOXES = []
 ANNOTATIONS_PRESENT = False # Track whether there is an 'Analysis Regions' field in the data (duplicate CIDs possible)
 ABSORPTION = False
+
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
 #TODO merge some of the GUI elements into the same container to prevent strange spacing issues
@@ -257,9 +259,9 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
         except KeyError:
             hdata.insert(8,"Notes","-")
             hdata.fillna("")
-        global XY_STORE, STATUS_LIST
-        for cell_name in STATUS_LIST.keys():
-            status = STATUS_LIST[cell_name]
+        global XY_STORE
+        for cell_name in SESSION.status_list.keys():
+            status = SESSION.status_list[cell_name]
             cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
             
             try:
@@ -268,22 +270,22 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
                     for call_type in STATUS_COLORS.keys():
                         hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
                     hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
-                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_name)]
+                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SESSION.saved_notes[str(cell_name)]
                 else:
                     for call_type in STATUS_COLORS.keys():
                         hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {call_type}"] = 0
                     hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {status}"] = 1
-                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SAVED_NOTES[cell_name]
+                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SESSION.saved_notes[cell_name]
             except:
                 print("There's an issue... ")
             # Now do it for the saved cache
             try:
                 if ANNOTATIONS_PRESENT:
                     XY_STORE[cell_name][4] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
-                    STATUS_LIST[cell_name] = status
+                    SESSION.status_list[cell_name] = status
                 else: 
                     XY_STORE[cell_name][4] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
-                    STATUS_LIST[cell_name] = status             
+                    SESSION.status_list[cell_name] = status             
 
             except Exception as e:
                 print("XY_Store saving issue.")
@@ -373,8 +375,8 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
             hdata.insert(8,"Notes","-")
             hdata.fillna("")
 
-        for cell_name in STATUS_LIST.keys():
-            status = STATUS_LIST[cell_name]
+        for cell_name in SESSION.status_list.keys():
+            status = SESSION.status_list[cell_name]
             cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
             
             try:
@@ -383,12 +385,12 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
                     for call_type in STATUS_COLORS.keys():
                         hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
                     hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
-                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_name)]
+                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SESSION.saved_notes[str(cell_name)]
                 else:
                     for call_type in STATUS_COLORS.keys():
                         hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {call_type}"] = 0
                     hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {status}"] = 1
-                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SAVED_NOTES[cell_name]
+                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SESSION.saved_notes[cell_name]
             except:
                 print("There's an issue... ")
         try:
@@ -534,11 +536,11 @@ def set_notes_label(display_note_widget, ID):
     else:
         image_name = f'Cell {cell_num} from {cell_anno}'
     try:
-        note = str(SAVED_NOTES[ID])
+        note = str(SESSION.saved_notes[ID])
     except KeyError: # in case the name was off
         return False
-    status = STATUS_LIST[str(ID)]
-    prefix = f'{SAVED_NOTES["page"]}<br><font color="{STATUSES_TO_HEX[status]}">{image_name}</font>'
+    status = SESSION.status_list[str(ID)]
+    prefix = f'{SESSION.saved_notes["page"]}<br><font color="{STATUSES_TO_HEX[status]}">{image_name}</font>'
 
     # Add intensities
     intensity_series = SAVED_INTENSITIES[ID]
@@ -553,6 +555,7 @@ def set_notes_label(display_note_widget, ID):
         intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">{fluor.replace("OPAL","Opal ")}'
         def add_values(intensity_str, fluor, intensity_lookup):
             flag = True
+            name = ''
             try:
                 cyto = intensity_lookup.replace("OPAL","Opal ")
                 cyto = [x for x in names if (cyto in x and 'Cytoplasm Intensity' in x)][0]
@@ -568,7 +571,7 @@ def set_notes_label(display_note_widget, ID):
                 intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> nuc: {val}</font>'
                 flag = False
                 name = nuc.replace(' Nucleus Intensity','')
-            except KeyError: pass
+            except (KeyError, IndexError): pass
             try:
                 cell = intensity_lookup.replace("OPAL","Opal ")
                 cell = [x for x in names if (cell in x and 'Cell Intensity' in x)][0]
@@ -576,7 +579,7 @@ def set_notes_label(display_note_widget, ID):
                 intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cell: {val}</font>'
                 flag = False
                 name = cell.replace(' Cell Intensity','')
-            except KeyError: pass
+            except (KeyError, IndexError): pass
             return intensity_str.replace(intensity_lookup.replace("OPAL","Opal "),name), flag
         intensity_str, error = add_values(intensity_str, fluor,fluor)
         possible_af_strings = ['AF', 'Autofluorescence', 'Sample AF']
@@ -605,9 +608,9 @@ def change_statuslayer_color(cells):
     composite_only=COMPOSITE_MODE
     def retrieve_status(cell_id):
         try:
-            return STATUS_LIST[str(cell_id)]
+            return SESSION.status_list[str(cell_id)]
         except:
-            raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {STATUS_LIST}")
+            raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {SESSION.status_list}")
 
     ''' Expects a numpy array of shape PUNCHOUT_SIZE x 16, with a 16x16 box taking up the left-hand side'''    
     def write_cid_text_to_array(cb_size, im_length, upsample, color, cid):
@@ -716,14 +719,14 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                 status = "Unseen"
             # Save to dict to make next retrieval faster
             # If there are annotations, need to track a separate list for each one
-            STATUS_LIST[str(cell_id)] = status
+            SESSION.status_list[str(cell_id)] = status
             return status
         else:
             # Just grab it because it's there already
             try:
-                return STATUS_LIST[str(cell_id)]
+                return SESSION.status_list[str(cell_id)]
             except:
-                raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {STATUS_LIST}")
+                raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {SESSION.status_list}")
 
     ''' Expects a numpy array of shape PUNCHOUT_SIZE x 16, with a 16x16 box taking up the left-hand side'''    
     def write_cid_text_to_array(cb_size, im_length, upsample, color, cid):
@@ -950,7 +953,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {vals[fluor]}   </font>'
         else:
             # print('else')
-            sc = STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]]
+            sc = STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]]
             VIEWER.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
 
     @status_layer.bind_key('Space')
@@ -962,10 +965,10 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
 
-        cur_status = STATUS_LIST[str(cell_name)]
+        cur_status = SESSION.status_list[str(cell_name)]
         cur_index = list(status_colors.keys()).index(cur_status)
         next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
-        STATUS_LIST[str(cell_name)] = next_status
+        SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
@@ -978,7 +981,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         image_layer.data = imdata.astype('int')
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
     @status_layer.mouse_drag_callbacks.append
@@ -999,7 +1002,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        STATUS_LIST[str(cell_name)] = next_status
+        SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
@@ -1012,7 +1015,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         image_layer.data = imdata.astype('int')
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
     @status_layer.bind_key('v')
@@ -1023,7 +1026,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        STATUS_LIST[str(cell_name)] = next_status
+        SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
@@ -1036,7 +1039,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         image_layer.data = imdata.astype('int')
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
     @status_layer.bind_key('b')
@@ -1047,7 +1050,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        STATUS_LIST[str(cell_name)] = next_status
+        SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
@@ -1060,7 +1063,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         image_layer.data = imdata.astype('int')
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
     @status_layer.bind_key('n')
@@ -1071,7 +1074,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        STATUS_LIST[str(cell_name)] = next_status
+        SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
@@ -1084,7 +1087,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         image_layer.data = imdata.astype('int')
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
     @status_layer.bind_key('m')
@@ -1095,7 +1098,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
             return None
         coords = np.round(data_coordinates).astype(int)
         row,col = pixel_coord_to_grid(coords)
-        STATUS_LIST[str(cell_name)] = next_status
+        SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
         imdata = image_layer.data
@@ -1108,7 +1111,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         image_layer.data = imdata.astype('int')
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[STATUS_LIST[str(cell_name)]], vstatus_list[0])
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
     #TODO make a page label... 
@@ -1155,8 +1158,8 @@ def sv_wrapper(viewer):
             hdata.insert(8,"Notes","-")
             hdata.fillna("")
 
-        for cell_name in STATUS_LIST.keys():
-            status = STATUS_LIST[cell_name]
+        for cell_name in SESSION.status_list.keys():
+            status = SESSION.status_list[cell_name]
             cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
             
             try:
@@ -1165,12 +1168,12 @@ def sv_wrapper(viewer):
                     for call_type in STATUS_COLORS.keys():
                         hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
                     hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
-                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SAVED_NOTES[str(cell_name)]
+                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SESSION.saved_notes[str(cell_name)]
                 else:
                     for call_type in STATUS_COLORS.keys():
                         hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {call_type}"] = 0
                     hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {status}"] = 1
-                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SAVED_NOTES[cell_name]
+                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SESSION.saved_notes[cell_name]
             except Exception as e:
                 print("There's an issue... ")
                 print(e)
@@ -1311,12 +1314,12 @@ def fetch_notes(cell_row, intensity_col_names):
         ID = "All " + str(cell_row['Object Id'])
     else:
         ID = str(cell_row['Analysis Region']) + ' ' + str(cell_row['Object Id'])
-    SAVED_NOTES[ID] = cell_row['Notes']
+    SESSION.saved_notes[ID] = cell_row['Notes']
     # Find out which columns are present in the Series and subset to those
     present_intensities = sorted(list(set(list(cell_row.index)).intersection(set(intensity_col_names))))
     cell_row = cell_row.loc[present_intensities]
     SAVED_INTENSITIES[ID] = cell_row
-    # print(f'dumping dict {SAVED_NOTES}')
+    # print(f'dumping dict {SESSION.saved_notes}')
 
 '''Get object data from csv and parse.''' 
 def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None, page_number = 1, 
@@ -1440,7 +1443,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
 
     # set widget to current page number 
     combobox_widget.setCurrentIndex(page_number-1)
-    SAVED_NOTES['page'] = combobox_widget.currentText()
+    SESSION.saved_notes['page'] = combobox_widget.currentText()
     # Get the appropriate set
     if page_number != last_page:
         cell_set = phen_only_df[(page_number-1)*page_size: page_number*page_size]
@@ -1491,7 +1494,6 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     return tumor_cell_XYs
 
 def replace_note(cell_widget, note_widget):
-    global SAVED_NOTES
     cellID = cell_widget.text(); note = note_widget.text()
     # try: 
     #     cellID = int(cellID)
@@ -1499,8 +1501,8 @@ def replace_note(cell_widget, note_widget):
     #     VIEWER.status = 'Error recording note: non-numeric Cell Id given'
     #     return None 
     try:
-        SAVED_NOTES[str(cellID)] # to trigger exception
-        SAVED_NOTES[str(cellID)] = note
+        SESSION.saved_notes[str(cellID)] # to trigger exception
+        SESSION.saved_notes[str(cellID)] = note
         cell_widget.clear(); note_widget.clear()
         VIEWER.status = "Note recorded! Press 's' to save to file."
     except KeyError as e:
@@ -1513,8 +1515,9 @@ def replace_note(cell_widget, note_widget):
 def GUI_execute(preprocess_class):
     global userInfo, qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
     global CHANNELS, ADJUSTED, OBJECT_DATA,OBJECT_DATA_PATH, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
-    global ANNOTATIONS_PRESENT, ORIGINAL_ADJUSTMENT_SETTINGS
+    global ANNOTATIONS_PRESENT, ORIGINAL_ADJUSTMENT_SETTINGS, SESSION
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
+    SESSION = userInfo.session
 
     qptiff = userInfo.qptiff
     PUNCHOUT_SIZE = userInfo.imageSize
@@ -1548,7 +1551,8 @@ def GUI_execute(preprocess_class):
         GLOBAL_SORT = f"{chn} Cell Intensity"
     else:
         GLOBAL_SORT = f"Sample AF Cell Intensity"
-
+    # set saving flag so that dataframe will be written upon exit
+    userInfo.session.saving_required = True
     main(preprocess_class)
 
 def main(preprocess_class = None):
@@ -1619,7 +1623,7 @@ def main(preprocess_class = None):
         print(f'... completed in {end_time-start_time} seconds')
 
     
-    viewer = napari.Viewer(title=f'GalleryViewer v{VERSION_NUMBER}')
+    viewer = napari.Viewer(title=f'GalleryViewer v1.2')
     VIEWER = viewer
     # Get rid of the crap on the left sidebar for a cleaner screen
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
@@ -1762,6 +1766,7 @@ def main(preprocess_class = None):
     if preprocess_class is not None: preprocess_class.close() # close other window
     napari.run()
     # close image file
+
     if RASTERS is not None:
         print('Not sure if we have to close this file... the "with" statement should handle it.')
         RAW_PYRAMID.close()

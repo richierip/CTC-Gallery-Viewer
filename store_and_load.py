@@ -20,7 +20,6 @@ CHANNELS = [DAPI, OPAL570, OPAL690, OPAL480, OPAL620, OPAL780, OPAL520, AF] # Li
 # Currently in the default Opal Motif order. Maybe could change in the future? So use this
 #   variably to determine the order of filters so the software knows which columns in the data
 #   to use. 
-# CHANNEL_ORDER = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
 CHANNEL_ORDER = {'DAPI': 'gray', 'OPAL570': 'purple', 'OPAL690': 'blue', 'OPAL480': 'green', 'OPAL620': 'orange',
   'OPAL780': 'red', 'OPAL520': 'yellow', 'AF': 'cyan'} # mappings of fluors to user selected colors. Order is also significant, represents image data channel order
 STATUSES = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red", "Interesting": "lavender" }
@@ -35,6 +34,13 @@ VIEW_SETTINGS = {"DAPI gamma": 0.5, "OPAL570 gamma": 0.5, "OPAL690 gamma": 0.5, 
                   "DAPI white-in": 255, "OPAL570 white-in": 255, "OPAL690 white-in": 255, "OPAL480 white-in": 255,
                   "OPAL620 white-in": 255, "OPAL780 white-in": 255, "OPAL520 white-in": 255, 
                   "AF white-in": 255,"Sample AF white-in": 255,"Autofluorescence white-in": 255}
+
+class sessionVariables:
+    ''' Stores variables that will only last for the duration of a single session'''
+    def __init__(self) -> None:
+        self.saving_required = False
+        self.status_list = {}
+        self.saved_notes = {}
 
 class userPresets:
     ''' This class is used to store user-selected parameters on disk persistently,
@@ -67,6 +73,7 @@ class userPresets:
         self.annotation_mappings = {} # Dict of user selected annotations and their status mappings. Cells in the data of these annotations will be kept for viewing and assigned the given status 
         self.annotation_mappings_label = '<u>Annotation Layer</u><br>All'# String representation of the above info for displaying in a QLabel
         self.analysisRegionsInData = False # Bool that tracks whether the object data has an 'Analysis Region' field with multiple annotations. Useful later
+        self.session = sessionVariables()
 
 
     '''
@@ -104,9 +111,10 @@ class userPresets:
                 self.channels.remove("AF")
                 self.channels.append("AF")
 
-def storeObject(obj, filename):
+def storeObject(obj : userPresets, filename : str):
     ''' Write the class object to a file. Default location is data/presets'''
     try:
+        obj.session = sessionVariables() # reset per-session variables to save space
         outfile = open(filename, 'wb' )
         pickle.dump(obj, outfile)
         outfile.close()
@@ -119,15 +127,9 @@ def loadObject(filename):
     try:
         infile = open(filename,'rb')
         new_obj = pickle.load(infile)
+        new_obj.session = sessionVariables() # just make sure nothing happened here
         infile.close()
         return new_obj
     except:
         # If no data yet (first time running the viewer), load up defaults
         return userPresets()
-
-# If no data yet (first time running the viewer), load up defaults
-# def checkObject(presets_object):
-#     if presets_object == None:
-#         return userPresets()
-#     else:
-#         return presets_object
