@@ -1043,64 +1043,6 @@ class ViewerPresets(QDialog):
             self._log_problem(logpath,e)
         
 
-
-def _save_validation(gallery):
-    hdata = gallery.userInfo.objectDataFrame
-    for call_type in reversed(gallery.userInfo.statuses.keys()):
-        try:
-            hdata.loc[2,f"Validation | {call_type}"]
-        except KeyError:
-            if call_type == 'Unseen':
-                hdata.insert(8,f"Validation | {call_type}", 1)
-            else:
-                hdata.insert(8,f"Validation | {call_type}", 0)  
-    try:
-        hdata.loc[2,"Notes"]
-    except KeyError:
-        hdata.insert(8,"Notes","-")
-        hdata.fillna("")
-
-    try:
-
-        for key, val in gallery.userInfo.session.status_list.items():
-            cid = key.split()[-1]
-            vals = [1 if x == status else 0 for x in list(gallery.userInfo.statuses.keys())]
-            gallery.userInfo.session.status_list[key] = [key.replace(' cid',''), int(cid), *vals]
-
-        calls = [f"Validation | {status}" for status in list(gallery.userInfo.statuses.keys())]
-        df = pd.DataFrame.from_dict(status_list, orient = 'index', columns = ["Analysis Region", "Object Id"] )
-
-        for cell_name in gallery.userInfo.session.status_list:
-            status = gallery.userInfo.session.status_list[cell_name]
-            cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
-            
-            
-            # reset all validation cols to zero before assigning a 1 to the appropriate status col
-            calls = list(gallery.userInfo.statuses.keys())
-            if cell_anno == 'All':
-                # reset calls
-                hdata.loc[hdata["Object Id"]==int(cell_id),calls] = 0
-
-                hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
-                hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = gallery.userInfo.session.saved_notes[str(cell_name)]
-            else:
-               # reset calls
-                hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),calls] = 0
-
-                hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {status}"] = 1
-                hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = gallery.userInfo.session.saved_notes[cell_name]
-
-        hdata.to_csv(gallery.userInfo.objectDataPath, index=False)
-        return True
-    except Exception as e:
-        print('final save issue!')
-        folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
-        if not os.path.exists(folder):
-            os.makedirs(folder)
-        logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_finalSavingError_%H%M%S.txt')))
-        gallery._log_problem(logpath,e)
-        return False
-
 def ensure_saving(gallery : ViewerPresets, app) -> None:
     app.exec()
     # old app has exited now
@@ -1116,7 +1058,17 @@ def ensure_saving(gallery : ViewerPresets, app) -> None:
         window.setText('Saving data back to disk, <font color="#a05459">do NOT modify or open the file!</font>')
         app.processEvents()
         print('\nShould be saving data now...')
-        if _save_validation(gallery):
+        try:
+            save = gallery.userInfo._save_validation()
+        except Exception as e:
+            save = False
+            print('save issue!')
+            folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+            logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_SavingError_%H%M%S.txt')))
+            gallery._log_problem(logpath,e)
+        if save:
             window.setText('<br><font color="#7dbc39">  Done. </font>')
         else:
             window.setText('<br><font color="#a05459">  Error! </font>')

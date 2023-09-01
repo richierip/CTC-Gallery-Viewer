@@ -11,6 +11,7 @@ Ting Lab
 
 import pickle
 import copy
+import pandas as pd
 
 CELL_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'cyan', 'pink'] # List of colors available to use as colormaps
 DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7 # Each fluor will be assigned a number that is used to represent it's position in the image array
@@ -110,6 +111,47 @@ class userPresets:
             if "AF" in self.channels:
                 self.channels.remove("AF")
                 self.channels.append("AF")
+
+    def _save_validation(self):
+        for call_type in reversed(self.statuses.keys()):
+            try:
+                self.objectDataFrame[f"Validation | {call_type}"]
+            except KeyError:
+                if call_type == 'Unseen':
+                    self.objectDataFrame.insert(8,f"Validation | {call_type}", 1)
+                else:
+                    self.objectDataFrame.insert(8,f"Validation | {call_type}", 0)  
+        try:
+            self.objectDataFrame["Notes"]
+        except KeyError:
+            self.objectDataFrame.insert(8,"Notes","-")
+            self.objectDataFrame.fillna("")
+        
+        status_copy = copy.copy(self.session.status_list)
+        for key, status in status_copy.items():
+            cid = key.split()[-1]
+            vals = [1 if x == status else 0 for x in list(self.statuses.keys())]
+            status_copy[key] = [key.replace(f' {cid}',''), int(cid),self.session.saved_notes[key], *vals]
+
+        # Create dataframe from stored dictionary and join with original df by assigning them the same kind of index
+        calls = [f"Validation | {status}" for status in list(self.statuses.keys())]
+        df = pd.DataFrame.from_dict(status_copy, orient = 'index', columns = ["Analysis Region", "Object Id",'Notes', *calls] )
+        if self.analysisRegionsInData:
+            self.objectDataFrame['new_index'] = self.objectDataFrame['Analysis Region'] +' '+ self.objectDataFrame['Object Id'].astype(str)
+        else:
+            df = df.drop(columns=['Analysis Region'])
+            self.objectDataFrame['new_index'] = 'All '+ self.objectDataFrame['Object Id'].astype(str)
+        self.objectDataFrame = self.objectDataFrame.set_index('new_index')
+        # Drop analysis region if it does not belong
+
+        self.objectDataFrame.update(df) # overwrite data with new cols
+
+        # print(self.objectDataFrame.columns)
+        # print(self.objectDataFrame[calls].head(15))
+
+        self.objectDataFrame.to_csv(self.objectDataPath, index=False)
+        self.objectDataFrame.reset_index(drop=True,inplace=True)
+        return True
 
 def storeObject(obj : userPresets, filename : str):
     ''' Write the class object to a file. Default location is data/presets'''

@@ -46,7 +46,6 @@ cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink
 CHANNEL_ORDER = {}
 qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
 OBJECT_DATA_PATH = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv" # path to halo export
-OBJECT_DATA = None # Pandas Dataframe containing the original object data
 PUNCHOUT_SIZE = 90 # microns or pixels? Probably pixels
 PAGE_SIZE = 15 # How many cells will be shown in next page
 CELLS_PER_ROW = 8
@@ -243,56 +242,8 @@ def fix_default_composite_adj():
 def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     def _save_validation(VIEWER, Mode):
         VIEWER.status = 'Saving ...'
-        print(f'Using stored dataframe for saving')
-        global OBJECT_DATA
-        hdata = OBJECT_DATA
-        for call_type in reversed(STATUS_COLORS.keys()):
-            try:
-                hdata.loc[2,f"Validation | {call_type}"]
-            except KeyError:
-                if call_type == 'Unseen':
-                    hdata.insert(8,f"Validation | {call_type}", 1)
-                else:
-                    hdata.insert(8,f"Validation | {call_type}", 0) 
         try:
-            hdata.loc[2,"Notes"]
-        except KeyError:
-            hdata.insert(8,"Notes","-")
-            hdata.fillna("")
-        global XY_STORE
-        for cell_name in SESSION.status_list.keys():
-            status = SESSION.status_list[cell_name]
-            cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
-            
-            try:
-                # reset all validation cols to zero before assigning a 1 to the appropriate status col
-                if cell_anno == 'All':
-                    for call_type in STATUS_COLORS.keys():
-                        hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
-                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SESSION.saved_notes[str(cell_name)]
-                else:
-                    for call_type in STATUS_COLORS.keys():
-                        hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {call_type}"] = 0
-                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {status}"] = 1
-                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SESSION.saved_notes[cell_name]
-            except:
-                print("There's an issue... ")
-            # Now do it for the saved cache
-            try:
-                if ANNOTATIONS_PRESENT:
-                    XY_STORE[cell_name][4] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
-                    SESSION.status_list[cell_name] = status
-                else: 
-                    XY_STORE[cell_name][4] = status # I don't think this value will be shown but it's not hurting anyone here, just in case.
-                    SESSION.status_list[cell_name] = status             
-
-            except Exception as e:
-                print("XY_Store saving issue.")
-                print(e)
-        try:
-            hdata.to_csv(OBJECT_DATA_PATH, index=False)
-            OBJECT_DATA = hdata
+            # userInfo._save_validation()
             if Mode == 1:
                 VIEWER.status = 'Channels Mode enabled. Decisions loaded successfully.'
             elif Mode ==2:
@@ -305,9 +256,6 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
             elif Mode ==2:
                 VIEWER.status = 'Composite Mode enabled. But, there was a problem saving your decisions. Close your data file?'
             return False
-            # hdata.loc[:,1:].to_excel(
-            # OBJECT_DATA,sheet_name='Exported from gallery viewer')
-        VIEWER.status = 'Done saving!'
     
     if all_channels_rb.isChecked(): Mode = 1
     else: Mode=2
@@ -351,61 +299,18 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
     return None
 
-# @magicgui(call_button='Load Cells',
-#         Direction={"widget_type": "RadioButtons","orientation": "horizontal",
-#         "choices": [("Next", 'fwd'), ("Previous", 'bkwd')]},
-#         Amount={"widget_type": "SpinBox", "value":15,
-#         "max":1000,"min":5})
+
 def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo, intensity_sort_widget):
     def _save_validation(VIEWER,numcells):
-        print(f'Using stored dataframe for saving')
-        global OBJECT_DATA
-        hdata = OBJECT_DATA
-        for call_type in reversed(STATUS_COLORS.keys()):
-            try:
-                hdata.loc[2,f"Validation | {call_type}"]
-            except KeyError:
-                if call_type == 'Unseen':
-                    hdata.insert(8,f"Validation | {call_type}", 1)
-                else:
-                    hdata.insert(8,f"Validation | {call_type}", 0)  
         try:
-            hdata.loc[2,"Notes"]
-        except KeyError:
-            hdata.insert(8,"Notes","-")
-            hdata.fillna("")
-
-        for cell_name in SESSION.status_list.keys():
-            status = SESSION.status_list[cell_name]
-            cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
-            
-            try:
-                # reset all validation cols to zero before assigning a 1 to the appropriate status col
-                if cell_anno == 'All':
-                    for call_type in STATUS_COLORS.keys():
-                        hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
-                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SESSION.saved_notes[str(cell_name)]
-                else:
-                    for call_type in STATUS_COLORS.keys():
-                        hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {call_type}"] = 0
-                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {status}"] = 1
-                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SESSION.saved_notes[cell_name]
-            except:
-                print("There's an issue... ")
-        try:
-            VIEWER.status = 'Saving ...'
-            hdata.to_csv(OBJECT_DATA_PATH, index=False)
-            OBJECT_DATA = hdata
-            VIEWER.status = f'Saved to file! Next {numcells} cells loaded.'
+            # userInfo._save_validation()
+            VIEWER.status = f'Next {numcells} cells loaded.'
             return True
         except:
             # Maybe it's an excel sheet?
             VIEWER.status = 'There was a problem saving, so the next set of cells was not loaded. Close your data file?'
             return False
-            # hdata.loc[:,1:].to_excel(
-            # OBJECT_DATA,sheet_name='Exported from gallery viewer')
-        VIEWER.status = 'Done saving!'
+        
     # Take note of new starting point
     global PAGE_SIZE
     page_number = int(page_cb_widget.currentText().split()[-1])
@@ -993,6 +898,39 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
         widget.setText(cell_name)
 
+    def set_all_unseen(image_layer):
+        next_status = 'Unseen'
+        imdata = image_layer.data
+
+        # set all cells to status
+        for coords, cell_id in GRID_TO_ID.items():
+            SESSION.status_list[str(cell_id)] = next_status
+            row = int(coords.split(',')[0])
+            col = int(coords.split(',')[1])
+
+            if COMPOSITE_MODE: 
+                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                                (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_id), True)
+            else:
+                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+                    :] = generate_status_box(next_status,str(cell_id), False)
+        image_layer.data = imdata.astype('int')
+
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        if val is None:
+            return None
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
+        vstatus_list = copy.copy(VIEWER.status).split('>')
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
+        VIEWER.status = ">".join(vstatus_list)
+    
+    @status_layer.bind_key('Control-c')
+    def ctrl_all_unseen(image_layer):
+        set_all_unseen(image_layer)
+
+    @status_layer.bind_key('Shift-c')
+    def shift_all_unseen(image_layer):
+        set_all_unseen(image_layer)
 
     @status_layer.bind_key('c')
     def set_unseen(image_layer):
@@ -1018,6 +956,40 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
+    def set_all_nr(image_layer):
+        next_status = 'Needs review'
+        imdata = image_layer.data
+
+        # set all cells to status
+        for coords, cell_id in GRID_TO_ID.items():
+            SESSION.status_list[str(cell_id)] = next_status
+            row = int(coords.split(',')[0])
+            col = int(coords.split(',')[1])
+
+            if COMPOSITE_MODE: 
+                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                                (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_id), True)
+            else:
+                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+                    :] = generate_status_box(next_status,str(cell_id), False)
+        image_layer.data = imdata.astype('int')
+
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        if val is None:
+            return None
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
+        vstatus_list = copy.copy(VIEWER.status).split('>')
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
+        VIEWER.status = ">".join(vstatus_list)
+    
+    @status_layer.bind_key('Control-v')
+    def ctrl_all_nr(image_layer):
+        set_all_nr(image_layer)
+
+    @status_layer.bind_key('Shift-v')
+    def shift_all_nr(image_layer):
+        set_all_nr(image_layer)
+
     @status_layer.bind_key('v')
     def set_nr(image_layer):
         next_status = 'Needs review'
@@ -1041,6 +1013,40 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
+
+    def set_all_confirmed(image_layer):
+        next_status = 'Confirmed'
+        imdata = image_layer.data
+
+        # set all cells to status
+        for coords, cell_id in GRID_TO_ID.items():
+            SESSION.status_list[str(cell_id)] = next_status
+            row = int(coords.split(',')[0])
+            col = int(coords.split(',')[1])
+
+            if COMPOSITE_MODE: 
+                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                                (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_id), True)
+            else:
+                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+                    :] = generate_status_box(next_status,str(cell_id), False)
+        image_layer.data = imdata.astype('int')
+
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        if val is None:
+            return None
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
+        vstatus_list = copy.copy(VIEWER.status).split('>')
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
+        VIEWER.status = ">".join(vstatus_list)
+
+    @status_layer.bind_key('Control-b')
+    def ctrl_all_confirmed(image_layer):
+        set_all_confirmed(image_layer)
+
+    @status_layer.bind_key('Shift-b')
+    def shift_all_confirmed(image_layer):
+        set_all_confirmed(image_layer)
 
     @status_layer.bind_key('b')
     def set_confirmed(image_layer):
@@ -1066,6 +1072,41 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
+
+    def set_all_rejected(image_layer):
+        next_status = 'Rejected'
+        imdata = image_layer.data
+
+        # set all cells to status
+        for coords, cell_id in GRID_TO_ID.items():
+            SESSION.status_list[str(cell_id)] = next_status
+            row = int(coords.split(',')[0])
+            col = int(coords.split(',')[1])
+
+            if COMPOSITE_MODE: 
+                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                                (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_id), True)
+            else:
+                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+                    :] = generate_status_box(next_status,str(cell_id), False)
+        image_layer.data = imdata.astype('int')
+
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        if val is None:
+            return None
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
+        vstatus_list = copy.copy(VIEWER.status).split('>')
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
+        VIEWER.status = ">".join(vstatus_list)
+
+    @status_layer.bind_key('Control-n')
+    def ctrl_all_rejected(image_layer):
+        set_all_rejected(image_layer)
+
+    @status_layer.bind_key('Shift-n')
+    def shift_all_rejected(image_layer):
+        set_all_rejected(image_layer)
+
     @status_layer.bind_key('n')
     def set_rejected(image_layer):
         next_status = 'Rejected'
@@ -1089,6 +1130,40 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
+
+    def set_all_interesting(image_layer):
+        next_status = 'Interesting'
+        imdata = image_layer.data
+
+        # set all cells to status
+        for coords, cell_id in GRID_TO_ID.items():
+            SESSION.status_list[str(cell_id)] = next_status
+            row = int(coords.split(',')[0])
+            col = int(coords.split(',')[1])
+
+            if COMPOSITE_MODE: 
+                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
+                                (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_id), True)
+            else:
+                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
+                    :] = generate_status_box(next_status,str(cell_id), False)
+        image_layer.data = imdata.astype('int')
+
+        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        if val is None:
+            return None
+        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
+        vstatus_list = copy.copy(VIEWER.status).split('>')
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
+        VIEWER.status = ">".join(vstatus_list)
+
+    @status_layer.bind_key('Control-m')
+    def ctrl_all_interesting(image_layer):
+        set_all_interesting(image_layer)
+
+    @status_layer.bind_key('Shift-m')
+    def shift_all_interesting(image_layer):
+        set_all_interesting(image_layer)
 
     @status_layer.bind_key('m')
     def set_interesting(image_layer):
@@ -1142,53 +1217,15 @@ def sv_wrapper(viewer):
     def save_validation(viewer):
         print(f'Using stored dataframe')
         viewer.status = 'Saving ...'
-        global OBJECT_DATA
-        hdata = OBJECT_DATA
-        for call_type in reversed(STATUS_COLORS.keys()):
-            try:
-                hdata.loc[2,f"Validation | {call_type}"]
-            except KeyError:
-                if call_type == 'Unseen':
-                    hdata.insert(8,f"Validation | {call_type}", 1)
-                else:
-                    hdata.insert(8,f"Validation | {call_type}", 0)  
-        try:
-            hdata.loc[2,"Notes"]
-        except KeyError:
-            hdata.insert(8,"Notes","-")
-            hdata.fillna("")
-
-        for cell_name in SESSION.status_list.keys():
-            status = SESSION.status_list[cell_name]
-            cell_id = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_id,'')
-            
-            try:
-                # reset all validation cols to zero before assigning a 1 to the appropriate status col
-                if cell_anno == 'All':
-                    for call_type in STATUS_COLORS.keys():
-                        hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {call_type}"] = 0
-                    hdata.loc[hdata["Object Id"]==int(cell_id),f"Validation | {status}"] = 1
-                    hdata.loc[hdata["Object Id"]==int(cell_id),"Notes"] = SESSION.saved_notes[str(cell_name)]
-                else:
-                    for call_type in STATUS_COLORS.keys():
-                        hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {call_type}"] = 0
-                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),f"Validation | {status}"] = 1
-                    hdata.loc[(hdata["Object Id"]==int(cell_id)) & (hdata["Analysis Region"]==cell_anno),"Notes"] = SESSION.saved_notes[cell_name]
-            except Exception as e:
-                print("There's an issue... ")
-                print(e)
-        try:
-            hdata.to_csv(OBJECT_DATA_PATH, index=False)
-            OBJECT_DATA = hdata
-            viewer.status = 'Done saving!'
-            return None
-        except:
-            # Maybe it's an excel sheet?
-            viewer.status = 'There was a problem. Close your data file?'
-            return None
-            # hdata.loc[:,1:].to_excel(
-            # OBJECT_DATA,sheet_name='Exported from gallery viewer')
+        # try:
+        userInfo._save_validation()
         viewer.status = 'Done saving!'
+        return None
+        # except :
+
+        #     # Maybe it's an excel sheet?
+        #     viewer.status = 'There was a problem. Close your data file?'
+        #     return None
 
 def tsv_wrapper(viewer):
     @viewer.bind_key('h')
@@ -1339,8 +1376,8 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     if phenotypes is None: phenotypes=PHENOTYPES
     if annotations is None: annotations=ANNOTATIONS  # Name of phenotype of interest
     # print(f'ORDERING PARAMS: id start: {cell_id_start}, page size: {page_size}, direction: {direction}, change?: {change_startID}')
-    halo_export = OBJECT_DATA
-    
+    halo_export = userInfo.objectDataFrame.copy()
+
     # Check for errors:
     for ph in phenotypes:
         if ph not in list(halo_export.columns):
@@ -1487,6 +1524,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
             else:
                 tumor_cell_XYs[f'All {cid}'] = ['All', cid, center_x, center_y, validation_call]
     except Exception as e:
+        print("FOUND IT!")
         print(e)
         exit()
     global XY_STORE
@@ -1514,7 +1552,7 @@ def replace_note(cell_widget, note_widget):
 ''' Reset globals and proceed to main '''
 def GUI_execute(preprocess_class):
     global userInfo, qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
-    global CHANNELS, ADJUSTED, OBJECT_DATA,OBJECT_DATA_PATH, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
+    global CHANNELS, ADJUSTED, OBJECT_DATA_PATH, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
     global ANNOTATIONS_PRESENT, ORIGINAL_ADJUSTMENT_SETTINGS, SESSION
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
     SESSION = userInfo.session
@@ -1527,7 +1565,6 @@ def GUI_execute(preprocess_class):
     STATUS_COLORS = userInfo.statuses ; STATUSES_RGBA = userInfo.statuses_rgba ; STATUSES_TO_HEX = userInfo.statuses_hex
     PAGE_SIZE = userInfo.page_size
     SPECIFIC_CELL = userInfo.specific_cell
-    OBJECT_DATA = userInfo.objectDataFrame
     OBJECT_DATA_PATH = userInfo.objectDataPath
     CELLS_PER_ROW = userInfo.cells_per_row
     CHANNEL_ORDER = userInfo.channelOrder
