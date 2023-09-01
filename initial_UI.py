@@ -1051,15 +1051,15 @@ def ensure_saving(gallery : ViewerPresets, app) -> None:
 
         window = QLabel()
         window.setWindowTitle('Save Data')
-        window.setGeometry(500,500,1400,300) # 3rd and 4th args are width and height
+        window.setGeometry(200,200,1400,300) # 3rd and 4th args are width and height
         window.frameGeometry().moveCenter(QDesktopWidget().availableGeometry().center()) # center this window
-        window.setStyleSheet('color:#075cbf ; font-size: 30pt')
+        window.setStyleSheet('color:#075cbf ; font-size: 25pt')
         window.show()
-        window.setText('Saving data back to disk, <font color="#a05459">do NOT modify or open the file!</font>')
+        window.setText('Saving scoring decisions, <font color="#a05459">the file will be locked until the operation is complete!</font>')
         app.processEvents()
         print('\nShould be saving data now...')
         try:
-            save = gallery.userInfo._save_validation()
+            save = gallery.userInfo._save_validation(to_disk=True)
         except Exception as e:
             save = False
             print('save issue!')

@@ -243,7 +243,7 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     def _save_validation(VIEWER, Mode):
         VIEWER.status = 'Saving ...'
         try:
-            # userInfo._save_validation()
+            userInfo._save_validation(to_disk=False)
             if Mode == 1:
                 VIEWER.status = 'Channels Mode enabled. Decisions loaded successfully.'
             elif Mode ==2:
@@ -303,7 +303,7 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
 def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo, intensity_sort_widget):
     def _save_validation(VIEWER,numcells):
         try:
-            # userInfo._save_validation()
+            userInfo._save_validation(to_disk=False)
             VIEWER.status = f'Next {numcells} cells loaded.'
             return True
         except:
@@ -460,7 +460,7 @@ def set_notes_label(display_note_widget, ID):
         intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">{fluor.replace("OPAL","Opal ")}'
         def add_values(intensity_str, fluor, intensity_lookup):
             flag = True
-            name = ''
+            name = intensity_lookup.replace("OPAL","Opal ") + ': No data'
             try:
                 cyto = intensity_lookup.replace("OPAL","Opal ")
                 cyto = [x for x in names if (cyto in x and 'Cytoplasm Intensity' in x)][0]
@@ -1218,7 +1218,7 @@ def sv_wrapper(viewer):
         print(f'Using stored dataframe')
         viewer.status = 'Saving ...'
         # try:
-        userInfo._save_validation()
+        userInfo._save_validation(to_disk=True)
         viewer.status = 'Done saving!'
         return None
         # except :
@@ -1282,11 +1282,16 @@ def tsv_wrapper(viewer):
         z,y,x = viewer.camera.center
         viewer.camera.center = (y,x+50)
 
+    # On Macs, ctrl-arrow key is taken by something else.
+    @viewer.bind_key('Shift-Right')  
+    @viewer.bind_key('Shift-Up') 
     @viewer.bind_key('Control-Right')  
     @viewer.bind_key('Control-Up')   
     def zoom_in(viewer):
         viewer.camera.zoom *= 1.3
 
+    @viewer.bind_key('Shift-Left')  
+    @viewer.bind_key('Shift-Down') 
     @viewer.bind_key('Control-Left')  
     @viewer.bind_key('Control-Down')   
     def zoom_out(viewer):
@@ -1594,15 +1599,10 @@ def GUI_execute(preprocess_class):
 
 def main(preprocess_class = None):
     #TODO do this in a function because this is ugly
-    # Status update helper
-    def _update_status(status):
-        if preprocess_class is not None:
-            preprocess_class.status_label.setText(status)
-            preprocess_class.app.processEvents()
+
     global RAW_PYRAMID, RASTERS, VIEWER, ALL_CUSTOM_WIDGETS
     if preprocess_class is not None: preprocess_class.status_label.setVisible(True)
-    status = "Loading image as raster..."
-    _update_status(status)
+    preprocess_class._append_status_br("Loading image as raster...")
     start_time = time.time()
 
     print(f'\nLoading pyramid from {qptiff}...\n')
@@ -1622,18 +1622,15 @@ def main(preprocess_class = None):
             raw_subdata.remove(sds)
         RASTERS = raw_subdata
 
-        status+='<font color="#7dbc39">  Done.</font><br> Parsing object data...'
-        _update_status(status)
+        preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
+        preprocess_class._append_status_br('Sorting object data...')
     except:
-        status+='<font color="#f5551a">  Failed.</font><br> Attempting to load memory-mapped object...'
-        _update_status(status)
+        preprocess_class._append_status('<font color="#f5551a">  Failed.</font> Attempting to load memory-mapped object...')
         try:
             pyramid = tifffile.memmap(qptiff)
-            status+='<font color="#7dbc39">  Done.</font><br> Parsing object data...'
-            _update_status(status)
+            preprocess_class._append_status('<font color="#7dbc39">  Done. </font> Parsing object data...')
         except:
-            status+='<font color="#f5551a">  Failed.</font><br> Attempting to load raw image, this will take a while ...'
-            _update_status(status)
+            preprocess_class._append_status('<font color="#f5551a">  Failed.</font> Attempting to load raw image, this will take a while ...')
             try:
                 pyramid = tifffile.imread(qptiff) # print(f'\nFinal pyramid levels: {[p.shape for p in pyramid]}\n')
                 # Find location of channels in np array. Save that value, and subset the rest (one nparray per channel)
@@ -1649,11 +1646,10 @@ def main(preprocess_class = None):
                     # firstLayer = pyramid[:,:,0]
                 else:
                     pass #firstLayer = pyramid[:,:,0]
-                status+='<font color="#7dbc39">  Done.</font><br> Parsing object data...'
-                _update_status(status)
+                preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
+                preprocess_class._append_status_br('Sorting object data...')
             except:
-                status+='<font color="#f5551a">  Failed.</font><br> Aborting startup, please contact Peter.'
-                _update_status(status)
+                preprocess_class._append_status('<font color="#f5551a">  Failed.</font><br> Aborting startup, please contact Peter.')
                 raise Exception("There was a problem reading the image data. Expecting a regular or memory-mapped tif/qptiff. Got something else.")
     finally:
         end_time = time.time()
@@ -1767,16 +1763,15 @@ def main(preprocess_class = None):
     except KeyError as e:
         print(e)
         # If the user has given bad input, the function will raise a KeyError. Fail gracefully and inform the user
-        status+=f'<font color="#f5551a">  Failed.</font>'
+        preprocess_class._append_status('<font color="#f5551a">  Failed.</font>')
         if PHENOTYPES:
             status+=f'<br><font color="#f5551a">The phenotype(s) {", ".join(str(x) for x in PHENOTYPES)} might not exist in the data, or other column names may have changed!</font>'
         if ANNOTATIONS:
             status+=f'<br><font color="#f5551a">The annotations(s) {", ".join(str(x) for x in ANNOTATIONS)} might not exist in the data, or other column names may have changed!</font>'
-        _update_status(status)
         viewer.close()
         return None # allows the input GUI to continue running
-    status+='<font color="#7dbc39">  Done.</font><br> Initializing Napari session...'
-    _update_status(status)
+    preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
+    preprocess_class._append_status_br('Initializing Napari session...')
 
     set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 1.0 gamma, 0 black in, 255 white in
     add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
@@ -1794,7 +1789,7 @@ def main(preprocess_class = None):
     viewer.window.add_dock_widget(UPDATED_CHECKBOXES,area='bottom')
 
     # Finish up, and set keybindings
-    status+='<font color="#7dbc39">  Done.</font><br> Goodbye' ;_update_status(status)
+    preprocess_class._append_status('<font color="#7dbc39">  Done.</font><br> Goodbye')
     sv_wrapper(viewer)
     tsv_wrapper(viewer)
     chn_key_wrapper(viewer)

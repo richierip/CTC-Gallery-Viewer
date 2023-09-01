@@ -112,7 +112,7 @@ class userPresets:
                 self.channels.remove("AF")
                 self.channels.append("AF")
 
-    def _save_validation(self):
+    def _save_validation(self, to_disk = False):
         for call_type in reversed(self.statuses.keys()):
             try:
                 self.objectDataFrame[f"Validation | {call_type}"]
@@ -145,11 +145,12 @@ class userPresets:
         # Drop analysis region if it does not belong
 
         self.objectDataFrame.update(df) # overwrite data with new cols
-
+        self.objectDataFrame[calls + ['Object Id']] = self.objectDataFrame[calls + ['Object Id']].astype(int)
         # print(self.objectDataFrame.columns)
         # print(self.objectDataFrame[calls].head(15))
 
-        self.objectDataFrame.to_csv(self.objectDataPath, index=False)
+        if to_disk:
+            self.objectDataFrame.to_csv(self.objectDataPath, index=False)
         self.objectDataFrame.reset_index(drop=True,inplace=True)
         return True
 
