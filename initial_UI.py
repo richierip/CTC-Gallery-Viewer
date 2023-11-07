@@ -1,6 +1,7 @@
 #############################################################################
 
-from PyQt5.QtCore import Qt
+import typing
+from PyQt5.QtCore import QObject, Qt, QThread
 from PyQt5.QtGui import QIcon, QPixmap,QColor,QFont
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,QMainWindow, QGridLayout, QDesktopWidget, 
                              QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QMenuBar, QAction)
@@ -28,7 +29,7 @@ import webbrowser # for opening github
 import warnings
 warnings.catch_warnings
 
-VERSION_NUMBER = '1.2.0'
+VERSION_NUMBER = '1.2'
 FONT_SIZE = 12
 #DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
 CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
@@ -72,6 +73,8 @@ class ViewerPresets(QDialog):
         self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
         self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
         self.setWindowFlag(Qt.WindowTitleHint,False)
+        # self.setWindowFlag(Qt.WindowContextHelpButtonHint,False)
+
 
         self.userInfo = store_and_load.loadObject('data/presets')
 
@@ -943,7 +946,7 @@ class ViewerPresets(QDialog):
             self.userInfo.annotation_mappings = {}
             self.specificCellAnnotationEdit.setVisible(False)
             self.specificCellAnnotationCombo.setVisible(False)
-            self.userInfo.specific_cell['Annotation Layer'] = ''
+        
             return True # It's ok to have no annotation layer
         annotations = list(self.userInfo.annotation_mappings.keys())
         phenotypes = list(self.userInfo.phenotype_mappings.keys())
@@ -1011,6 +1014,7 @@ class ViewerPresets(QDialog):
 
         self.saveViewSettings() # Lets viewer app know if it needs to look out for multiple cell IDs in the sheet
         store_and_load.storeObject(self.userInfo, 'data/presets')
+        self.userInfo.session.image_display_name = sub(r'.*?\\',"", self.userInfo.qptiff) # save name of image for display later
 
         # If user fetched metadata, save changes to color mappings
         # self.saveColors()
@@ -1042,24 +1046,66 @@ class ViewerPresets(QDialog):
             logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_runtime_crash_%H%M%S.txt')))
             self._log_problem(logpath,e)
         
+class ThreadSave(QThread):
+    def __init__(self, gallery:ViewerPresets, target=None) -> None:
+        super().__init__()
+        self.target=target
+        self.gallery=gallery
+    def run(self):
+        if self.target:
+            self.target()
 
-def ensure_saving(gallery : ViewerPresets, app) -> None:
+
+
+def ensure_saving(gallery : ViewerPresets, app, window = QDialog(), 
+                  notice = QLabel(),button = QPushButton()) -> None:
     app.exec()
     # old app has exited now
     if gallery.userInfo.session.saving_required:
         app = QApplication([])
-
-        window = QLabel()
+        button.setVisible(False)
+        
         window.setWindowTitle('Save Data')
+        window.setWindowIcon(QIcon('data/mghiconwhite.png'))
+        window.setWindowFlag(Qt.WindowTitleHint,False)
+        window.setWindowFlag(Qt.WindowContextHelpButtonHint,False)
+        
         window.setGeometry(200,200,1400,300) # 3rd and 4th args are width and height
         window.frameGeometry().moveCenter(QDesktopWidget().availableGeometry().center()) # center this window
         window.setStyleSheet('color:#075cbf ; font-size: 25pt')
+        notice.setText('Saving scoring decisions, <font color="#a05459">the file will be locked until the operation is complete!</font>')
+        notice.setAlignment(Qt.AlignCenter)
+
+        # set layout
+        layout = QGridLayout()
+        layout.addWidget(notice,0,0)
+        layout.addWidget(button,1,0)
+        window.setLayout(layout)
         window.show()
-        window.setText('Saving scoring decisions, <font color="#a05459">the file will be locked until the operation is complete!</font>')
-        app.processEvents()
-        print('\nShould be saving data now...')
+        def goodbye(window,notice):
+            notice.setText(notice.text()+'<br><font color="#7dbc39">  Done. </font>')
+            notice.setText('<font color="#7dbc39">  Done. </font>')
+            app.processEvents()
+            print('Done saving.')
+            time.sleep(2)
+            window.close()
         try:
-            save = gallery.userInfo._save_validation(to_disk=True)
+            def begin_save():
+                gallery.userInfo._save_validation(to_disk=True)
+            t = ThreadSave(gallery, target = begin_save)
+            t.start()
+            print('\nShould be saving data now...')
+            t.finished.connect(lambda: goodbye(window,notice))
+            app.exec()
+
+
+        except PermissionError:
+            button.setText("Try to save again")
+            button.setVisible(True)
+            button.pressed.connect(ensure_saving(gallery,app,window,notice,button))
+            notice.setText('<font color="#a05459">Can\'t access the save file! </font><br>Close your file and hit the button below')
+            app.exec()
+
         except Exception as e:
             save = False
             print('save issue!')
@@ -1068,15 +1114,8 @@ def ensure_saving(gallery : ViewerPresets, app) -> None:
                 os.makedirs(folder)
             logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_SavingError_%H%M%S.txt')))
             gallery._log_problem(logpath,e)
-        if save:
-            window.setText('<br><font color="#7dbc39">  Done. </font>')
-        else:
-            window.setText('<br><font color="#a05459">  Error! </font>')
-        window.setAlignment(Qt.AlignCenter)
-        app.processEvents()
-        print('Done saving.')
-        time.sleep(2)
-        window.close()
+            notice.setText('<font color="#a05459">There was an issue.</font><br>Send the error log to Peter.')
+        app.processEvents() 
     return None
 
 

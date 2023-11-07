@@ -23,7 +23,7 @@ from os.path import abspath, join, dirname, pardir
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT, BUNDLE
 from PyInstaller.utils.hooks import collect_data_files
 import napari
-VERSION_NUMBER = "1.2.0"
+VERSION_NUMBER = "1.2"
 
 sys.modules['FixTk'] = None
 
@@ -119,7 +119,7 @@ def format(x):
 
 
 DATA_FILES = [format(f) for f in collect_data_files('napari') if keep(f[0])]
-NAME = f'GalleryViewer v{VERSION_NUMBER} beta'
+NAME = f'GalleryViewer v{VERSION_NUMBER}'
 WINDOWED = True
 DEBUG = False
 UPX = False
@@ -134,7 +134,7 @@ a = Analysis(
                  'imagecodecs._shared', 'imagecodecs._imcd', 'magicgui', 'rasterio'],
     pathex=[BUNDLE_ROOT],
     datas=DATA_FILES + [(r'C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\*.PNG', 'data' ),
-            (r"C:\Users\prich\Desktop\Projects\MGH\gallery_app\mghiconwhite.ico", 'data', 'runtime logs')],
+            (r"C:\Users\prich\Desktop\Projects\MGH\gallery_app\mghiconwhite.ico", 'data')],
     hookspath=[HOOKSPATH],
     excludes=[
         'FixTk',

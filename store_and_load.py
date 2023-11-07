@@ -42,6 +42,7 @@ class sessionVariables:
         self.saving_required = False
         self.status_list = {}
         self.saved_notes = {}
+        self.image_display_name = ""
 
 class userPresets:
     ''' This class is used to store user-selected parameters on disk persistently,

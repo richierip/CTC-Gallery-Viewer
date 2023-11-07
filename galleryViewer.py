@@ -29,6 +29,7 @@ from re import sub
 
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
+VERSION_NUMBER = '1.2'
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
 cell_colors = store_and_load.CELL_COLORS
 print('\n--------------- adding custom cmaps\n')
@@ -1594,7 +1595,7 @@ def GUI_execute(preprocess_class):
     else:
         GLOBAL_SORT = f"Sample AF Cell Intensity"
     # set saving flag so that dataframe will be written upon exit
-    userInfo.session.saving_required = True
+    userInfo.session.saving_required = True # make the app save it's data on closing
     main(preprocess_class)
 
 def main(preprocess_class = None):
@@ -1656,7 +1657,7 @@ def main(preprocess_class = None):
         print(f'... completed in {end_time-start_time} seconds')
 
     
-    viewer = napari.Viewer(title=f'GalleryViewer v1.2')
+    viewer = napari.Viewer(title=f'GalleryViewer v{VERSION_NUMBER} {SESSION.image_display_name}')
     VIEWER = viewer
     # Get rid of the crap on the left sidebar for a cleaner screen
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
@@ -1730,7 +1731,7 @@ def main(preprocess_class = None):
     box_container = viewer.window.add_dock_widget([status_box_show,status_box_hide],name ="Show/hide boxes",area="right")
     absorption_widget = QPushButton("Absorption")
     absorption_widget.pressed.connect(toggle_absorption)
-    viewer.window.add_dock_widget(absorption_widget,name ="Light/dark mode slider",area="right")
+    viewer.window.add_dock_widget(absorption_widget,name ="Light/dark mode",area="right")
 
 
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
