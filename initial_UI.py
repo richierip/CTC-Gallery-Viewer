@@ -559,6 +559,22 @@ class ViewerPresets(QDialog):
             self.previewImageDataButton.setEnabled(False)
             self.previewImageDataButton.setStyleSheet(f"color: #ffa000")
 
+    def _retrieve_image_scale(self):
+        ''' Get pixel per um value for the image'''
+        try:
+            # return None
+            path = self.qptiffEntry.text().strip('"')
+            description = tifffile.TiffFile(path).pages[0].tags['ImageDescription'].value
+            root = ET.fromstring(description)
+            # QPTIFF only
+            raw = [x.text.split("_")[0] for x in root.findall(".//PixelSizeMicrons")]
+            val = min([float(x) for x in raw])
+            return val
+        except Exception:
+            return None
+
+
+
     def _prefillImageData(self):
         path = self.qptiffEntry.text().strip('"')
         # Parse annoying TIF metadata
@@ -1016,7 +1032,7 @@ class ViewerPresets(QDialog):
         self.saveViewSettings() # Lets viewer app know if it needs to look out for multiple cell IDs in the sheet
         store_and_load.storeObject(self.userInfo, 'data/presets')
         self.userInfo.session.image_display_name = sub(r'.*?\\',"", self.userInfo.qptiff) # save name of image for display later
-
+        self.userInfo.session.image_scale = self._retrieve_image_scale()
         # If user fetched metadata, save changes to color mappings
         # self.saveColors()
 
@@ -1054,7 +1070,7 @@ class ThreadSave(QThread):
         self.gallery=gallery
     def run(self):
         if self.target:
-            self.target()
+            self.target(self.gallery)
 
 
 
@@ -1083,28 +1099,37 @@ def ensure_saving(gallery : ViewerPresets, app, window = QDialog(),
         layout.addWidget(button,1,0)
         window.setLayout(layout)
         window.show()
-        def goodbye(window,notice):
-            notice.setText(notice.text()+'<br><font color="#7dbc39">  Done. </font>')
-            notice.setText('<font color="#7dbc39">  Done. </font>')
-            app.processEvents()
-            print('Done saving.')
+        def begin_save(g):
+            g.save_result = g.userInfo._save_validation(to_disk=True)
+        def goodbye(gallery,app,window,notice,button, save_result):
+            if save_result:
+                notice.setText(notice.text()+'<br><font color="#7dbc39">  Done. </font>')
+                # notice.setText('<font color="#7dbc39">  Done. </font>')
+                print('Done saving.')
+            else:
+                print('Error. Looping here until saving works.')
+                notice.setText(notice.text()+'<br><font color="#a05459"> There was a permissions issue - close your file? </font>')
+                button.setText("Try to save again")
+                button.setVisible(True)
+                def retry(gallery, notice, app):
+                    if gallery.userInfo._save_validation(to_disk=True): 
+                        notice.setText('<font color="#7dbc39"> Scoring results saved. </font>')
+                        app.processEvents()
+                        time.sleep(2)
+                        window.close()
+                button.pressed.connect(lambda: retry(gallery, notice, app))
+                notice.setText('<font color="#a05459">Can\'t access the save file! </font><br>Close your file and hit the button below')
+                app.processEvents()
+                return None # needed?
+            
             time.sleep(2)
             window.close()
         try:
-            def begin_save():
-                gallery.userInfo._save_validation(to_disk=True)
+                    
             t = ThreadSave(gallery, target = begin_save)
             t.start()
             print('\nShould be saving data now...')
-            t.finished.connect(lambda: goodbye(window,notice))
-            app.exec()
-
-
-        except PermissionError:
-            button.setText("Try to save again")
-            button.setVisible(True)
-            button.pressed.connect(ensure_saving(gallery,app,window,notice,button))
-            notice.setText('<font color="#a05459">Can\'t access the save file! </font><br>Close your file and hit the button below')
+            t.finished.connect(lambda: goodbye(gallery,app,window,notice,button, gallery.save_result))
             app.exec()
 
         except Exception as e:

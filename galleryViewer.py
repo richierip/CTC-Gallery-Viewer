@@ -244,14 +244,14 @@ def fix_default_composite_adj():
 def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
     def _save_validation(VIEWER, Mode):
         VIEWER.status = 'Saving ...'
-        try:
-            userInfo._save_validation(to_disk=False)
+        res = userInfo._save_validation(to_disk=False)
+        if res:
             if Mode == 1:
                 VIEWER.status = 'Channels Mode enabled. Decisions loaded successfully.'
             elif Mode ==2:
                 VIEWER.status = 'Composite Mode enabled. Decisions loaded successfully.'
             return True
-        except:
+        else:
             #TODO Maybe it's an excel sheet?
             if Mode == 1:
                 VIEWER.status = 'Channels Mode enabled. But, there was a problem saving your decisions. Close your data file?'
@@ -304,12 +304,11 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
 
 def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo, intensity_sort_widget):
     def _save_validation(VIEWER,numcells):
-        try:
-            userInfo._save_validation(to_disk=False)
+        res = userInfo._save_validation(to_disk=False)
+        if res:
             VIEWER.status = f'Next {numcells} cells loaded.'
             return True
-        except:
-            # Maybe it's an excel sheet?
+        else:
             VIEWER.status = 'There was a problem saving, so the next set of cells was not loaded. Close your data file?'
             return False
         
@@ -648,7 +647,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
         cid = i + " " + anno
         editable_image.text((60,1), str(cid), color, font = font)
         resized = np.array(new.resize((im_length,cb_size), Image.Resampling.LANCZOS))
-        np.save("lanczos", resized)
+        # np.save("lanczos", resized)
         if ABSORPTION:
             resized[:,:,0]
             resized[:,:,3] = (255* (resized[:,:,:3] <200).any(axis=2)).astype(np.uint8)
@@ -778,20 +777,22 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
                     page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout
                     page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), composite_only)
     
-    
-    IMAGE_LAYERS['Absorption'] = viewer.add_image(white_background(size_multiplier).astype(np.uint8), name = "Absorption", blending = 'translucent', visible = ABSORPTION)
+    print(f"\nMy scale is {SESSION.image_scale}")
+    sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
+    IMAGE_LAYERS['Absorption'] = viewer.add_image(white_background(size_multiplier).astype(np.uint8), name = "Absorption", 
+                                                  blending = 'translucent', visible = ABSORPTION, scale =sc )
     for fluor in list(page_image.keys()):
         print(f"Adding layers now. fluor is {fluor}")
         if fluor == 'Composite':
             continue
         if ABSORPTION:
             IMAGE_LAYERS[fluor] = viewer.add_image(page_image[fluor], name = fluor, 
-                                                blending = 'minimum', colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse') )
+                                                blending = 'minimum', colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse'), scale = sc )
         else:
              IMAGE_LAYERS[fluor] = viewer.add_image(page_image[fluor], name = fluor, 
-                                                blending = 'additive', colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]) )
+                                                blending = 'additive', colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]), scale = sc)
     # if composite_only:
-    IMAGE_LAYERS['Status'] = viewer.add_image(page_status_layer.astype(np.uint8), name='Status Layer', interpolation='linear')
+    IMAGE_LAYERS['Status'] = viewer.add_image(page_status_layer.astype(np.uint8), name='Status Layer', interpolation='linear', scale = sc)
     status_layer = IMAGE_LAYERS['Status']
 
     ##----------------- Live functions that control mouseover behavior on images 
@@ -799,6 +800,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     '''Take a pixel coordinate (y,x) and return an (x,y) position for the image that contains the pixel in the image grid'''
     def pixel_coord_to_grid(coords):
         x = coords[0]; y = coords[1]
+        sc = 1 if SESSION.image_scale is None else SESSION.image_scale
         # Cannot return 0 this way, since there is no 0 row or col
         row_num = max(ceil((x+1)/(PUNCHOUT_SIZE+2)),1)
         col_num = max(ceil((y+1)/(PUNCHOUT_SIZE+2)),1)
@@ -812,7 +814,11 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     def find_mouse(image_layer, data_coordinates, scope = 'world'):
         
                 # retrieve cell ID name
+        # Scale data coordinates to image. Then round to nearest int, representing the coord or the image pixel under the mouse
+        sc = 1.0 if SESSION.image_scale is None else SESSION.image_scale
+        data_coordinates = tuple([x/sc for x in data_coordinates])
         coords = np.round(data_coordinates).astype(int)
+
         row,col = pixel_coord_to_grid(coords)
         if coords[0] < 0 or coords[1]<0:
             return "None" , None, None
@@ -1199,11 +1205,12 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
 
 #TODO make a button to do this as well?
 def set_viewer_to_neutral_zoom(viewer):
+    sc = 1 if SESSION.image_scale is None else SESSION.image_scale
     if COMPOSITE_MODE:
-        viewer.camera.center = (350,450) # these values seem to work best
+        viewer.camera.center = (350*sc,450*sc) # these values seem to work best
     else:
-        viewer.camera.center = (350, 220)
-    viewer.camera.zoom = 1.3
+        viewer.camera.center = (350*sc, 300*sc)
+    viewer.camera.zoom = 1.2 / sc
 
 def add_custom_colors():
     for colormap in cell_colors:
@@ -1220,14 +1227,13 @@ def sv_wrapper(viewer):
         print(f'Using stored dataframe')
         viewer.status = 'Saving ...'
         # try:
-        userInfo._save_validation(to_disk=True)
-        viewer.status = 'Done saving!'
+        res = userInfo._save_validation(to_disk=True)
+        
+        if res: 
+            viewer.status = 'Done saving!'
+        else:
+            viewer.status = 'There was a problem. Close your data file?'
         return None
-        # except :
-
-        #     # Maybe it's an excel sheet?
-        #     viewer.status = 'There was a problem. Close your data file?'
-        #     return None
 
 def tsv_wrapper(viewer):
     @viewer.bind_key('h')
@@ -1263,17 +1269,20 @@ def tsv_wrapper(viewer):
     @viewer.bind_key('Up')
     def scroll_up(viewer):
         z,y,x = viewer.camera.center
-        viewer.camera.center = (y-50,x)
+        sc = 1 if SESSION.image_scale is None else SESSION.image_scale
+        viewer.camera.center = (y-((PUNCHOUT_SIZE+2)*sc),x)
 
     @viewer.bind_key('Down')
     def scroll_down(viewer):
         z,y,x = viewer.camera.center
-        viewer.camera.center = (y+50,x)
+        sc = 1 if SESSION.image_scale is None else SESSION.image_scale
+        viewer.camera.center = (y+((PUNCHOUT_SIZE+2)*sc),x)
     
     @viewer.bind_key('Left')
     def scroll_left(viewer):
         z,y,x = viewer.camera.center
-        viewer.camera.center = (y,x-50)
+        sc = 1 if SESSION.image_scale is None else SESSION.image_scale
+        viewer.camera.center = (y,x-((PUNCHOUT_SIZE+2)*sc))
         #TODO trigger mouse update here
         # napari.Viewer.window.qt_viewer._process_mouse_event
         # viewer.window.qt_viewer.canvas.events.mouse_press(pos=(x, y), modifiers=(), button=0)
@@ -1282,7 +1291,8 @@ def tsv_wrapper(viewer):
     @viewer.bind_key('Right')   
     def scroll_right(viewer):
         z,y,x = viewer.camera.center
-        viewer.camera.center = (y,x+50)
+        sc = 1 if SESSION.image_scale is None else SESSION.image_scale
+        viewer.camera.center = (y,x+((PUNCHOUT_SIZE+2)*sc))
 
     # On Macs, ctrl-arrow key is taken by something else.
     @viewer.bind_key('Shift-Right')  
@@ -1290,14 +1300,14 @@ def tsv_wrapper(viewer):
     @viewer.bind_key('Control-Right')  
     @viewer.bind_key('Control-Up')   
     def zoom_in(viewer):
-        viewer.camera.zoom *= 1.3
+        viewer.camera.zoom *= 1.15
 
     @viewer.bind_key('Shift-Left')  
     @viewer.bind_key('Shift-Down') 
     @viewer.bind_key('Control-Left')  
     @viewer.bind_key('Control-Down')   
     def zoom_out(viewer):
-        viewer.camera.zoom /= 1.3  
+        viewer.camera.zoom /= 1.15  
     
     @viewer.bind_key('a')
     def trigger_absorption(viewer):
@@ -1397,17 +1407,13 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
         raise KeyError
 
     # Add columns w/defaults if they aren't there to avoid runtime issues
-    try:
-        halo_export.loc[2,f"Validation | Unseen"]
-    except KeyError:
+    if "Validation | Unseen" not in halo_export.columns:
         for call_type in reversed(STATUS_COLORS.keys()):
             if call_type == 'Unseen':
                 halo_export.insert(8,f"Validation | {call_type}", 1)
             else:
-                halo_export.insert(8,f"Validation | {call_type}", 0) 
-    try:
-        halo_export.loc[2,"Notes"]
-    except KeyError:
+                halo_export.insert(8,f"Validation | {call_type}", 0)     
+    if "Notes" not in halo_export.columns:
         halo_export.insert(8,"Notes","-")
         halo_export.fillna("")
 
@@ -1430,6 +1436,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     global_sort_status = True
     if GLOBAL_SORT is not None:
         try:
+            GLOBAL_SORT = [x for x in all_possible_intensities if all(y in x for y in GLOBAL_SORT.split(" "))][0]
             halo_export = halo_export.sort_values(by = GLOBAL_SORT, ascending = False, kind = 'mergesort')
         except:
             print('Global sort failed. Will sort by Cell Id instead.')
@@ -1510,8 +1517,11 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
                     cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = False, kind = 'mergesort')
 
             else:
+                 # First, check if a custom name was used.
+                sort_by_intensity = [x for x in all_possible_intensities if all(y in x for y in sort_by_intensity.split(" "))][0]
                 cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = True, kind = 'mergesort')
-        except:
+        except KeyError:
+            #  
             if global_sort_status:
                 VIEWER.status = f"Unable to sort this page by '{sort_by_intensity}', will use ID instead. Check your data headers."
             else:
@@ -1785,6 +1795,10 @@ def main(preprocess_class = None):
     # Perform adjustments before exiting function
     reuse_contrast_limits() # Only checked fluors will be visible
     reuse_gamma()
+    #Enable scale bar
+    if SESSION.image_scale:
+        viewer.scale_bar.visible = True
+        viewer.scale_bar.unit = "um"
 
     # Filter checkboxes down to relevant ones only and update color
     for i in range(len(all_boxes)):
@@ -1804,7 +1818,7 @@ def main(preprocess_class = None):
     if preprocess_class is not None: preprocess_class.close() # close other window
     napari.run()
     # close image file
-
+    set_viewer_to_neutral_zoom(viewer)
     if RASTERS is not None:
         print('Not sure if we have to close this file... the "with" statement should handle it.')
         RAW_PYRAMID.close()

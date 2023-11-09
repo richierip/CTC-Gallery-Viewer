@@ -43,6 +43,7 @@ class sessionVariables:
         self.status_list = {}
         self.saved_notes = {}
         self.image_display_name = ""
+        self.image_scale = None # None, or float representing pixels per micron
 
 class userPresets:
     ''' This class is used to store user-selected parameters on disk persistently,
@@ -151,8 +152,15 @@ class userPresets:
         # print(self.objectDataFrame[calls].head(15))
 
         if to_disk:
-            self.objectDataFrame.to_csv(self.objectDataPath, index=False)
-        self.objectDataFrame.reset_index(drop=True,inplace=True)
+            try:
+                self.objectDataFrame.to_csv(self.objectDataPath, index=False)
+                self.objectDataFrame.reset_index(drop=True,inplace=True)
+            except PermissionError:
+                self.objectDataFrame.reset_index(drop=True,inplace=True)
+                return False
+        
+            # hdata.loc[:,1:].to_excel(
+            # OBJECT_DATA,sheet_name='Exported from gallery viewer')
         return True
 
 def storeObject(obj : userPresets, filename : str):
