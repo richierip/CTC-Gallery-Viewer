@@ -23,7 +23,7 @@ from os.path import abspath, join, dirname, pardir
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT, BUNDLE
 from PyInstaller.utils.hooks import collect_data_files
 import napari
-VERSION_NUMBER = "1.2"
+VERSION_NUMBER = "1.2.1"
 
 sys.modules['FixTk'] = None
 

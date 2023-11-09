@@ -25,11 +25,12 @@ import custom_maps # Necessary, do not remove
 from math import ceil
 from PIL import Image, ImageFont, ImageDraw
 from re import sub
+import os
 # from initial_UI import VERSION_NUMBER
 
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
-VERSION_NUMBER = '1.2'
+VERSION_NUMBER = '1.2.1'
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
 cell_colors = store_and_load.CELL_COLORS
 print('\n--------------- adding custom cmaps\n')
@@ -1319,6 +1320,10 @@ def tsv_wrapper(viewer):
         for fluor in CHANNELS_STR:
             if fluor =='Composite': continue
             IMAGE_LAYERS[fluor].interpolation = new
+
+    @viewer.bind_key('Alt-m')
+    def open_guide(viewer):
+        os.startfile(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
         
 
 

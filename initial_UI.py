@@ -29,7 +29,7 @@ import webbrowser # for opening github
 import warnings
 warnings.catch_warnings
 
-VERSION_NUMBER = '1.2'
+VERSION_NUMBER = '1.2.1'
 FONT_SIZE = 12
 #DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
 CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
@@ -226,7 +226,8 @@ class ViewerPresets(QDialog):
     def process_menu_action(self,q):
         if 'manual' in q.text().lower():
             try:
-                os.startfile(r"N:\Imagers\ImageProcessing\GalleryViewer\GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER))
+                # print(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
+                os.startfile(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
             except FileNotFoundError:
                 self.status_label.setVisible(True)
                 status ='<font color="#ffa000">Can\'t find a guide for this version!</font><br>Check for old versions in the server\'s Imagers/ImageProcessing/GalleryViewer/ folder.'
