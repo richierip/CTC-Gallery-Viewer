@@ -14,6 +14,7 @@ This spec file will omit the following critical folder from your /venv/Lib/site-
     /napari_svg
     /honestly anything related to napari
     /rasterio
+    /freetype
     /runtime logs
 
 Modified from this: https://github.com/tlambert03/napari/blob/e9eee2edd29dc29db0fc011c31635ee2d713abf0/bundle/napari.spec

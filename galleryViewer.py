@@ -800,7 +800,7 @@ def add_layers(viewer,pyramid, cells, offset, composite_only=COMPOSITE_MODE, new
     '''Take a pixel coordinate (y,x) and return an (x,y) position for the image that contains the pixel in the image grid'''
     def pixel_coord_to_grid(coords):
         x = coords[0]; y = coords[1]
-        sc = 1 if SESSION.image_scale is None else SESSION.image_scale
+        # sc = 1 if SESSION.image_scale is None else SESSION.image_scale
         # Cannot return 0 this way, since there is no 0 row or col
         row_num = max(ceil((x+1)/(PUNCHOUT_SIZE+2)),1)
         col_num = max(ceil((y+1)/(PUNCHOUT_SIZE+2)),1)
@@ -1818,7 +1818,7 @@ def main(preprocess_class = None):
     if preprocess_class is not None: preprocess_class.close() # close other window
     napari.run()
     # close image file
-    set_viewer_to_neutral_zoom(viewer)
+
     if RASTERS is not None:
         print('Not sure if we have to close this file... the "with" statement should handle it.')
         RAW_PYRAMID.close()

@@ -520,13 +520,13 @@ class ViewerPresets(QDialog):
             # get everything after the last / , i.e. the image name.
             # Do it this way since some people use a mapped drive path, some use CIFS, some use UNC path with IP address
             im_name_csv = sub(r'.*?\\',"", im_location_csv) 
-            path = self.qptiffEntry.text().strip('"')
+            path = self.userInfo.qptiff
             if im_name_csv != sub(r'.*?\\',"", path):
                 return 'name conflict'
         except ValueError: 
             try: # Attempt to check the alternative column name that might be present
                 im_location_csv = pd.read_csv(path, index_col=False, nrows=1, usecols=['Image File Name']).iloc[0,0]
-                path = self.qptiffEntry.text().strip('"')
+                path = self.userInfo.qptiff
                 if im_name_csv != sub(r'.*?\\',"", path):
                     return 'name conflict'
             except ValueError:
@@ -562,24 +562,32 @@ class ViewerPresets(QDialog):
     def _retrieve_image_scale(self):
         ''' Get pixel per um value for the image'''
         try:
-            # return None
-            path = self.qptiffEntry.text().strip('"')
-            description = tifffile.TiffFile(path).pages[0].tags['ImageDescription'].value
+        #     return None
+            path = self.userInfo.qptiff
+            with tifffile.TiffFile(path) as tif:
+                description = tif.pages[0].tags['ImageDescription'].value
             root = ET.fromstring(description)
             # QPTIFF only
             raw = [x.text.split("_")[0] for x in root.findall(".//PixelSizeMicrons")]
             val = min([float(x) for x in raw])
             return val
-        except Exception:
+        except Exception as e:
+            folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+            logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_scale_retrieve_failure_%H%M%S.txt')))
+            self._log_problem(logpath,e)
+            # exit()
             return None
 
 
 
     def _prefillImageData(self):
-        path = self.qptiffEntry.text().strip('"')
+        path = self.userInfo.qptiff
         # Parse annoying TIF metadata
         # It seems to be stored in XML format under the 'ImageDescription' TIF tag. 
-        description = tifffile.TiffFile(path).pages[0].tags['ImageDescription'].value
+        with tifffile.TiffFile(path) as tif:
+            description = tif.pages[0].tags['ImageDescription'].value
         root = ET.fromstring(description)
         # QPTIFF only
         sc = root.find(".//ScanColorTable")
@@ -955,7 +963,7 @@ class ViewerPresets(QDialog):
         # Get headers and unique annotations
         path = self.userInfo.objectDataPath
         headers = pd.read_csv(path, index_col=False, nrows=0).columns.tolist() 
-        true_annotations = self._locate_annotations_col(path)
+        true_annotations = self._locate_annotations_col(path) # Find out if the data have multiple analysis regions (duplicate Cell IDs as well)
         if true_annotations is None: 
             self.annotationButton.setEnabled(False)
             self.annotationDisplay.setText('<u>Annotation Layer</u><br>All')
@@ -1029,7 +1037,7 @@ class ViewerPresets(QDialog):
              self.status_label.setText('<font color="#f5551a">Access to object data file was denied</font><br>Close the sheet before trying again')
              return None
 
-        self.saveViewSettings() # Lets viewer app know if it needs to look out for multiple cell IDs in the sheet
+        self.saveViewSettings()
         store_and_load.storeObject(self.userInfo, 'data/presets')
         self.userInfo.session.image_display_name = sub(r'.*?\\',"", self.userInfo.qptiff) # save name of image for display later
         self.userInfo.session.image_scale = self._retrieve_image_scale()
