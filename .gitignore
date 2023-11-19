@@ -3,7 +3,9 @@
 build/
 dist/
 ctc-gallery-venv/
+runtime logs/
 __pycache__/
+.vscode/
 data/presets
 data/SCDATA.txt
 data/composite.txt
@@ -17,6 +19,17 @@ raster_testing.py
 setup.py
 test.spec
 *.tif
+*.pkl
+*.npy
+data/8.10presets
+data/8.16presets
+data/8.22presets
+halo_export
+im_metadata_sample.txt
+jchen_imageload_test.py
+lineEditTesting.py
+needed.txt
+view_settings_parser.py
 
 # Compiled source #
 ###################

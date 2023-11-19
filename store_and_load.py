@@ -44,6 +44,11 @@ class sessionVariables:
         self.saved_notes = {}
         self.image_display_name = ""
         self.image_scale = None # None, or float representing pixels per micron
+        self.zarr_store = None
+        self.mode = "Gallery" # ['Gallery', 'Multichannel', 'Context']
+        self.current_cells =  {'Layer':str,"cid": int,"center_x": int,'center_y': int,
+                                'validation_call': str, 'XMax' : float,'XMin':float,
+                                'YMax' : float,'YMin':float} # Holds dict of dict for the cells that are loaded on the current page in the viewer
 
 class userPresets:
     ''' This class is used to store user-selected parameters on disk persistently,
@@ -115,6 +120,7 @@ class userPresets:
                 self.channels.append("AF")
 
     def _save_validation(self, to_disk = False):
+        '''Save new calls to the session's Pandas DataFrame, and optionally save that frame to disk'''
         for call_type in reversed(self.statuses.keys()):
             try:
                 self.objectDataFrame[f"Validation | {call_type}"]
@@ -155,7 +161,7 @@ class userPresets:
             try:
                 self.objectDataFrame.to_csv(self.objectDataPath, index=False)
                 self.objectDataFrame.reset_index(drop=True,inplace=True)
-            except PermissionError:
+            except PermissionError: # file in use
                 self.objectDataFrame.reset_index(drop=True,inplace=True)
                 return False
         

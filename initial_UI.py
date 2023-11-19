@@ -89,7 +89,7 @@ class ViewerPresets(QDialog):
         pixmap = QPixmap('data/mgh-mgb-cc-logo2 (Custom).png')
         cc_logo.setPixmap(pixmap)
         # f'<br><font color="{idcolor}">CID: {ID}</font>'
-        titleLabel = QLabel(f'TCC Imaging Core <font color="#033b96">Gallery</font><font color="#009ca6">Viewer</font> <font size=12pt>v{VERSION_NUMBER}</font>')
+        titleLabel = QLabel(f'Tumor Cartography Core <font color="#033b96">Gallery</font><font color="#009ca6">Viewer</font> <font size=12pt>v{VERSION_NUMBER}</font>')
         # custom_font = QFont(); custom_font.setFamily('Metropolis Black'); custom_font.setPointSize(39)
         titleLabel.setStyleSheet('font-family: Metropolis ; font-size: 25pt')
         # titleLabel.setFont(QFont('MS Gothic',38))
@@ -193,7 +193,7 @@ class ViewerPresets(QDialog):
         topLayout = QGridLayout()
         # topLayout.addStretch(1)
         topLayout.addWidget(cc_logo,0,0)
-        topLayout.addWidget(titleLabel,0,1)
+        topLayout.addWidget(titleLabel,0,1, 1,2, Qt.AlignLeft)
         topLayout.setSpacing(20)
         topLayout.addWidget(entryLabel,1,0,1,0)
         topLayout.addWidget(self.qptiffEntry,1,1)
@@ -1065,6 +1065,7 @@ class ViewerPresets(QDialog):
             # self.processEvents()
             GUI_execute(self)
         except Exception as e:
+            # self.userInfo.session.zarr_store.close() # close zarr file??
             folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
             if not os.path.exists(folder):
                 os.makedirs(folder)
@@ -1085,6 +1086,8 @@ class ThreadSave(QThread):
 def ensure_saving(gallery : ViewerPresets, app, window = QDialog(), 
                   notice = QLabel(),button = QPushButton()) -> None:
     app.exec()
+
+    # gallery.userInfo.session.zarr_store.close() # close zarr file??
     # old app has exited now
     if gallery.userInfo.session.saving_required:
         app = QApplication([])
