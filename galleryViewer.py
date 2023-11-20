@@ -396,7 +396,8 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
     else:
         for layer in VIEWER.layers:
             if "global" not in layer.name:
-                VIEWER.layers.remove(layer)
+                VIEWER.layers.selection.add(layer)
+        VIEWER.layers.remove_selected()
         # VIEWER.layers.clear()
         add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2))
     
@@ -870,65 +871,86 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         return (global_y, offset_x+local_x)
     
 
+    '''Locate mouse on the canvas. Returns the name of the cell under the mouse, current mouse 
+        coordinates, and pixel values for each channel in a dict'''
     def find_mouse(image_layer, data_coordinates, scope = 'world'):
-        
+   
                 # retrieve cell ID name
         # Scale data coordinates to image. Then round to nearest int, representing the coord or the image pixel under the mouse
         sc = 1.0 if SESSION.image_scale is None else SESSION.image_scale
         data_coordinates = tuple([x/sc for x in data_coordinates])
         coords = np.round(data_coordinates).astype(int)
+        vals = {} # will hold fluor : pixel intensity pairs 
 
-        row,col = pixel_coord_to_grid(coords)
         if coords[0] < 0 or coords[1]<0:
             return "None" , None, None
-        try:
-            image_name = GRID_TO_ID[f'{row},{col}']
-        except KeyError as e:
-            return "None" , None, None
-        
-        vals = {}
-        local_x = coords[1] - (PUNCHOUT_SIZE+2)*(col-1)
-        local_y = coords[0] - (PUNCHOUT_SIZE+2)*(row-1)
-        for fluor in CHANNELS_STR:
-            if fluor == "Composite": continue
+        if SESSION.mode == "Context":
+            for fluor in CHANNELS_STR:
+                if fluor == "Composite": continue
+                # get_value returns a tuple here, where the first number is the image layer in the pyramid. Discard that
+                vals[fluor] = VIEWER.layers["global "+fluor].get_value(data_coordinates)[1]
+            return "Context", (coords[1],coords[0]), vals # flips axes of coordinates
+        else: # Gallery mode or Multichannel mode    
+            row,col = pixel_coord_to_grid(coords)
+            try:
+                image_name = GRID_TO_ID[f'{row},{col}']
+            except KeyError as e:
+                return "None" , None, None
             
-            
-            if SESSION.mode=="Multichannel":
-                # print(f"data coords: {data_coordinates}  | vs assumed coords for {fluor}: {multichannel_fetch_val(local_x, data_coordinates[0], fluor)}")
-                vals[fluor] = VIEWER.layers[fluor].get_value(multichannel_fetch_val(local_x, data_coordinates[0], fluor))
-            elif SESSION.mode=="Gallery":
-                vals[fluor] = VIEWER.layers[fluor].get_value(data_coordinates)
-            elif SESSION.mode == "Context":
-                vals[fluor] = VIEWER.layers["global "+fluor].get_value(data_coordinates)
-            if vals[fluor] is None:
-                vals[fluor] = "-"
+            local_x = coords[1] - (PUNCHOUT_SIZE+2)*(col-1)
+            local_y = coords[0] - (PUNCHOUT_SIZE+2)*(row-1)
+            for fluor in CHANNELS_STR:
+                if fluor == "Composite": continue
+                # Context mode already taken care of. Need to handle Gallery / Multichannel 
+                if SESSION.mode=="Multichannel":
+                    # print(f"data coords: {data_coordinates}  | vs assumed coords for {fluor}: {multichannel_fetch_val(local_x, data_coordinates[0], fluor)}")
+                    vals[fluor] = VIEWER.layers[fluor].get_value(multichannel_fetch_val(local_x, data_coordinates[0], fluor))
+                elif SESSION.mode=="Gallery":
+                    vals[fluor] = VIEWER.layers[fluor].get_value(data_coordinates)
+                if vals[fluor] is None:
+                    vals[fluor] = "-"
 
-        # return either global or local (relative to punchout) coordinates
-        if scope == 'world':
-            return str(image_name), coords, vals
-        else:
-            return str(image_name), (local_x,local_y), vals
+            # return either global or local (relative to punchout) coordinates
+            if scope == 'world':
+                return str(image_name), coords, vals
+            else:
+                return str(image_name), (local_x,local_y), vals
 
     @viewer.mouse_move_callbacks.append
     def display_intensity(image_layer, event):
         
-        cell_name,coords,vals = find_mouse(image_layer, event.position, scope = 'grid') 
-        if (not vals) or (vals is None):
-            # Don't do anything else
-            VIEWER.status = 'Out of bounds'
-            return True
-        cell_num = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_num,'')
-        if cell_anno == 'All':
-            image_name = f'Cell {cell_num}'
-        else:
-            image_name = f'Cell {cell_num} from {cell_anno}'
-        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
-        output_str = ''
-        for fluor, val in vals.items():
-            if val != "-": val = int(val)
-            output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {val}   </font>'
-        else:
-            # print('else')
+        if SESSION.mode == "Context":
+            _ ,coords,vals = find_mouse(image_layer, event.position)
+            
+            if (not vals) or (vals is None) or (next(iter(vals.values())) is None):
+                # Don't do anything else - the cursor is out of bounds of the image
+                VIEWER.status = 'Out of bounds'
+                return True 
+            output_str = ''
+            for fluor, val in vals.items():
+                if val != "-": val = int(val)
+                output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {val}   </font>'
+            VIEWER.status = f'Context Mode pixel intensities at {coords}: {output_str}'
+        elif SESSION.mode == "Gallery" or SESSION.mode == "Multichannel":
+            cell_name,coords,vals = find_mouse(image_layer, event.position, scope = 'grid') 
+            if (not vals) or (vals is None):
+                # Don't do anything else
+                VIEWER.status = 'Out of bounds'
+                return True
+            cell_num = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_num,'')
+
+            if cell_anno == 'All':
+                image_name = f'Cell {cell_num}'
+            else:
+                image_name = f'Cell {cell_num} from {cell_anno}'
+
+            set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
+            output_str = ''
+
+            for fluor, val in vals.items():
+                if val != "-": val = int(val)
+                output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {val}   </font>'
+        
             sc = STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]]
             VIEWER.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
 
@@ -1263,7 +1285,7 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
     @status_layer.bind_key('l')
     def load_context_mode(image_layer):
         print("\nIn context mode fxn")
-        SESSION.mode = "Context"
+        
         cell_name, data_coordinates, val = find_mouse(image_layer, viewer.cursor.position)
         print(cell_name)
         target_cell_info = SESSION.current_cells[cell_name]
@@ -1287,6 +1309,8 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
         viewer.camera.center = (target_cell_info["center_y"]*sc,target_cell_info["center_x"]*sc) # these values seem to work best
         # viewer.camera.zoom = 1.2 / sc
+        # finally, set mode
+        SESSION.mode = "Context"
         
 
         
