@@ -283,7 +283,7 @@ def fix_default_composite_adj():
 # @magicgui(call_button='Change Mode',
 #         Mode={"widget_type": "RadioButtons","orientation": "vertical",
 #         "choices": [("Multichannel Mode", 1), ("Composite Mode", 2)]})#,layout = 'horizontal')
-def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
+def toggle_session_mode(target_mode):
     def _save_validation(VIEWER, Mode):
         VIEWER.status = 'Saving ...'
         res = userInfo._save_validation(to_disk=False)
@@ -295,52 +295,146 @@ def toggle_composite_viewstatus(all_channels_rb,composite_only_rb):
             VIEWER.status = f'{Mode} Mode enabled. But, there was a problem saving your decisions. Close your data file?'
             return False
     
-    if all_channels_rb.isChecked(): target_mode = "Multichannel"
-    else: target_mode="Gallery"
-
     # Do nothing in these cases
     if target_mode==SESSION.mode: return None
 
-    # Save data to file from current set
-    VIEWER.status = 'Saving data to file...'
-    _save_validation(VIEWER, target_mode)
-
-    # Hide the widgets to avoid crashing?
-    for widg in ALL_CUSTOM_WIDGETS.values():
-        widg.setVisible(False)
-
-    print("|||| XY STORE INFO ||||")
-    print(f"length is {len(SESSION.current_cells)} and type is {type(SESSION.current_cells)}")
-    if target_mode == "Multichannel": # change to Show All
-        SESSION.mode = target_mode
-        print(f'\nAttempting to clear')
+    if target_mode=="Context":
+                
+        target_cell_info = SESSION.cell_under_mouse
+        cell_num = str(target_cell_info["cid"])
+        print(cell_num)
+        # Turn on / off the correct layers
         for layer in VIEWER.layers:
-            if "global" not in layer.name:
-                VIEWER.layers.selection.add(layer)
-        VIEWER.layers.remove_selected()
-        # VIEWER.layers.clear()
-        # data = extract_phenotype_xldata() # Don't need this since it is saved now
-        add_layers(VIEWER,RAW_PYRAMID, copy.copy(SESSION.current_cells), int(PUNCHOUT_SIZE/2), new_page=False)
-    elif target_mode == "Gallery": # change to composite only
+            lname = layer.name
+            print(lname)
+            if 'global' not in lname:
+                layer.visible = False
+                continue
+            if "Composite" in ADJUSTED : # All marker images should be on
+                layer.visible = True
+                continue
+            else:
+                if lname.split()[1]  in ADJUSTED:  # marker image should be on
+                    layer.visible = True
+                else:
+                    layer.visible = False
+        
+        # save current coordinates
+        if SESSION.mode=="Gallery": 
+            SESSION.last_gallery_camera_coordinates["center"] = VIEWER.camera.center
+            SESSION.last_gallery_camera_coordinates["z"] = VIEWER.camera.zoom
+
+        elif SESSION.mode=="Multichannel": 
+            SESSION.last_multichannel_camera_coordinates["center"] = VIEWER.camera.center
+            SESSION.last_multichannel_camera_coordinates["z"] = VIEWER.camera.zoom
+
+        # Move to cell location on the global image
+        sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary.
+        VIEWER.camera.center = (target_cell_info["center_y"]*sc,target_cell_info["center_x"]*sc) # these values seem to work best
+        # viewer.camera.zoom = 1.2 / sc
+
+        # try to remove any previous box layers if there are any
+        try:
+            VIEWER.layers.selection.active = VIEWER.layers["global Nuclei Boxes"]
+            VIEWER.layers.remove_selected()
+        except KeyError:
+            pass
+        # Add box around cells
+        x1 = int(target_cell_info["XMin"]); x2 = int(target_cell_info["XMax"])
+        y1 = int(target_cell_info["YMin"]); y2 = int(target_cell_info["YMax"])
+        nuclei_box_coords = [[[y1,x1] , [y2,x2]]]
+
+        features = {'cid': cell_num}
+        nb_color_str = 'black' if ABSORPTION else 'white' 
+        nb_color_hex = '#000000' if ABSORPTION else '#ffffff'
+        nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_str}
+        sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
+        VIEWER.add_shapes(nuclei_box_coords, name="global Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
+                                            face_color='#00000000', scale=sc, features=features, text = nb_text )
+        VIEWER.layers.selection.active = VIEWER.layers["Status Layer"]    
+        # finally, set mode
         SESSION.mode = target_mode
-        print(f'\nAttempting to clear')
+        # Done. Leave function, no need to save cells
+        return True 
+    
+    # Now, we must be changing to Gallery OR Multichannel
+    if SESSION.mode == "Context":
+        # If we are coming from Context Mode, just change coordinates back and restore visibility
+        if target_mode == "Gallery":
+            VIEWER.camera.center = SESSION.last_gallery_camera_coordinates["center"]
+            VIEWER.camera.zoom = SESSION.last_gallery_camera_coordinates["z"]
+        elif target_mode == "Multichannel":
+            VIEWER.camera.center = SESSION.last_multichannel_camera_coordinates["center"]
+            VIEWER.camera.zoom = SESSION.last_multichannel_camera_coordinates["z"]
+
+        # Change visibilities of the correct layers
         for layer in VIEWER.layers:
-            if "global" not in layer.name:
-                VIEWER.layers.selection.add(layer)
-        VIEWER.layers.remove_selected()
-        # VIEWER.layers.clear()
-        #data = extract_phenotype_xldata() # Don't need this since it is saved now
-        add_layers(VIEWER,RAW_PYRAMID, copy.copy(SESSION.current_cells), int(PUNCHOUT_SIZE/2), new_page=False)
+            lname = layer.name
+            if 'global' in lname:
+                layer.visible = False
+                continue
+            elif lname == "Absorption":
+                layer.visible = ABSORPTION
+                continue
+            if "Composite" in ADJUSTED : # All marker images should be on
+                layer.visible = True
+                continue
+            else:
+                if lname.split()[1]  in ADJUSTED:  # marker image should be on
+                    layer.visible = True
+                else:
+                    layer.visible = False
+
+        VIEWER.layers.selection.active = VIEWER.layers["Status Layer"]
+        for widg in ALL_CUSTOM_WIDGETS.values(): # restore widgets
+            widg.setVisible(True)
+        SESSION.mode = target_mode
+        return True
     else:
-        raise Exception(f"Invalid parameter passed to toggle_composite_viewstatus: {target_mode}. Must be 1 or 2.")
-        # Perform adjustments before exiting function
-    reuse_contrast_limits() # Only checked fluors will be visible
-    reuse_gamma() 
-    for widg in ALL_CUSTOM_WIDGETS.values(): # restore widgets
-        widg.setVisible(True)
+        # Now, we are switching between Gallery and Multichannel mode. We might want to save. 
+        # Save data to file from current set
+        VIEWER.status = 'Saving data to file...'
+        _save_validation(VIEWER, target_mode)
 
-    set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
-    return None
+        # Hide the widgets to avoid crashing?
+        for widg in ALL_CUSTOM_WIDGETS.values():
+            widg.setVisible(False)
+
+        print(f"Number of cells in current page is {len(SESSION.current_cells)} and type is {type(SESSION.current_cells)}")
+        if target_mode == "Multichannel": # change to Show All
+            VIEWER.camera.center = SESSION.last_multichannel_camera_coordinates["center"]
+            VIEWER.camera.zoom = SESSION.last_multichannel_camera_coordinates["z"]
+            SESSION.mode = target_mode
+            print(f'\nAttempting to clear')
+            for layer in VIEWER.layers:
+                if "global" not in layer.name:
+                    VIEWER.layers.selection.add(layer)
+            VIEWER.layers.remove_selected()
+            # VIEWER.layers.clear()
+            # data = extract_phenotype_xldata() # Don't need this since it is saved now
+            add_layers(VIEWER,RAW_PYRAMID, copy.copy(SESSION.current_cells), int(PUNCHOUT_SIZE/2), new_page=False)
+        elif target_mode == "Gallery": # change to composite only
+            VIEWER.camera.center = SESSION.last_gallery_camera_coordinates["center"]
+            VIEWER.camera.zoom = SESSION.last_gallery_camera_coordinates["z"]
+            SESSION.mode = target_mode
+            print(f'\nAttempting to clear')
+            for layer in VIEWER.layers:
+                if "global" not in layer.name:
+                    VIEWER.layers.selection.add(layer)
+            VIEWER.layers.remove_selected()
+            # VIEWER.layers.clear()
+            #data = extract_phenotype_xldata() # Don't need this since it is saved now
+            add_layers(VIEWER,RAW_PYRAMID, copy.copy(SESSION.current_cells), int(PUNCHOUT_SIZE/2), new_page=False)
+        else:
+            raise Exception(f"Invalid parameter passed to toggle_session_mode: {target_mode}. Must be 'Gallery' or 'Multichannel'.")
+            # Perform adjustments before exiting function
+        reuse_contrast_limits() # Only checked fluors will be visible
+        reuse_gamma() 
+        for widg in ALL_CUSTOM_WIDGETS.values(): # restore widgets
+            widg.setVisible(True)
+
+        # set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
+        return True
 
 
 def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo, intensity_sort_widget):
@@ -352,7 +446,8 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
         else:
             VIEWER.status = 'There was a problem saving, so the next set of cells was not loaded. Close your data file?'
             return False
-        
+    if SESSION.mode == "Context":
+        return None # Don't allow loading of new cells when in context mode.
     # Take note of new starting point
     global PAGE_SIZE
     page_number = int(page_cb_widget.currentText().split()[-1])
@@ -407,7 +502,7 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
     #TODO
     reuse_contrast_limits()# Only checked fluors will be visible
     reuse_gamma() 
-    set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
+    set_viewer_to_neutral_zoom(VIEWER, reset_session=True) # Fix zoomed out issue
     for widg in ALL_CUSTOM_WIDGETS.values():
         widg.setVisible(True)
     return None
@@ -846,6 +941,7 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
             viewer.add_image(page_image[fluor], name = fluor, blending = 'additive',
                  colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]), scale = sc, interpolation="linear")
     # if composite_only:
+
     features = {'cid': cid_list}
     nb_color_str = 'black' if ABSORPTION else 'white' 
     nb_color_hex = '#000000' if ABSORPTION else '#ffffff'
@@ -937,6 +1033,7 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
                 # Don't do anything else
                 VIEWER.status = 'Out of bounds'
                 return True
+            SESSION.cell_under_mouse = SESSION.current_cells[cell_name] # save info
             cell_num = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_num,'')
 
             if cell_anno == 'All':
@@ -1285,35 +1382,8 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
     @status_layer.bind_key('l')
     def load_context_mode(image_layer):
         print("\nIn context mode fxn")
-        
-        cell_name, data_coordinates, val = find_mouse(image_layer, viewer.cursor.position)
-        print(cell_name)
-        target_cell_info = SESSION.current_cells[cell_name]
+        toggle_session_mode("Context")
 
-        # Turn on / off the correct layers
-        for layer in VIEWER.layers:
-            lname = layer.name
-            print(lname)
-            if 'global' not in lname:
-                layer.visible = False
-                continue
-            if "Composite" in ADJUSTED : # All marker images should be on
-                layer.visible = True
-                continue
-            else:
-                if lname.split()[1]  in ADJUSTED:  # marker image should be on
-                    layer.visible = True
-                else:
-                    layer.visible = False
-        # Move to cell location on the global image
-        sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        viewer.camera.center = (target_cell_info["center_y"]*sc,target_cell_info["center_x"]*sc) # these values seem to work best
-        # viewer.camera.zoom = 1.2 / sc
-        # finally, set mode
-        SESSION.mode = "Context"
-        
-
-        
         
     #TODO make a page label... 
 
@@ -1322,13 +1392,23 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
 ######------------------------- Misc + Viewer keybindings ---------------------######
 
 #TODO make a button to do this as well?
-def set_viewer_to_neutral_zoom(viewer):
+def set_viewer_to_neutral_zoom(viewer, reset_session = False):
     sc = 1 if SESSION.image_scale is None else SESSION.image_scale
+    viewer.camera.zoom = 1.2 / sc
     if SESSION.mode=="Gallery":
         viewer.camera.center = (350*sc,450*sc) # these values seem to work best
+        SESSION.last_gallery_camera_coordinates["center"] = viewer.camera.center
+        SESSION.last_gallery_camera_coordinates["z"] = viewer.camera.zoom
     elif SESSION.mode=="Multichannel":
         viewer.camera.center = (350*sc, 300*sc)
-    viewer.camera.zoom = 1.2 / sc
+        SESSION.last_multichannel_camera_coordinates["center"] = viewer.camera.center
+        SESSION.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom
+
+    if reset_session:
+        SESSION.last_gallery_camera_coordinates["center"] = (350*sc,450*sc)
+        SESSION.last_multichannel_camera_coordinates["center"] = (350*sc, 300*sc)
+        SESSION.last_gallery_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
+        SESSION.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
 
 def add_custom_colors():
     for colormap in cell_colors:
@@ -1669,6 +1749,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
                                 'YMax' : row['YMax'],'YMin':row['YMin']}
 
     SESSION.current_cells = copy.copy(tumor_cell_XYs)
+    SESSION.cell_under_mouse = next(iter(tumor_cell_XYs.values())) # Set first cell in list as "current" to avoid exceptions
     return tumor_cell_XYs
 
 def replace_note(cell_widget, note_widget):
@@ -1842,12 +1923,11 @@ def main(preprocess_class = None):
         page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, intensity_sort_box, next_page_button], name = 'Page selection', area = 'right')
 
 
-    all_channels_rb = QRadioButton("Multichannel Mode")
-    composite_only_rb = QRadioButton("Composite Mode"); composite_only_rb.setChecked(True) # Start in composite mode
-    comp_group = QButtonGroup(); comp_group.addButton(composite_only_rb); comp_group.addButton(all_channels_rb)
+    mode_switch_combo = QComboBox()
+    mode_switch_combo.addItems(["Gallery","Multichannel","Context"])
     switch_mode_button = QPushButton("Change Mode")
-    switch_mode_button.pressed.connect(lambda: toggle_composite_viewstatus(all_channels_rb,composite_only_rb))
-    mode_container = viewer.window.add_dock_widget([all_channels_rb,composite_only_rb,switch_mode_button],name ="Mode selection",area="right")
+    switch_mode_button.pressed.connect(lambda: toggle_session_mode(mode_switch_combo.currentText()))
+    mode_container = viewer.window.add_dock_widget([mode_switch_combo,switch_mode_button],name ="Mode selection",area="right")
     
     status_layer_show = QRadioButton("Show label overlay"); status_layer_show.setChecked(True)
     status_layer_hide = QRadioButton("Hide label overlay"); status_layer_hide.setChecked(False)
@@ -1871,15 +1951,15 @@ def main(preprocess_class = None):
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
-    # viewer.window.add_dock_widget(toggle_composite_viewstatus,name = 'Test', area = 'right')
+    # viewer.window.add_dock_widget(toggle_session_mode,name = 'Test', area = 'right')
     # viewer.window.add_dock_widget(show_next_cell_group,name = 'Test2', area = 'right')
     # viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test3', area = 'right')
     # print(f'\n {dir()}') # prints out the namespace variables 
     ALL_CUSTOM_WIDGETS['notes label']=notes_label; ALL_CUSTOM_WIDGETS['notes text entry']=note_text_entry
     ALL_CUSTOM_WIDGETS['notes cell entry']= note_cell_entry;ALL_CUSTOM_WIDGETS['notes button']=note_button
     ALL_CUSTOM_WIDGETS['next page button']=next_page_button
-    ALL_CUSTOM_WIDGETS['channels mode radio']=all_channels_rb; ALL_CUSTOM_WIDGETS['composite mode radio']=composite_only_rb
-    ALL_CUSTOM_WIDGETS['switch mode buton']=switch_mode_button; 
+    ALL_CUSTOM_WIDGETS['switch mode combo']=mode_switch_combo
+    ALL_CUSTOM_WIDGETS['switch mode button']=switch_mode_button; 
     ALL_CUSTOM_WIDGETS['show status layer radio']=status_layer_show; ALL_CUSTOM_WIDGETS['hide status layer radio']=status_layer_hide
     ALL_CUSTOM_WIDGETS['show status box radio']=status_box_show; ALL_CUSTOM_WIDGETS['hide status box radio']=status_box_hide
     ALL_CUSTOM_WIDGETS['page combobox']=page_combobox
@@ -1929,7 +2009,7 @@ def main(preprocess_class = None):
     sv_wrapper(viewer)
     tsv_wrapper(viewer)
     chn_key_wrapper(viewer)
-    set_viewer_to_neutral_zoom(viewer) # Fix zoomed out issue
+    set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
     if preprocess_class is not None: preprocess_class.close() # close other window
     with tifffile.imread(userInfo.qptiff, aszarr=True) as zs:
         SESSION.zarr_store = zs

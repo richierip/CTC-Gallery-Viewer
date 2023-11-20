@@ -46,6 +46,11 @@ class sessionVariables:
         self.image_scale = None # None, or float representing pixels per micron
         self.zarr_store = None
         self.mode = "Gallery" # ['Gallery', 'Multichannel', 'Context']
+        self.last_mode = "Gallery" # The previous mode of the
+        self.cell_under_mouse = {} # Will update with below infor for one cell
+        self.last_gallery_camera_coordinates = {"center":(0,0),"z":1} # store the last place the user was looking in the gallery
+        self.last_multichannel_camera_coordinates = {"center":(0,0),"z":1} # store the last place the user was looking in multichannel mode
+        self.last_context_camera_coordinates = {"center":(0,0),"z":1} # store the last place the user was looking in context mode
         self.current_cells =  {'Layer':str,"cid": int,"center_x": int,'center_y': int,
                                 'validation_call': str, 'XMax' : float,'XMin':float,
                                 'YMax' : float,'YMin':float} # Holds dict of dict for the cells that are loaded on the current page in the viewer
