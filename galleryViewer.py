@@ -50,7 +50,6 @@ cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink
 CHANNEL_ORDER = {}
 qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
 OBJECT_DATA_PATH = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv" # path to halo export
-PUNCHOUT_SIZE = 90 # microns or pixels? Probably pixels
 PAGE_SIZE = 15 # How many cells will be shown in next page
 CELLS_PER_ROW = 8
 SPECIFIC_CELL = None # Dictionary with the format {'ID': (int),'Annotation Layer': (str) }
@@ -76,13 +75,11 @@ RAW_PYRAMID=None
 ALL_CUSTOM_WIDGETS = {}
 RASTERS = None
 NO_LABEL_BOX = False
-GRID_TO_ID = {}
 STATUS_COLORS = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red" }
 STATUSES_TO_HEX = store_and_load.STATUSES_HEX
 STATUSES_RGBA = {}
 UPDATED_CHECKBOXES = []
 ANNOTATIONS_PRESENT = False # Track whether there is an 'Analysis Regions' field in the data (duplicate CIDs possible)
-ABSORPTION = False
 
 
 ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
@@ -97,53 +94,53 @@ def adjust_composite_limits(layer, limits):
 
 def reuse_gamma():
     # Make everything silent
+    for layer in VIEWER.layers:
+        layer.visible = False
     for fluor in CHANNELS_STR:
         if fluor == 'Composite':
             continue
-        if "Composite" in ADJUSTED: 
-            VIEWER.layers[fluor].visible = True
-            if SESSION.mode == "Context":  VIEWER.layers["global "+fluor].visible = True
-        else: 
-            VIEWER.layers[fluor].visible = False
-            if SESSION.mode == "Context":  VIEWER.layers["global "+fluor].visible = False
-    # Set settings for all layers
-    for fluor in ADJUSTED:
-        if fluor == 'Composite':
-            continue
-        if SESSION.mode == "Context":  
-            VIEWER.layers["global "+fluor].visible = True
-        else:
-            VIEWER.layers[fluor].visible = True
-
+        if "Composite" in ADJUSTED or fluor in ADJUSTED: 
+            VIEWER.layers[f"{SESSION.mode} {fluor}"].visible = True
         # Now change settings for both, whether or not they are displayed right now.
-        adjust_composite_gamma(VIEWER.layers["global "+fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
-        adjust_composite_gamma(VIEWER.layers[fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
+        adjust_composite_gamma(VIEWER.layers["Gallery "+fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
+        adjust_composite_gamma(VIEWER.layers["Multichannel "+fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
+        adjust_composite_gamma(VIEWER.layers["Context "+fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
+
+    if SESSION.mode != "Context":
+        VIEWER.layers[f"{SESSION.mode} Status Layer"].visible = SESSION.status_layer_vis
+        VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
+        VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = SESSION.nuclei_boxes_vis
+    else:
+        try:
+            VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = True
+        except KeyError:
+            pass
 
 
 def reuse_contrast_limits():
+        # Make everything silent
     for layer in VIEWER.layers:
-        print(layer.name)
+        layer.visible = False
     for fluor in CHANNELS_STR:
         if fluor == 'Composite':
             continue
-        if "Composite" in ADJUSTED: 
-            VIEWER.layers[fluor].visible = True
-            if SESSION.mode == "Context":  VIEWER.layers["global "+fluor].visible = True
-        else: 
-            VIEWER.layers[fluor].visible = False
-            if SESSION.mode == "Context":  VIEWER.layers["global "+fluor].visible = False
-    # Set settings for all layers
-    for fluor in ADJUSTED:
-        if fluor == 'Composite':
-            continue
-        if SESSION.mode == "Context":  
-            VIEWER.layers["global "+fluor].visible = True
-        else:
-            VIEWER.layers[fluor].visible = True
-
+        if "Composite" in ADJUSTED or fluor in ADJUSTED: 
+            VIEWER.layers[f"{SESSION.mode} {fluor}"].visible = True
         # Now change settings for both, whether or not they are displayed right now.
-        adjust_composite_limits(VIEWER.layers["global "+fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
-        adjust_composite_limits(VIEWER.layers[fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
+        adjust_composite_limits(VIEWER.layers["Gallery "+fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
+        adjust_composite_limits(VIEWER.layers["Multichannel "+fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
+        adjust_composite_limits(VIEWER.layers["Context "+fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
+
+
+    if SESSION.mode != "Context":
+        VIEWER.layers[f"{SESSION.mode} Status Layer"].visible = SESSION.status_layer_vis
+        VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
+        VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = SESSION.nuclei_boxes_vis
+    else:
+        try: # Always try to enable box when loading context mode. 
+            VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = True
+        except KeyError:
+            pass
 
 ## --- Bottom bar functions and GUI elements 
 
@@ -158,10 +155,9 @@ def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData:
         if fluor == 'Composite':
             continue
         _update_dictionary(fluor,Gamma)
-        if SESSION.mode == "Context":
-            adjust_composite_gamma(VIEWER.layers["global "+fluor],Gamma)
-        else: # Gallery or multichannel
-            adjust_composite_gamma(VIEWER.layers[fluor],Gamma)
+        for m in ["Gallery", "Multichannel", "Context"]:
+            adjust_composite_gamma(VIEWER.layers[f"{m} "+fluor],Gamma)
+
 adjust_gamma_widget.visible=False
 
 @magicgui(auto_call=True,
@@ -175,10 +171,9 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
         if fluor == 'Composite':
             continue
         _update_dictionary(fluor,white_in)
-        if SESSION.mode == "Context":
-            adjust_composite_limits(VIEWER.layers["global "+fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],white_in])
-        else:
-            adjust_composite_limits(VIEWER.layers[fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],white_in])
+        for m in ["Gallery", "Multichannel", "Context"]:
+            adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [ADJUSTMENT_SETTINGS[fluor+" black-in"],white_in])
+
 
 @magicgui(auto_call=True,
         black_in={"widget_type": "FloatSlider", "max":255, "label":"Black-in"},
@@ -192,45 +187,42 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         if fluor == 'Composite':
             continue
         _update_dictionary(fluor,black_in)
-        if SESSION.mode == "Context":
-            adjust_composite_limits(VIEWER.layers["global "+fluor], [black_in,ADJUSTMENT_SETTINGS[fluor+" white-in"]])
-        else:
-            adjust_composite_limits(VIEWER.layers[fluor], [black_in,ADJUSTMENT_SETTINGS[fluor+" white-in"]])
+        for m in ["Gallery", "Multichannel", "Context"]:
+            adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [black_in,ADJUSTMENT_SETTINGS[fluor+" white-in"]])
 
 def toggle_absorption():
-    global ABSORPTION
-    if ABSORPTION ==True:
-        ABSORPTION = False
+    if SESSION.absorption_mode ==True:
+        SESSION.absorption_mode = False
         for layer in VIEWER.layers:
             fluor = layer.name
-            if fluor == 'Status Layer' or "global" in fluor:
+            if 'Status Layer' in fluor or "Context" in fluor:
                 continue
-            elif fluor =="Nuclei Boxes":
+            elif "Nuclei Boxes" in fluor:
                 layer.edge_color = '#ffffff'
                 layer.text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':"white"}
                 continue
-            elif fluor == 'Absorption':
+            elif 'Absorption' in fluor:
                 layer.visible = False
                 continue
-            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor])
+            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor.split()[1]])
             layer.blending = 'Additive'
     else:
-        ABSORPTION = True
+        SESSION.absorption_mode = True
         for layer in VIEWER.layers:
             fluor = layer.name
-            if fluor == 'Status Layer' or "global" in fluor:
+            if 'Status Layer' in fluor or "Context" in fluor:
                 continue
-            elif fluor =="Nuclei Boxes":
+            elif "Nuclei Boxes" in fluor:
                 layer.edge_color="#000000"
                 layer.text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':"black"}
                 continue
-            elif fluor == 'Absorption':
+            elif 'Absorption' in fluor:
                 layer.visible = True
                 im = layer.data
                 im[:,:] = [255,255,255,255]
                 layer.data = im.astype(np.uint8)
                 continue
-            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse')
+            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor.split()[1]]+' inverse')
             layer.blending = 'Minimum'
     change_statuslayer_color(copy.copy(SESSION.current_cells))
 
@@ -248,7 +240,7 @@ def tally_checked_widgets():
     # Make visible all channels according to rules
     for fluor in CHANNELS_STR:
         # Different set of layers if we are in context mode
-        lname = f'global {fluor}' if SESSION.mode == "Context" else fluor
+        lname = f'{SESSION.mode} {fluor}'
         if fluor == "Composite":
             continue
         if "Composite" in ADJUSTED or fluor in ADJUSTED:
@@ -297,27 +289,13 @@ def toggle_session_mode(target_mode):
     
     # Do nothing in these cases
     if target_mode==SESSION.mode: return None
+    SESSION.last_mode = SESSION.mode # save for later
 
     if target_mode=="Context":
                 
         target_cell_info = SESSION.cell_under_mouse
         cell_num = str(target_cell_info["cid"])
         print(cell_num)
-        # Turn on / off the correct layers
-        for layer in VIEWER.layers:
-            lname = layer.name
-            print(lname)
-            if 'global' not in lname:
-                layer.visible = False
-                continue
-            if "Composite" in ADJUSTED : # All marker images should be on
-                layer.visible = True
-                continue
-            else:
-                if lname.split()[1]  in ADJUSTED:  # marker image should be on
-                    layer.visible = True
-                else:
-                    layer.visible = False
         
         # save current coordinates
         if SESSION.mode=="Gallery": 
@@ -335,7 +313,7 @@ def toggle_session_mode(target_mode):
 
         # try to remove any previous box layers if there are any
         try:
-            VIEWER.layers.selection.active = VIEWER.layers["global Nuclei Boxes"]
+            VIEWER.layers.selection.active = VIEWER.layers["Context Nuclei Boxes"]
             VIEWER.layers.remove_selected()
         except KeyError:
             pass
@@ -345,15 +323,17 @@ def toggle_session_mode(target_mode):
         nuclei_box_coords = [[[y1,x1] , [y2,x2]]]
 
         features = {'cid': cell_num}
-        nb_color_str = 'black' if ABSORPTION else 'white' 
-        nb_color_hex = '#000000' if ABSORPTION else '#ffffff'
+        nb_color_str = 'black' if SESSION.absorption_mode else 'white' 
+        nb_color_hex = '#000000' if SESSION.absorption_mode else '#ffffff'
         nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_str}
         sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-        VIEWER.add_shapes(nuclei_box_coords, name="global Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
+        VIEWER.add_shapes(nuclei_box_coords, name="Context Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
                                             face_color='#00000000', scale=sc, features=features, text = nb_text )
-        VIEWER.layers.selection.active = VIEWER.layers["Status Layer"]    
+        VIEWER.layers.selection.active = VIEWER.layers["Gallery Status Layer"]  
         # finally, set mode
         SESSION.mode = target_mode
+        # Turn on / off the correct layers
+        reuse_gamma()
         # Done. Leave function, no need to save cells
         return True 
     
@@ -367,28 +347,12 @@ def toggle_session_mode(target_mode):
             VIEWER.camera.center = SESSION.last_multichannel_camera_coordinates["center"]
             VIEWER.camera.zoom = SESSION.last_multichannel_camera_coordinates["z"]
 
-        # Change visibilities of the correct layers
-        for layer in VIEWER.layers:
-            lname = layer.name
-            if 'global' in lname:
-                layer.visible = False
-                continue
-            elif lname == "Absorption":
-                layer.visible = ABSORPTION
-                continue
-            if "Composite" in ADJUSTED : # All marker images should be on
-                layer.visible = True
-                continue
-            else:
-                if lname.split()[1]  in ADJUSTED:  # marker image should be on
-                    layer.visible = True
-                else:
-                    layer.visible = False
-
-        VIEWER.layers.selection.active = VIEWER.layers["Status Layer"]
-        for widg in ALL_CUSTOM_WIDGETS.values(): # restore widgets
-            widg.setVisible(True)
+        
+        # VIEWER.layers.selection.active = VIEWER.layers["Status Layer"]
+    
         SESSION.mode = target_mode
+        # Change visibilities of the correct layers
+        reuse_gamma()
         return True
     else:
         # Now, we are switching between Gallery and Multichannel mode. We might want to save. 
@@ -396,42 +360,23 @@ def toggle_session_mode(target_mode):
         VIEWER.status = 'Saving data to file...'
         _save_validation(VIEWER, target_mode)
 
-        # Hide the widgets to avoid crashing?
-        for widg in ALL_CUSTOM_WIDGETS.values():
-            widg.setVisible(False)
 
         print(f"Number of cells in current page is {len(SESSION.current_cells)} and type is {type(SESSION.current_cells)}")
         if target_mode == "Multichannel": # change to Show All
             VIEWER.camera.center = SESSION.last_multichannel_camera_coordinates["center"]
             VIEWER.camera.zoom = SESSION.last_multichannel_camera_coordinates["z"]
             SESSION.mode = target_mode
-            print(f'\nAttempting to clear')
-            for layer in VIEWER.layers:
-                if "global" not in layer.name:
-                    VIEWER.layers.selection.add(layer)
-            VIEWER.layers.remove_selected()
-            # VIEWER.layers.clear()
-            # data = extract_phenotype_xldata() # Don't need this since it is saved now
-            add_layers(VIEWER,RAW_PYRAMID, copy.copy(SESSION.current_cells), int(PUNCHOUT_SIZE/2), new_page=False)
+
         elif target_mode == "Gallery": # change to composite only
             VIEWER.camera.center = SESSION.last_gallery_camera_coordinates["center"]
             VIEWER.camera.zoom = SESSION.last_gallery_camera_coordinates["z"]
             SESSION.mode = target_mode
-            print(f'\nAttempting to clear')
-            for layer in VIEWER.layers:
-                if "global" not in layer.name:
-                    VIEWER.layers.selection.add(layer)
-            VIEWER.layers.remove_selected()
-            # VIEWER.layers.clear()
-            #data = extract_phenotype_xldata() # Don't need this since it is saved now
-            add_layers(VIEWER,RAW_PYRAMID, copy.copy(SESSION.current_cells), int(PUNCHOUT_SIZE/2), new_page=False)
+
         else:
             raise Exception(f"Invalid parameter passed to toggle_session_mode: {target_mode}. Must be 'Gallery' or 'Multichannel'.")
             # Perform adjustments before exiting function
         reuse_contrast_limits() # Only checked fluors will be visible
         reuse_gamma() 
-        for widg in ALL_CUSTOM_WIDGETS.values(): # restore widgets
-            widg.setVisible(True)
 
         # set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
         return True
@@ -477,11 +422,6 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
     if not _save_validation(VIEWER, PAGE_SIZE):
         print(f'Could not save...')
         return None
-    
-    # might not be necessary. Was put here in an attempt to avoid weird GUI element deletion glitch
-    # Must come after attempting to save, otherwise widgets vanish when an error occurs...
-    for widg in ALL_CUSTOM_WIDGETS.values():
-        widg.setVisible(False)
 
 
     # Load into same mode as the current
@@ -490,11 +430,11 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
         VIEWER.status="Can't load cells: out of bounds error."
     else:
         for layer in VIEWER.layers:
-            if "global" not in layer.name:
+            if "Context" not in layer.name:
                 VIEWER.layers.selection.add(layer)
         VIEWER.layers.remove_selected()
         # VIEWER.layers.clear()
-        add_layers(VIEWER,RAW_PYRAMID, xydata, int(PUNCHOUT_SIZE/2))
+        add_layers(VIEWER,RAW_PYRAMID, xydata, int(userInfo.imageSize/2))
     
     single_cell_lineEdit.clear() # reset the widgets
     if single_cell_combo: single_cell_combo.setCurrentIndex(0) # reset the widgets
@@ -503,8 +443,8 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
     reuse_contrast_limits()# Only checked fluors will be visible
     reuse_gamma() 
     set_viewer_to_neutral_zoom(VIEWER, reset_session=True) # Fix zoomed out issue
-    for widg in ALL_CUSTOM_WIDGETS.values():
-        widg.setVisible(True)
+    VIEWER.layers.selection.active = VIEWER.layers["Gallery Status Layer"]  
+
     return None
     
 # @magicgui(auto_call=True,
@@ -512,68 +452,56 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
 #         "choices": [("Show", 1), ("Hide", 2)]})
 # def toggle_statusbar_visibility(Status_Bar_Visibility: int=1):
 def toggle_statuslayer_visibility(show_widget):
-    if show_widget.isChecked(): Status_Bar_Visibility = 1
-    else: Status_Bar_Visibility = 2
+    if SESSION.mode == "Context": return False
+    if show_widget.isChecked(): SESSION.status_layer_vis = True
+    else: SESSION.status_layer_vis = False
     # Find status layers and toggle visibility
-    if Status_Bar_Visibility==1:
-        for layer in VIEWER.layers:
-            if layer.name == 'Status Layer':
-                layer.visible = True
-    elif Status_Bar_Visibility==2:
-        for layer in VIEWER.layers:
-            if layer.name == 'Status Layer':
-                layer.visible = False
-    else:
-        raise Exception(f"Invalid parameter passed to toggle_statusbar_visibility: {Status_Bar_Visibility}. Must be 1 or 2.")
-    return None
+    VIEWER.layers[f"{SESSION.mode} Status Layer"].visible = SESSION.status_layer_vis
+    return True
 
 def toggle_statusbox_visibility(show_widget):
-    if show_widget.isChecked(): Status_Box_Visibility = 1
-    else: Status_Box_Visibility = 2
+    if SESSION.mode == "Context": return False
+    if show_widget.isChecked(): SESSION.status_box_vis = True
+    else: SESSION.status_box_vis = False
     # Find status layers and toggle visibility
-    if Status_Box_Visibility==1:
+    if SESSION.status_box_vis:
         for layer in VIEWER.layers:
-            if layer.name == 'Status Layer':
+            if layer.name == f'{SESSION.mode} Status Layer':
                 im = layer.data
                 if SESSION.mode=="Gallery":
                     mult = 1
                 elif SESSION.mode=="Multichannel":
                     mult = 4
-                for j in range(0,((PUNCHOUT_SIZE+2)*CELLS_PER_ROW), (PUNCHOUT_SIZE+2)):#rows
-                    for i in range(0,(ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2))+1, (PUNCHOUT_SIZE+2)):#cols
-                        im[i:i+1, j:j+PUNCHOUT_SIZE+2, 3] = 255 # top
-                        im[i:i+PUNCHOUT_SIZE+2,j:j+1, 3] = 255 # left
-                        im[i+PUNCHOUT_SIZE+1:i+PUNCHOUT_SIZE+2, j:j+PUNCHOUT_SIZE+2, 3] = 255 # right
-                        im[i:i+PUNCHOUT_SIZE+2,j+PUNCHOUT_SIZE+1:j+PUNCHOUT_SIZE+2, 3] = 255 # bottom
+                for j in range(0,((userInfo.imageSize+2)*CELLS_PER_ROW), (userInfo.imageSize+2)):#rows
+                    for i in range(0,(ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(userInfo.imageSize+2))+1, (userInfo.imageSize+2)):#cols
+                        im[i:i+1, j:j+userInfo.imageSize+2, 3] = 255 # top
+                        im[i:i+userInfo.imageSize+2,j:j+1, 3] = 255 # left
+                        im[i+userInfo.imageSize+1:i+userInfo.imageSize+2, j:j+userInfo.imageSize+2, 3] = 255 # right
+                        im[i:i+userInfo.imageSize+2,j+userInfo.imageSize+1:j+userInfo.imageSize+2, 3] = 255 # bottom
                         if j == 0 or SESSION.mode=="Gallery":
                             im[i:i+16, j:j+16, 3] = 255
 
                 layer.data = im
                 # for col in range(1,CELLS_PER_ROW,1):
                     
-    elif Status_Box_Visibility==2:
+    else: # Don't show box
         for layer in VIEWER.layers:
-            if layer.name == 'Status Layer':
+            if layer.name == f'{SESSION.mode} Status Layer':
                 im = layer.data
                 if SESSION.mode=="Gallery":
                     mult = 1
                 elif SESSION.mode=="Multichannel":
                     mult = 4
-                for j in range(0,((PUNCHOUT_SIZE+2)*CELLS_PER_ROW), (PUNCHOUT_SIZE+2)):
-                    for i in range(0,(ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2))+1, (PUNCHOUT_SIZE+2)):
-                        im[i:i+1, j:j+PUNCHOUT_SIZE+2, 3] = 0 # top
-                        im[i:i+PUNCHOUT_SIZE+2,j:j+1, 3] = 0 # left
-                        im[i+PUNCHOUT_SIZE+1:i+PUNCHOUT_SIZE+2, j:j+PUNCHOUT_SIZE+2, 3] = 0 # right
-                        im[i:i+PUNCHOUT_SIZE+2,j+PUNCHOUT_SIZE+1:j+PUNCHOUT_SIZE+2, 3] = 0 # bottom
+                for j in range(0,((userInfo.imageSize+2)*CELLS_PER_ROW), (userInfo.imageSize+2)):
+                    for i in range(0,(ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(userInfo.imageSize+2))+1, (userInfo.imageSize+2)):
+                        im[i:i+1, j:j+userInfo.imageSize+2, 3] = 0 # top
+                        im[i:i+userInfo.imageSize+2,j:j+1, 3] = 0 # left
+                        im[i+userInfo.imageSize+1:i+userInfo.imageSize+2, j:j+userInfo.imageSize+2, 3] = 0 # right
+                        im[i:i+userInfo.imageSize+2,j+userInfo.imageSize+1:j+userInfo.imageSize+2, 3] = 0 # bottom
                         im[i:i+16, j:j+16, 3] = 0 # box
                 layer.data = im
                 # print(im.shape)
-    else:
-        raise Exception(f"Invalid parameter passed to toggle_statusbox_visibility: {Status_Box_Visibility}. Must be 1 or 2.")
-    return None
-
-def sort_by_intensity():
-    pass
+    return True
 
 def set_notes_label(display_note_widget, ID):
     cell_num = ID.split()[-1]; cell_anno = ID.replace(' '+cell_num,'')
@@ -649,70 +577,105 @@ def set_notes_label(display_note_widget, ID):
     return True
 ######------------------------- Image loading and processing functions ---------------------######
 
+def retrieve_status(cell_id, status, new_page):
+    ''' Kind of an anachronistic function at this point.'''
+    # print(f'Getting status for {cell_id}')
+    if new_page:
+        if type(status) is not str or status not in STATUS_COLORS.keys():
+            status = "Unseen"
+        # Save to dict to make next retrieval faster
+        # If there are annotations, need to track a separate list for each one
+        SESSION.status_list[str(cell_id)] = status
+        return status
+    else:
+        # Just grab it because it's there already
+        try:
+            return SESSION.status_list[str(cell_id)]
+        except:
+            raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {SESSION.status_list}")
+
+''' Expects a numpy array of shape userInfo.imageSize x 16, with a 16x16 box taking up the left-hand side'''    
+def write_cid_text_to_array(cb_size, im_length, upsample, color, cid):
+    if SESSION.absorption_mode: bg_color = (255,255,255,255)
+    else: bg_color = (0,0,0,255)
+    new = Image.new("RGBA", (int(upsample*im_length),int(upsample*cb_size)), bg_color)
+    font = ImageFont.truetype("arial.ttf",48)
+    editable_image = ImageDraw.Draw(new)
+
+    # switch CID order
+    i = cid.split()[-1]; anno = cid.replace(' '+i,'')
+    cid = i + " " + anno
+    editable_image.text((60,1), str(cid), color, font = font)
+    resized = np.array(new.resize((im_length,cb_size), Image.Resampling.LANCZOS))
+    # np.save("lanczos", resized)
+    if SESSION.absorption_mode:
+        resized[:,:,0]
+        resized[:,:,3] = (255* (resized[:,:,:3] <200).any(axis=2)).astype(np.uint8)
+        # resized[fade]
+    else:
+        resized[:,:,3] = (255* (resized[:,:,:3] >50).any(axis=2)).astype(np.uint8)
+    return resized
+
+def generate_status_box(status, cid, kind = "Gallery"):
+
+    color_tuple = STATUSES_RGBA[status]
+    # print(f'STATUSES {STATUSES_RGBA} \n status {status}, color tup {color_tuple}')
+    cpr_m = SESSION.cells_per_row["Multichannel"]
+    upsample = {"Multichannel" : 3.5, "Gallery": 3.5 }
+
+    corner_box_size = 16
+    edge_width = 1
+    if kind=="Gallery":
+        layer_length = (userInfo.imageSize+(edge_width*2))
+    elif kind=="Multichannel":
+        layer_length = (userInfo.imageSize+(edge_width*2)) * cpr_m
+    else:
+        return np.array()
+
+    if NO_LABEL_BOX:
+        number_only = write_cid_text_to_array(userInfo.imageSize+(edge_width*2), layer_length, upsample[SESSION.mode], color_tuple, cid)
+        return number_only
+
+    top_or_bottom = [color_tuple, ] *layer_length
+    # top_or_bottom = np.append([top_or_bottom],[top_or_bottom],axis = 0)
+    x = np.array([[color_tuple, (0,0,0,0), color_tuple]])
+    y = np.repeat(x,[edge_width,layer_length - (2*edge_width),edge_width],axis=1)
+    mid = np.repeat(y,userInfo.imageSize+edge_width-(corner_box_size), axis=0)
+
+    z = np.repeat(x,[corner_box_size,(layer_length-(2*edge_width))+edge_width-(corner_box_size),edge_width],axis=1)
+    # above_mid = np.repeat(z,corner_box_size-edge_width, axis=0)
+
+    top = write_cid_text_to_array(corner_box_size, layer_length, upsample[SESSION.mode], color_tuple, cid)
+    # text_added = text_added | above_mid
+    # top = np.append([top_or_bottom],above_mid,axis=0)
+    # print(f"SHAPES: tob {np.array([top_or_bottom]).shape} and text_added {text_added.shape}")
+    # exit()
+    top[0:corner_box_size,0:corner_box_size,:] = color_tuple
+    top[0,:,:] = color_tuple
+    top[:,-1,:] = color_tuple
+
+    # top = np.append([top_or_bottom],text_added,axis=0)
+    # z = np.repeat([np.repeat([0],12)],2,axis=0)z
+    tm = np.append(top,mid, axis=0)
+    return np.append(tm,[top_or_bottom],axis=0)
+
+def black_background(color_space, mult, CPR):
+    if color_space == 'RGB':
+        return np.zeros((ceil((PAGE_SIZE*mult)/CPR)*(userInfo.imageSize+2),(userInfo.imageSize+2) * CPR, 4))
+    elif color_space == 'Luminescence':
+        return np.zeros((ceil((PAGE_SIZE*mult)/CPR)*(userInfo.imageSize+2),(userInfo.imageSize+2) * CPR))
+    
+def white_background(mult, CPR): 
+    a = np.tile([255,255,255,255] , (ceil((PAGE_SIZE*mult)/CPR)*(userInfo.imageSize+2),(userInfo.imageSize+2) * CPR,1))
+    return a
+
 def change_statuslayer_color(cells):
-    status_colors = STATUS_COLORS
     def retrieve_status(cell_id):
         try:
             return SESSION.status_list[str(cell_id)]
         except:
             raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {SESSION.status_list}")
 
-    ''' Expects a numpy array of shape PUNCHOUT_SIZE x 16, with a 16x16 box taking up the left-hand side'''    
-    def write_cid_text_to_array(cb_size, im_length, upsample, color, cid):
-        if ABSORPTION: bg_color = (255,255,255,255)
-        else: bg_color = (0,0,0,255)
-        new = Image.new("RGBA", (int(upsample*im_length),int(upsample*cb_size)), bg_color)
-        font = ImageFont.truetype("arial.ttf",48)
-        editable_image = ImageDraw.Draw(new)
-
-        # switch CID order
-        i = cid.split()[-1]; anno = cid.replace(' '+i,'')
-        cid = i + " " + anno
-        editable_image.text((60,1), str(cid), color, font = font)
-        resized = np.array(new.resize((im_length,cb_size), Image.Resampling.LANCZOS))
-        np.save("lanczos", resized)
-        if ABSORPTION:
-            resized[:,:,0]
-            resized[:,:,3] = (255* (resized[:,:,:3] <200).any(axis=2)).astype(np.uint8)
-        else:
-            resized[:,:,3] = (255* (resized[:,:,:3] >50).any(axis=2)).astype(np.uint8)
-        return resized
-
-    def generate_status_box(status, cid):
-        color_tuple = STATUSES_RGBA[status]
-        upsample = {"Gallery" : 3.5, "Multichannel": 3.5 }
-
-        corner_box_size = 16
-        edge_width = 1
-        if SESSION.mode=="Gallery":
-            layer_length = (PUNCHOUT_SIZE+(edge_width*2))
-        elif SESSION.mode=="Multichannel":
-            layer_length = (PUNCHOUT_SIZE+(edge_width*2)) * CELLS_PER_ROW
-
-        if NO_LABEL_BOX:
-            number_only = write_cid_text_to_array(PUNCHOUT_SIZE+(edge_width*2), layer_length, upsample[SESSION.mode], color_tuple, cid)
-            return number_only
-
-        top_or_bottom = [color_tuple, ] *layer_length
-        if ABSORPTION:
-            x = np.array([[color_tuple, (255,255,255,0), color_tuple]])
-        else:
-            x = np.array([[color_tuple, (0,0,0,0), color_tuple]])
-        y = np.repeat(x,[edge_width,layer_length - (2*edge_width),edge_width],axis=1)
-        mid = np.repeat(y,PUNCHOUT_SIZE+edge_width-(corner_box_size), axis=0)
-        z = np.repeat(x,[corner_box_size,(layer_length-(2*edge_width))+edge_width-(corner_box_size),edge_width],axis=1)
-        top = write_cid_text_to_array(corner_box_size, layer_length, upsample[SESSION.mode], color_tuple, cid)
-        top[0:corner_box_size,0:corner_box_size,:] = color_tuple
-        top[0,:,:] = color_tuple
-        top[:,-1,:] = color_tuple
-        tm = np.append(top,mid, axis=0)
-        return np.append(tm,[top_or_bottom],axis=0)
-
-    def black_background(color_space, mult):
-        if color_space == 'RGB':
-            return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW, 4))
-        elif color_space == 'Luminescence':
-            return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW))
 
     # Starting to add
     if SESSION.mode=="Gallery": size_multiplier = 1
@@ -732,147 +695,60 @@ def change_statuslayer_color(cells):
             if pos in CHANNELS and fluor != 'Composite':
                 if SESSION.mode=="Multichannel": # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
                     if col ==1:
-                        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id))
+                        page_status_layer[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id))
                     col+=1 # so that next luminescence image is tiled 
                     continue
                 elif SESSION.mode=="Gallery": # This stuff is only necessary in composite mode 
-                   page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id))
+                   page_status_layer[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id))
+    
     # if composite_only:
-    VIEWER.layers['Status Layer'].data = page_status_layer.astype(np.uint8)
+    VIEWER.layers[f'{SESSION.mode} Status Layer'].data = page_status_layer.astype(np.uint8)
 
-#TODO consider combining numpy arrays before adding layers? So that we create ONE image, and have ONE layer
-#   for the ctc cells. Gallery mode might end up being a pain for downstream.
-#   Counterpoint - how to apply filters to only some channels if they are in same image?
-#   Counterpoint to counterpoint - never get rid of numpy arrays and remake whole image as needed. 
+''' Add images layers for Gallery and Multichannel modes. Only make visible the layers for the active mode'''
 def add_layers(viewer,pyramid, cells, offset, new_page=True):
     print(f'\n---------\n \n Entering the add_layers function')
     print(f"pyramid shape is {pyramid.shape}")
     # Make the color bar that appears to the left of the composite image
     status_colors = STATUS_COLORS
-    global CELLS_PER_ROW, GRID_TO_ID
-    if SESSION.mode == "Multichannel":
-        CELLS_PER_ROW = len(CHANNELS_STR) #+1
-        # print(f"$$$$$$$ ROW SIZE VS CHANSTR: {CELLS_PER_ROW} vs {len(CHANNELS_STR)}")
-    elif SESSION.mode == "Gallery": # composite_only = True
-        CELLS_PER_ROW = userInfo.cells_per_row
-
-    def retrieve_status(cell_id, status):
-        ''' Kind of an anachronistic function at this point.'''
-        # print(f'Getting status for {cell_id}')
-        if new_page:
-            if type(status) is not str or status not in status_colors.keys():
-                status = "Unseen"
-            # Save to dict to make next retrieval faster
-            # If there are annotations, need to track a separate list for each one
-            SESSION.status_list[str(cell_id)] = status
-            return status
-        else:
-            # Just grab it because it's there already
-            try:
-                return SESSION.status_list[str(cell_id)]
-            except:
-                raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {SESSION.status_list}")
-
-    ''' Expects a numpy array of shape PUNCHOUT_SIZE x 16, with a 16x16 box taking up the left-hand side'''    
-    def write_cid_text_to_array(cb_size, im_length, upsample, color, cid):
-        if ABSORPTION: bg_color = (255,255,255,255)
-        else: bg_color = (0,0,0,255)
-        new = Image.new("RGBA", (int(upsample*im_length),int(upsample*cb_size)), bg_color)
-        font = ImageFont.truetype("arial.ttf",48)
-        editable_image = ImageDraw.Draw(new)
-
-        # switch CID order
-        i = cid.split()[-1]; anno = cid.replace(' '+i,'')
-        cid = i + " " + anno
-        editable_image.text((60,1), str(cid), color, font = font)
-        resized = np.array(new.resize((im_length,cb_size), Image.Resampling.LANCZOS))
-        # np.save("lanczos", resized)
-        if ABSORPTION:
-            resized[:,:,0]
-            resized[:,:,3] = (255* (resized[:,:,:3] <200).any(axis=2)).astype(np.uint8)
-            # resized[fade]
-        else:
-            resized[:,:,3] = (255* (resized[:,:,:3] >50).any(axis=2)).astype(np.uint8)
-        return resized
-
-    def generate_status_box(status, cid):
-
-        color_tuple = STATUSES_RGBA[status]
-        # print(f'STATUSES {STATUSES_RGBA} \n status {status}, color tup {color_tuple}')
-        
-        upsample = {"Multichannel" : 3.5, "Gallery": 3.5 }
-
-        corner_box_size = 16
-        edge_width = 1
-        if SESSION.mode=="Gallery":
-            layer_length = (PUNCHOUT_SIZE+(edge_width*2))
-        elif SESSION.mode=="Multichannel":
-            layer_length = (PUNCHOUT_SIZE+(edge_width*2)) * CELLS_PER_ROW
-
-        if NO_LABEL_BOX:
-            number_only = write_cid_text_to_array(PUNCHOUT_SIZE+(edge_width*2), layer_length, upsample[SESSION.mode], color_tuple, cid)
-            return number_only
-
-        top_or_bottom = [color_tuple, ] *layer_length
-        # top_or_bottom = np.append([top_or_bottom],[top_or_bottom],axis = 0)
-        x = np.array([[color_tuple, (0,0,0,0), color_tuple]])
-        y = np.repeat(x,[edge_width,layer_length - (2*edge_width),edge_width],axis=1)
-        mid = np.repeat(y,PUNCHOUT_SIZE+edge_width-(corner_box_size), axis=0)
-
-        z = np.repeat(x,[corner_box_size,(layer_length-(2*edge_width))+edge_width-(corner_box_size),edge_width],axis=1)
-        # above_mid = np.repeat(z,corner_box_size-edge_width, axis=0)
-
-        top = write_cid_text_to_array(corner_box_size, layer_length, upsample[SESSION.mode], color_tuple, cid)
-        # text_added = text_added | above_mid
-        # top = np.append([top_or_bottom],above_mid,axis=0)
-        # print(f"SHAPES: tob {np.array([top_or_bottom]).shape} and text_added {text_added.shape}")
-        # exit()
-        top[0:corner_box_size,0:corner_box_size,:] = color_tuple
-        top[0,:,:] = color_tuple
-        top[:,-1,:] = color_tuple
-
-        # top = np.append([top_or_bottom],text_added,axis=0)
-        # z = np.repeat([np.repeat([0],12)],2,axis=0)z
-        tm = np.append(top,mid, axis=0)
-        return np.append(tm,[top_or_bottom],axis=0)
-
-    def black_background(color_space, mult):
-        if color_space == 'RGB':
-            return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW, 4))
-        elif color_space == 'Luminescence':
-            return np.zeros((ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW))
-        
-    def white_background(mult): 
-        a = np.tile([255,255,255,255] , (ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(PUNCHOUT_SIZE+2),(PUNCHOUT_SIZE+2) * CELLS_PER_ROW,1))
-        return a
+  
+    SESSION.cells_per_row["Multichannel"] = len(userInfo.channels) + 1
+    SESSION.cells_per_row["Gallery"] = userInfo.cells_per_row
+    cpr_g = SESSION.cells_per_row["Gallery"]
+    cpr_m = SESSION.cells_per_row["Multichannel"]
 
 
     # Starting to add
-    if SESSION.mode=="Gallery": size_multiplier = 1
-    elif SESSION.mode=="Multichannel": size_multiplier = len(CHANNELS)
-    page_image = {}
+    SESSION.page_status_layers["Gallery"] = black_background('RGB', 1, userInfo.cells_per_row)
+    SESSION.page_status_layers["Multichannel"] = black_background('RGB',cpr_m, cpr_m)
+
+    print(f"Shapes are {SESSION.page_status_layers['Multichannel'].shape}  || {SESSION.page_status_layers['Gallery'].shape}")
+    page_image_multichannel = {} ; page_image_gallery = {}
     for chn in CHANNELS_STR:
         if chn == 'Composite':
             pass
         else:
-            page_image[chn] = black_background('Luminescence', size_multiplier)
+            page_image_gallery[chn] = black_background('Luminescence', 1, userInfo.cells_per_row)
+            page_image_multichannel[chn] = black_background('Luminescence', cpr_m, cpr_m)
 
     # page_image = black_background('RGB',size_multiplier)
-    page_status_layer = black_background('RGB',size_multiplier)
-    nuclei_box_coords = []
+
+    nuclei_box_coords_g = []
+    nuclei_box_coords_m = []
     print(f'Adding {len(cells)} cells to viewer... Channels are {CHANNELS} // {CHANNELS_STR}')
-    col = 0
-    row = 0
-    GRID_TO_ID = {} # Reset this since we could be changing to multichannel mode
+    col_g = 0 
+    row_g = 0 ; row_m = 0
+    SESSION.grid_to_ID = {"Gallery":{}, "Multichannel":{}} # Reset this since we could be changing to multichannel mode
     cells = list(cells.values())
     cid_list = []
     while bool(cells): # coords left
-        col = (col%CELLS_PER_ROW)+1
-        if col ==1: row+=1 
-        # print(f'Next round of while. Still {len(cells)} cells left. Row {row}, Col {col}')
+        col_g = (col_g%cpr_g)+1 
+        if col_g ==1: row_g+=1
+        col_m = 1 ;  row_m+=1 
+
+        # print(f'Next round of while. Still {len(cells)} cells left. G Row {row_g}, Col {col_g} || M Row {row_m}, Col {col_m}')
         cell = cells.pop(); 
         cell_anno = cell["Layer"]; cell_id = cell['cid']; cell_x = cell['center_x']; cell_y = cell['center_y']
-        cell_status = retrieve_status(cell_anno +' '+ str(cell_id),cell['validation_call'])
+        cell_status = retrieve_status(cell_anno +' '+ str(cell_id),cell['validation_call'], new_page)
         cid_list.append(cell_id)
         # add the rest of the layers to the viewer
         if RASTERS is not None:
@@ -883,18 +759,17 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
 
         x1 = int(cell["XMin"] + offset - cell_x) ; x2 = int(cell["XMax"] + offset - cell_x)
         y1 = int(cell["YMin"] + offset - cell_y) ; y2 = int(cell["YMax"] + offset - cell_y)
-        cX = (row-1)*(PUNCHOUT_SIZE+2) ; cY = (col-1)*(PUNCHOUT_SIZE+2)
+        cXg = (row_g-1)*(userInfo.imageSize+2) ; cYg = (col_g-1)*(userInfo.imageSize+2)
+        cXm = (row_m-1)*(userInfo.imageSize+2) ; cYm = len(userInfo.channels)*(userInfo.imageSize+2)
 
-        nuclei_box_coords.append([[cX+y1, cY+x1], [cX+y2, cY+x2]]) # x and y are actually flipped between napari and the object data
+        nuclei_box_coords_g.append([[cXg+y1, cYg+x1], [cXg+y2, cYg+x2]]) # x and y are actually flipped between napari and the object data
+        nuclei_box_coords_m.append([[cXm+y1, cYm+x1], [cXm+y2, cYm+x2]]) 
+
         for pos, fluor in enumerate(CHANNEL_ORDER): # loop through channels
             if pos in CHANNELS and fluor != 'Composite':
                 # name cell layer
                 cell_name = f'Cell {cell_id} {fluor}'
 
-                # print(f'Adding cell {cell_x},{cell_y} - layer {i}')
-                # Save record of what colormap is chosen for what fluor. Useful for 
-                #   altering the composite image later (white-in / black-in). 
-                # This is dumb - do it somewhere else
                 # print(f'Testing if raster used: {RASTERS}') # YES can see subdatasets.
                 if RASTERS is not None:
                     with rasterio.open(RASTERS[pos]) as channel:
@@ -904,72 +779,94 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
                     cell_punchout = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,pos].astype(np.uint8)
                 # print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{CHANNEL_ORDER[fluor]}')
 
-                # print(f'fluor {fluor} pageimage shape: {pageimage.shape} | row {row}, col {col} | cpsave shape {cp_save.shape}')
-                if SESSION.mode=="Multichannel": # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
-                    # multichannel mode: individual image
-                    page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
-                                (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout
-                    # multichannel mode: composite image
-                    page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1,
-                                (CELLS_PER_ROW-1)*(PUNCHOUT_SIZE+2)+1:CELLS_PER_ROW*(PUNCHOUT_SIZE+2)-1] = cell_punchout
-                    GRID_TO_ID[f'{row},{col}'] = cell_anno + ' ' + str(cell_id)
-                    GRID_TO_ID[f'{row},{CELLS_PER_ROW}'] = cell_anno + ' ' + str(cell_id)
-                    if col ==1:
-                        page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id))
+                
+                # multichannel mode: individual image
+                page_image_multichannel[fluor][(row_m-1)*(userInfo.imageSize+2)+1:row_m*(userInfo.imageSize+2)-1,
+                            (col_m-1)*(userInfo.imageSize+2)+1:col_m*(userInfo.imageSize+2)-1] = cell_punchout
+                # multichannel mode: composite image
+                page_image_multichannel[fluor][(row_m-1)*(userInfo.imageSize+2)+1:row_m*(userInfo.imageSize+2)-1,
+                            (cpr_m-1)*(userInfo.imageSize+2)+1:cpr_m*(userInfo.imageSize+2)-1] = cell_punchout
+                SESSION.grid_to_ID["Multichannel"][f'{row_m},{col_m}'] = cell_anno + ' ' + str(cell_id)
+                SESSION.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cell_anno + ' ' + str(cell_id)
+                if col_m ==1:
+                    SESSION.page_status_layers["Multichannel"][(row_m-1)*(userInfo.imageSize+2):row_m*(userInfo.imageSize+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Multichannel")
+                col_m+=1 # so that next luminescence image is tiled 
+                
 
-                    col+=1 # so that next luminescence image is tiled 
-                    continue
-
-                elif SESSION.mode=="Gallery": # This stuff is only necessary in composite mode 
-                    GRID_TO_ID[f'{row},{col}'] = cell_anno + ' ' + str(cell_id)
-                    page_image[fluor][(row-1)*(PUNCHOUT_SIZE+2)+1:row*(PUNCHOUT_SIZE+2)-1, (col-1)*(PUNCHOUT_SIZE+2)+1:col*(PUNCHOUT_SIZE+2)-1] = cell_punchout
-                    page_status_layer[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id))
+                # Gallery images 
+                SESSION.grid_to_ID["Gallery"][f'{row_g},{col_g}'] = cell_anno + ' ' + str(cell_id)
+                page_image_gallery[fluor][(row_g-1)*(userInfo.imageSize+2)+1:row_g*(userInfo.imageSize+2)-1, (col_g-1)*(userInfo.imageSize+2)+1:col_g*(userInfo.imageSize+2)-1] = cell_punchout
+                SESSION.page_status_layers["Gallery"][(row_g-1)*(userInfo.imageSize+2):row_g*(userInfo.imageSize+2), (col_g-1)*(userInfo.imageSize+2):col_g*(userInfo.imageSize+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Gallery")
     
+
+    gal_vis = True if SESSION.mode == "Gallery" else False
+    mult_vis = not gal_vis
     print(f"\nMy scale is {SESSION.image_scale}")
     sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-    viewer.add_image(white_background(size_multiplier).astype(np.uint8), name = "Absorption", 
-                                                  blending = 'translucent', visible = ABSORPTION, scale =sc )
-    for fluor in list(page_image.keys()):
+    viewer.add_image(white_background(1, userInfo.cells_per_row).astype(np.uint8), name = "Gallery Absorption", 
+                                                  blending = 'translucent', visible = SESSION.absorption_mode and gal_vis, scale =sc )
+    viewer.add_image(white_background(cpr_m, cpr_m).astype(np.uint8), name = "Multichannel Absorption", 
+                                                  blending = 'translucent', visible = SESSION.absorption_mode and mult_vis, scale =sc )
+    for fluor in list(page_image_gallery.keys()):
         print(f"Adding layers now. fluor is {fluor}")
         if fluor == 'Composite':
             continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
-        if ABSORPTION:
-            viewer.add_image(page_image[fluor], name = fluor, blending = 'minimum',
-                 colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse'), scale = sc, interpolation="linear")
+        if SESSION.absorption_mode:
+            viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'minimum',
+                 colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse'), scale = sc, interpolation="linear", visible =gal_vis)
+            viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'minimum',
+                 colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse'), scale = sc, interpolation="linear", visible=mult_vis)
             
         else:
-            viewer.add_image(page_image[fluor], name = fluor, blending = 'additive',
-                 colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]), scale = sc, interpolation="linear")
+            viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'additive',
+                 colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]), scale = sc, interpolation="linear", visible=gal_vis)
+            viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
+                 colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]), scale = sc, interpolation="linear", visible=mult_vis)
     # if composite_only:
 
     features = {'cid': cid_list}
-    nb_color_str = 'black' if ABSORPTION else 'white' 
-    nb_color_hex = '#000000' if ABSORPTION else '#ffffff'
+    nb_color_str = 'black' if SESSION.absorption_mode else 'white' 
+    nb_color_hex = '#000000' if SESSION.absorption_mode else '#ffffff'
     nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_str}
-    viewer.add_shapes(nuclei_box_coords, name="Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
-                                        face_color='#00000000', scale=sc, features=features, text = nb_text )
-    status_layer = viewer.add_image(page_status_layer.astype(np.uint8), name='Status Layer', interpolation='linear', scale = sc)
-    viewer.layers.selection.active = viewer.layers["Status Layer"]
+    viewer.add_shapes(nuclei_box_coords_g, name="Gallery Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
+                                        face_color='#00000000', scale=sc, features=features, text = nb_text, visible=False)
+    viewer.add_shapes(nuclei_box_coords_m, name="Multichannel Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
+                                        face_color='#00000000', scale=sc, features=features, text = nb_text, visible = False)
+    viewer.add_image(SESSION.page_status_layers["Gallery"].astype(np.uint8), name='Gallery Status Layer', interpolation='linear', scale = sc, visible=gal_vis)
+    viewer.add_image(SESSION.page_status_layers["Multichannel"].astype(np.uint8), name='Multichannel Status Layer', interpolation='linear', scale = sc, visible=mult_vis)
+    # viewer.layers.selection.active = viewer.layers["Status Layer"]
+
+    VIEWER.layers.selection.active = VIEWER.layers["Gallery Status Layer"]  
+    
+
+    #TODO make a page label... 
+
+    # Exiting add_layers function
+
+    return True
+
+def attach_functions_to_viewer(viewer):
 
     ##----------------- Live functions that control mouseover behavior on images 
+    status_colors = STATUS_COLORS
 
     '''Take a pixel coordinate (y,x) and return an (x,y) position for the image that contains the pixel in the image grid'''
     def pixel_coord_to_grid(coords):
         x = coords[0]; y = coords[1]
         # sc = 1 if SESSION.image_scale is None else SESSION.image_scale
         # Cannot return 0 this way, since there is no 0 row or col
-        row_num = max(ceil((x+1)/(PUNCHOUT_SIZE+2)),1)
-        col_num = max(ceil((y+1)/(PUNCHOUT_SIZE+2)),1)
+        row_num = max(ceil((x+1)/(userInfo.imageSize+2)),1)
+        col_num = max(ceil((y+1)/(userInfo.imageSize+2)),1)
         return row_num, col_num
     
     def multichannel_fetch_val(local_x,global_y, fluor):
-        offset_x = (PUNCHOUT_SIZE+2) * list(CHANNELS_STR).index(fluor)
+        offset_x = (userInfo.imageSize+2) * list(CHANNELS_STR).index(fluor)
         return (global_y, offset_x+local_x)
     
 
     '''Locate mouse on the canvas. Returns the name of the cell under the mouse, current mouse 
         coordinates, and pixel values for each channel in a dict'''
-    def find_mouse(image_layer, data_coordinates, scope = 'world'):
+    def find_mouse(data_coordinates, scope = 'world'):
    
                 # retrieve cell ID name
         # Scale data coordinates to image. Then round to nearest int, representing the coord or the image pixel under the mouse
@@ -984,25 +881,26 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
             for fluor in CHANNELS_STR:
                 if fluor == "Composite": continue
                 # get_value returns a tuple here, where the first number is the image layer in the pyramid. Discard that
-                vals[fluor] = VIEWER.layers["global "+fluor].get_value(data_coordinates)[1]
+                v = VIEWER.layers["Context "+fluor].get_value(data_coordinates)
+                vals[fluor] =  v[1] if v is not None else "-"
             return "Context", (coords[1],coords[0]), vals # flips axes of coordinates
         else: # Gallery mode or Multichannel mode    
             row,col = pixel_coord_to_grid(coords)
             try:
-                image_name = GRID_TO_ID[f'{row},{col}']
+                image_name = SESSION.grid_to_ID[SESSION.mode][f'{row},{col}']
             except KeyError as e:
                 return "None" , None, None
             
-            local_x = coords[1] - (PUNCHOUT_SIZE+2)*(col-1)
-            local_y = coords[0] - (PUNCHOUT_SIZE+2)*(row-1)
+            local_x = coords[1] - (userInfo.imageSize+2)*(col-1)
+            local_y = coords[0] - (userInfo.imageSize+2)*(row-1)
             for fluor in CHANNELS_STR:
                 if fluor == "Composite": continue
                 # Context mode already taken care of. Need to handle Gallery / Multichannel 
                 if SESSION.mode=="Multichannel":
                     # print(f"data coords: {data_coordinates}  | vs assumed coords for {fluor}: {multichannel_fetch_val(local_x, data_coordinates[0], fluor)}")
-                    vals[fluor] = VIEWER.layers[fluor].get_value(multichannel_fetch_val(local_x, data_coordinates[0], fluor))
+                    vals[fluor] = VIEWER.layers[f"Multichannel {fluor}"].get_value(multichannel_fetch_val(local_x, data_coordinates[0], fluor))
                 elif SESSION.mode=="Gallery":
-                    vals[fluor] = VIEWER.layers[fluor].get_value(data_coordinates)
+                    vals[fluor] = VIEWER.layers[f"Gallery {fluor}"].get_value(data_coordinates)
                 if vals[fluor] is None:
                     vals[fluor] = "-"
 
@@ -1013,10 +911,10 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
                 return str(image_name), (local_x,local_y), vals
 
     @viewer.mouse_move_callbacks.append
-    def display_intensity(image_layer, event):
+    def display_intensity(viewer, event):
         
         if SESSION.mode == "Context":
-            _ ,coords,vals = find_mouse(image_layer, event.position)
+            _ ,coords,vals = find_mouse(event.position)
             
             if (not vals) or (vals is None) or (next(iter(vals.values())) is None):
                 # Don't do anything else - the cursor is out of bounds of the image
@@ -1028,7 +926,7 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
                 output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {val}   </font>'
             VIEWER.status = f'Context Mode pixel intensities at {coords}: {output_str}'
         elif SESSION.mode == "Gallery" or SESSION.mode == "Multichannel":
-            cell_name,coords,vals = find_mouse(image_layer, event.position, scope = 'grid') 
+            cell_name,coords,vals = find_mouse(event.position, scope = 'grid') 
             if (not vals) or (vals is None):
                 # Don't do anything else
                 VIEWER.status = 'Out of bounds'
@@ -1051,10 +949,10 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
             sc = STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]]
             VIEWER.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
 
-    @status_layer.bind_key('Space')
-    def toggle_status(image_layer):
+    @viewer.bind_key('Space')
+    def toggle_status(viewer):
         
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         if val is None:
             return None
         coords = np.round(data_coordinates).astype(int)
@@ -1066,66 +964,66 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
-        imdata = image_layer.data
         if SESSION.mode=="Gallery": 
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name))
+            imdata = viewer.layers["Gallery Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
+                              (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
         elif SESSION.mode=="Multichannel":
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                :] = generate_status_box(next_status,str(cell_name))
-        image_layer.data = imdata.astype('int')
+            imdata = viewer.layers["Multichannel Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
+                :] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
-    @status_layer.mouse_drag_callbacks.append
-    def trigger_toggle_status(image_layer, event):
-        # toggle_status(image_layer) #TODO decide on the behavior for clicking on a cell
+    @viewer.mouse_drag_callbacks.append
+    def trigger_toggle_status(viewer, event):
+        #TODO decide on the behavior for clicking on a cell
         
         # Allow user to click on a cell to get it's name into the entry box  
         widget = ALL_CUSTOM_WIDGETS['notes cell entry']
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
-        widget.setText(cell_name)
+        # cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
+        widget.setText(f"{SESSION.cell_under_mouse['Layer']} {SESSION.cell_under_mouse['cid']}")
 
-    def set_all_unseen(image_layer):
+    @viewer.bind_key('Control-c')
+    @viewer.bind_key('Shift-c')
+    def set_all_unseen(viewer):
+        if SESSION.mode == "Context": return None
         next_status = 'Unseen'
-        imdata = image_layer.data
 
         # set all cells to status
-        for coords, cell_id in GRID_TO_ID.items():
+        for coords, cell_id in SESSION.grid_to_ID[SESSION.mode].items():
             SESSION.status_list[str(cell_id)] = next_status
             row = int(coords.split(',')[0])
             col = int(coords.split(',')[1])
 
             if SESSION.mode=="Gallery": 
-                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                                (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_id))
+                imdata = viewer.layers["Gallery Status Layer"].data
+                imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
+                                (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_id), SESSION.mode)
+                viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
             elif SESSION.mode=="Multichannel":
-                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                    :] = generate_status_box(next_status,str(cell_id))
-        image_layer.data = imdata.astype('int')
+                imdata = viewer.layers["Multichannel Status Layer"].data
+                imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
+                    :] = generate_status_box(next_status,str(cell_id), SESSION.mode)
+                viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
 
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         if val is None:
             return None
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
-    
-    @status_layer.bind_key('Control-c')
-    def ctrl_all_unseen(image_layer):
-        set_all_unseen(image_layer)
-
-    @status_layer.bind_key('Shift-c')
-    def shift_all_unseen(image_layer):
-        set_all_unseen(image_layer)
-
-    @status_layer.bind_key('c')
-    def set_unseen(image_layer):
+ 
+    @viewer.bind_key('c')
+    def set_unseen(viewer):
+        if SESSION.mode == "Context": return None
         next_status = 'Unseen'
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         if val is None:
             return None
         coords = np.round(data_coordinates).astype(int)
@@ -1133,57 +1031,58 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
-        imdata = image_layer.data
+
         if SESSION.mode=="Gallery": 
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name))
+            imdata = viewer.layers["Gallery Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
+                              (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
         elif SESSION.mode=="Multichannel":
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                :] = generate_status_box(next_status,str(cell_name))
-        image_layer.data = imdata.astype('int')
+            imdata = viewer.layers["Multichannel Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
+                :] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
-    def set_all_nr(image_layer):
+    @viewer.bind_key('Control-v')
+    @viewer.bind_key('Shift-v')
+    def set_all_nr(viewer):
+        if SESSION.mode == "Context": return None
         next_status = 'Needs review'
-        imdata = image_layer.data
 
         # set all cells to status
-        for coords, cell_id in GRID_TO_ID.items():
+        for coords, cell_id in SESSION.grid_to_ID[SESSION.mode].items():
             SESSION.status_list[str(cell_id)] = next_status
             row = int(coords.split(',')[0])
             col = int(coords.split(',')[1])
 
             if SESSION.mode=="Gallery": 
-                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                                (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_id))
+                imdata = viewer.layers["Gallery Status Layer"].data
+                imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
+                                (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_id), SESSION.mode)
+                viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
             elif SESSION.mode=="Multichannel":
-                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                    :] = generate_status_box(next_status,str(cell_id))
-        image_layer.data = imdata.astype('int')
+                imdata = viewer.layers["Multichannel Status Layer"].data
+                imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
+                    :] = generate_status_box(next_status,str(cell_id), SESSION.mode)
+                viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
 
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         if val is None:
             return None
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
-    
-    @status_layer.bind_key('Control-v')
-    def ctrl_all_nr(image_layer):
-        set_all_nr(image_layer)
 
-    @status_layer.bind_key('Shift-v')
-    def shift_all_nr(image_layer):
-        set_all_nr(image_layer)
-
-    @status_layer.bind_key('v')
-    def set_nr(image_layer):
+    @viewer.bind_key('v')
+    def set_nr(viewer):
+        if SESSION.mode == "Context": return None
         next_status = 'Needs review'
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         if val is None:
             return None
         coords = np.round(data_coordinates).astype(int)
@@ -1191,38 +1090,48 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
-        imdata = image_layer.data
         if SESSION.mode=="Gallery": 
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name))
+            imdata = viewer.layers["Gallery Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
+                              (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
+
         elif SESSION.mode=="Multichannel":
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                :] = generate_status_box(next_status,str(cell_name))
-        image_layer.data = imdata.astype('int')
+            imdata = viewer.layers["Multichannel Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
+                :] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
+
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
-    def set_all_confirmed(image_layer):
+    @viewer.bind_key('Control-b')
+    @viewer.bind_key('Shift-b')
+    def set_all_confirmed(viewer):
+        if SESSION.mode == "Context": return None
         next_status = 'Confirmed'
-        imdata = image_layer.data
 
         # set all cells to status
-        for coords, cell_id in GRID_TO_ID.items():
+        for coords, cell_id in SESSION.grid_to_ID[SESSION.mode].items():
             SESSION.status_list[str(cell_id)] = next_status
             row = int(coords.split(',')[0])
             col = int(coords.split(',')[1])
 
             if SESSION.mode=="Gallery": 
-                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                                (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_id))
-            elif SESSION.mode=="Multichannel":
-                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                    :] = generate_status_box(next_status,str(cell_id))
-        image_layer.data = imdata.astype('int')
+                imdata = viewer.layers["Gallery Status Layer"].data
+                imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
+                                (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_id), SESSION.mode)
+                viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
 
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+            elif SESSION.mode=="Multichannel":
+                imdata = viewer.layers["Multichannel Status Layer"].data
+                imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
+                    :] = generate_status_box(next_status,str(cell_id), SESSION.mode)
+                viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
+
+        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         if val is None:
             return None
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
@@ -1230,18 +1139,11 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
-    @status_layer.bind_key('Control-b')
-    def ctrl_all_confirmed(image_layer):
-        set_all_confirmed(image_layer)
-
-    @status_layer.bind_key('Shift-b')
-    def shift_all_confirmed(image_layer):
-        set_all_confirmed(image_layer)
-
-    @status_layer.bind_key('b')
-    def set_confirmed(image_layer):
+    @viewer.bind_key('b')
+    def set_confirmed(viewer):
+        if SESSION.mode == "Context": return None
         next_status = 'Confirmed'
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         if val is None:
             return None
         coords = np.round(data_coordinates).astype(int)
@@ -1249,39 +1151,46 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
-        imdata = image_layer.data
         if SESSION.mode=="Gallery": 
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name))
+            imdata = viewer.layers["Gallery Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
+                              (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
+
         elif SESSION.mode=="Multichannel":
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                :] = generate_status_box(next_status,str(cell_name))
-        image_layer.data = imdata.astype('int')
+            imdata = viewer.layers["Multichannel Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
+                :] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
-
-    def set_all_rejected(image_layer):
+    @viewer.bind_key('Control-n')
+    @viewer.bind_key('Shift-n')
+    def set_all_rejected(viewer):
+        if SESSION.mode == "Context": return None
         next_status = 'Rejected'
-        imdata = image_layer.data
 
         # set all cells to status
-        for coords, cell_id in GRID_TO_ID.items():
+        for coords, cell_id in SESSION.grid_to_ID[SESSION.mode].items():
             SESSION.status_list[str(cell_id)] = next_status
             row = int(coords.split(',')[0])
             col = int(coords.split(',')[1])
 
             if SESSION.mode=="Gallery": 
-                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                                (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_id))
+                imdata = viewer.layers["Gallery Status Layer"].data
+                imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
+                                (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_id), SESSION.mode)
+                viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
             elif SESSION.mode=="Multichannel":
-                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                    :] = generate_status_box(next_status,str(cell_id))
-        image_layer.data = imdata.astype('int')
+                imdata = viewer.layers["Multichannel Status Layer"].data
+                imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
+                    :] = generate_status_box(next_status,str(cell_id), SESSION.mode)
+            viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
 
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         if val is None:
             return None
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
@@ -1289,18 +1198,11 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
-    @status_layer.bind_key('Control-n')
-    def ctrl_all_rejected(image_layer):
-        set_all_rejected(image_layer)
-
-    @status_layer.bind_key('Shift-n')
-    def shift_all_rejected(image_layer):
-        set_all_rejected(image_layer)
-
-    @status_layer.bind_key('n')
-    def set_rejected(image_layer):
+    @viewer.bind_key('n')
+    def set_rejected(viewer):
+        if SESSION.mode == "Context": return None
         next_status = 'Rejected'
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         if val is None:
             return None
         coords = np.round(data_coordinates).astype(int)
@@ -1308,38 +1210,47 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
-        imdata = image_layer.data
         if SESSION.mode=="Gallery": 
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name))
+            imdata = viewer.layers["Gallery Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
+                              (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
+
         elif SESSION.mode=="Multichannel":
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                :] = generate_status_box(next_status,str(cell_name))
-        image_layer.data = imdata.astype('int')
+            imdata = viewer.layers["Multichannel Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
+                :] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
-    def set_all_interesting(image_layer):
+    @viewer.bind_key('Control-m')
+    @viewer.bind_key('Shift-m')
+    def set_all_interesting(viewer):
+        if SESSION.mode == "Context": return None
         next_status = 'Interesting'
-        imdata = image_layer.data
 
         # set all cells to status
-        for coords, cell_id in GRID_TO_ID.items():
+        for coords, cell_id in SESSION.grid_to_ID[SESSION.mode].items():
             SESSION.status_list[str(cell_id)] = next_status
             row = int(coords.split(',')[0])
             col = int(coords.split(',')[1])
 
             if SESSION.mode=="Gallery": 
-                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                                (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_id))
-            elif SESSION.mode=="Multichannel":
-                imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                    :] = generate_status_box(next_status,str(cell_id))
-        image_layer.data = imdata.astype('int')
+                imdata = viewer.layers["Gallery Status Layer"].data
+                imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
+                                (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_id), SESSION.mode)
+                viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
 
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+            elif SESSION.mode=="Multichannel":
+                imdata = viewer.layers["Multichannel Status Layer"].data
+                imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
+                    :] = generate_status_box(next_status,str(cell_id), SESSION.mode)
+                viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
+
+        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         if val is None:
             return None
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
@@ -1347,18 +1258,12 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
-    @status_layer.bind_key('Control-m')
-    def ctrl_all_interesting(image_layer):
-        set_all_interesting(image_layer)
 
-    @status_layer.bind_key('Shift-m')
-    def shift_all_interesting(image_layer):
-        set_all_interesting(image_layer)
-
-    @status_layer.bind_key('m')
-    def set_interesting(image_layer):
+    @viewer.bind_key('m')
+    def set_interesting(viewer):
+        if SESSION.mode == "Context": return None
         next_status = 'Interesting'
-        cell_name,data_coordinates,val = find_mouse(image_layer, viewer.cursor.position)
+        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         if val is None:
             return None
         coords = np.round(data_coordinates).astype(int)
@@ -1366,28 +1271,32 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
-        imdata = image_layer.data
         if SESSION.mode=="Gallery": 
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2), 
-                              (col-1)*(PUNCHOUT_SIZE+2):col*(PUNCHOUT_SIZE+2)] = generate_status_box(next_status,str(cell_name))
+            imdata = viewer.layers["Gallery Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
+                              (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
+
         elif SESSION.mode=="Multichannel":
-            imdata[(row-1)*(PUNCHOUT_SIZE+2):row*(PUNCHOUT_SIZE+2),
-                :] = generate_status_box(next_status,str(cell_name))
-        image_layer.data = imdata.astype('int')
+            imdata = viewer.layers["Multichannel Status Layer"].data
+            imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
+                :] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+            viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
-    @status_layer.bind_key('l')
-    def load_context_mode(image_layer):
+    @viewer.bind_key('l')
+    def load_context_mode(viewer):
         print("\nIn context mode fxn")
-        toggle_session_mode("Context")
-
-        
-    #TODO make a page label... 
+        if SESSION.mode == "Context":
+            toggle_session_mode(SESSION.last_mode)
+        else:
+            toggle_session_mode("Context")
 
     return True
+
 
 ######------------------------- Misc + Viewer keybindings ---------------------######
 
@@ -1458,7 +1367,9 @@ def tsv_wrapper(viewer):
     
     @viewer.bind_key('Shift-h')
     def toggle_nuclei_boxes(viewer):
-        VIEWER.layers['Nuclei Boxes'].visible = not VIEWER.layers['Nuclei Boxes'].visible
+        SESSION.nuclei_boxes_vis = not SESSION.nuclei_boxes_vis
+        VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible = not VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible
+
 
     @viewer.bind_key('Control-k')
     def restore_canvas(viewer):
@@ -1472,19 +1383,19 @@ def tsv_wrapper(viewer):
     def scroll_up(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        viewer.camera.center = (y-((PUNCHOUT_SIZE+2)*sc),x)
+        viewer.camera.center = (y-((userInfo.imageSize+2)*sc),x)
 
     @viewer.bind_key('Down')
     def scroll_down(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        viewer.camera.center = (y+((PUNCHOUT_SIZE+2)*sc),x)
+        viewer.camera.center = (y+((userInfo.imageSize+2)*sc),x)
     
     @viewer.bind_key('Left')
     def scroll_left(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        viewer.camera.center = (y,x-((PUNCHOUT_SIZE+2)*sc))
+        viewer.camera.center = (y,x-((userInfo.imageSize+2)*sc))
         #TODO trigger mouse update here
         # napari.Viewer.window.qt_viewer._process_mouse_event
         # viewer.window.qt_viewer.canvas.events.mouse_press(pos=(x, y), modifiers=(), button=0)
@@ -1494,7 +1405,7 @@ def tsv_wrapper(viewer):
     def scroll_right(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        viewer.camera.center = (y,x+((PUNCHOUT_SIZE+2)*sc))
+        viewer.camera.center = (y,x+((userInfo.imageSize+2)*sc))
 
     # On Macs, ctrl-arrow key is taken by something else.
     @viewer.bind_key('Shift-Right')  
@@ -1524,15 +1435,16 @@ def tsv_wrapper(viewer):
     
     @viewer.bind_key('i')
     def toggle_interpolation(viewer):
-        current = VIEWER.layers[CHANNELS_STR[0]].interpolation
+        current = VIEWER.layers[f"Gallery {CHANNELS_STR[0]}"].interpolation
         if current == 'nearest':
             new = 'linear'
         else:
             new = 'nearest' 
         for fluor in CHANNELS_STR:
             if fluor =='Composite': continue
-            VIEWER.layers[fluor].interpolation = new
-            VIEWER.layers["global "+fluor].interpolation = new
+            VIEWER.layers["Gallery " +fluor].interpolation = new
+            VIEWER.layers["Multichannel "+fluor].interpolation = new
+            VIEWER.layers["Context "+fluor].interpolation = new
 
     @viewer.bind_key('Alt-m')
     def open_guide(viewer):
@@ -1588,7 +1500,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     # 'OPAL520' # None means 'don't do it', while a channel name means 'put highest at the top'
     if sort_by_intensity is None:
         sort_by_intensity = "Object Id"
-    elif "opal" in sort_by_intensity.lower():
+    elif "opal" in sort_by_intensity.lower() or "DAPI" == sort_by_intensity:
         sort_by_intensity = sort_by_intensity.replace('OPAL','Opal ') + ' Cell Intensity'
     else:
         sort_by_intensity = "Sample AF Cell Intensity"
@@ -1722,7 +1634,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
                  # First, check if a custom name was used.
                 sort_by_intensity = [x for x in all_possible_intensities if all(y in x for y in sort_by_intensity.split(" "))][0]
                 cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = True, kind = 'mergesort')
-        except KeyError:
+        except (KeyError, IndexError):
             #  
             if global_sort_status:
                 VIEWER.status = f"Unable to sort this page by '{sort_by_intensity}', will use ID instead. Check your data headers."
@@ -1772,14 +1684,13 @@ def replace_note(cell_widget, note_widget):
 
 ''' Reset globals and proceed to main '''
 def GUI_execute(preprocess_class):
-    global userInfo, qptiff, PUNCHOUT_SIZE, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
+    global userInfo, qptiff, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
     global CHANNELS, ADJUSTED, OBJECT_DATA_PATH, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
     global ANNOTATIONS_PRESENT, ORIGINAL_ADJUSTMENT_SETTINGS, SESSION
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
     SESSION = userInfo.session
 
     qptiff = userInfo.qptiff
-    PUNCHOUT_SIZE = userInfo.imageSize
     PHENOTYPES = list(userInfo.phenotype_mappings.keys())
     ANNOTATIONS = list(userInfo.annotation_mappings.keys())
     ANNOTATIONS_PRESENT = userInfo.analysisRegionsInData
@@ -1989,7 +1900,7 @@ def main(preprocess_class = None):
     preprocess_class._append_status_br('Initializing Napari session...')
 
     set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 1.0 gamma, 0 black in, 255 white in
-    add_layers(viewer,pyramid,tumor_cell_XYs, int(PUNCHOUT_SIZE/2))
+    add_layers(viewer,pyramid,tumor_cell_XYs, int(userInfo.imageSize/2))
     #TODO
     #Enable scale bar
     if SESSION.image_scale:
@@ -2009,6 +1920,7 @@ def main(preprocess_class = None):
     sv_wrapper(viewer)
     tsv_wrapper(viewer)
     chn_key_wrapper(viewer)
+    attach_functions_to_viewer(viewer)
     set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
     if preprocess_class is not None: preprocess_class.close() # close other window
     with tifffile.imread(userInfo.qptiff, aszarr=True) as zs:
@@ -2017,16 +1929,16 @@ def main(preprocess_class = None):
         for i, fluor in enumerate(userInfo.channelOrder):
             if i not in CHANNELS or fluor == 'Composite':
                 continue
-            print(f"\nAdding global {fluor} to the image")
+            print(f"\nAdding full size {fluor} image")
             pyramid = [da.from_zarr(zs, n)[i] for n in range(6) ] #TODO how to know how many pyramid layers?
-            viewer.add_image(pyramid, name = f'global {fluor}', 
+            viewer.add_image(pyramid, name = f'Context {fluor}', 
                         blending = 'additive', colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]),
                         interpolation = "linear", scale=sc, visible = False)
         
         # Set adjustment settings to their default now that all images are loaded
         reuse_contrast_limits()
         reuse_gamma()
-        viewer.layers.selection.active = viewer.layers["Status Layer"]
+        viewer.layers.selection.active = viewer.layers["Gallery Status Layer"]
         napari.run() # Start the event loop
         # zs.close()
     print('\n#Zarr object should be closed')
