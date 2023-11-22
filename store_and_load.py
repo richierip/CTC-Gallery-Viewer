@@ -53,6 +53,7 @@ class sessionVariables:
         self.last_context_camera_coordinates = {"center":(0,0),"z":1} # store the last place the user was looking in context mode
         self.grid_to_ID = {"Gallery":{}, "Multichannel":{}}
         self.page_status_layers = {"Gallery": [], "Multichannel": []}
+        self.session_cells = pd.DataFrame()
         self.current_cells =  {'Layer':str,"cid": int,"center_x": int,'center_y': int,
                                 'validation_call': str, 'XMax' : float,'XMin':float,
                                 'YMax' : float,'YMin':float} # Holds dict of dict for the cells that are loaded on the current page in the viewer
@@ -61,6 +62,9 @@ class sessionVariables:
         self.nuclei_boxes_vis = False
         self.status_layer_vis = True
         self.status_box_vis = True
+        self.kdtree = None # Will hold scipy.spatial.cKDTree data structure, for use in finding nearest neighbors
+        self.intensity_columns = []
+        self.validation_columns = []
 
 class userPresets:
     ''' This class is used to store user-selected parameters on disk persistently,

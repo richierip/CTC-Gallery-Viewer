@@ -28,6 +28,7 @@ from re import sub
 import os
 import dask.array as da
 import zarr
+import scipy.spatial as spatial
 # from initial_UI import VERSION_NUMBER
 
 
@@ -191,6 +192,8 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
             adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [black_in,ADJUSTMENT_SETTINGS[fluor+" white-in"]])
 
 def toggle_absorption():
+    #TODO make absorption work for context more?
+    if SESSION.mode == "Context": return None
     if SESSION.absorption_mode ==True:
         SESSION.absorption_mode = False
         for layer in VIEWER.layers:
@@ -317,12 +320,21 @@ def toggle_session_mode(target_mode):
             VIEWER.layers.remove_selected()
         except KeyError:
             pass
-        # Add box around cells
-        x1 = int(target_cell_info["XMin"]); x2 = int(target_cell_info["XMax"])
-        y1 = int(target_cell_info["YMin"]); y2 = int(target_cell_info["YMax"])
-        nuclei_box_coords = [[[y1,x1] , [y2,x2]]]
 
-        features = {'cid': cell_num}
+        # Find cells in session table near target
+        nearby_inds = SESSION.kdtree.query_ball_point([target_cell_info["center_x"],target_cell_info["center_y"]], 500) # [x,y], dist -> indices in table
+        nearby_cells = SESSION.session_cells.iloc[nearby_inds]
+
+        # Add box around cells
+        nuclei_box_coords = []
+        cids = []
+        for index, cell in nearby_cells.iterrows():
+            x1 = int(cell["XMin"]); x2 = int(cell["XMax"])
+            y1 = int(cell["YMin"]); y2 = int(cell["YMax"])
+            nuclei_box_coords.append([[y1,x1] , [y2,x2]])
+            cids.append(str(cell["Object Id"]))
+
+        features = {'cid': cids}
         nb_color_str = 'black' if SESSION.absorption_mode else 'white' 
         nb_color_hex = '#000000' if SESSION.absorption_mode else '#ffffff'
         nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_str}
@@ -883,7 +895,14 @@ def attach_functions_to_viewer(viewer):
                 # get_value returns a tuple here, where the first number is the image layer in the pyramid. Discard that
                 v = VIEWER.layers["Context "+fluor].get_value(data_coordinates)
                 vals[fluor] =  v[1] if v is not None else "-"
-            return "Context", (coords[1],coords[0]), vals # flips axes of coordinates
+            
+            # Now find the name of the closest cell 
+            dist, closest_ind = SESSION.kdtree.query([data_coordinates[1],data_coordinates[0]])
+            if dist < 1.5*userInfo.imageSize:
+                closest_cell = SESSION.session_cells.iloc[closest_ind]
+            else:
+                closest_cell = None
+            return {"cell":closest_cell,"coords": (coords[1],coords[0]),"vals": vals} # flips axes of coordinates
         else: # Gallery mode or Multichannel mode    
             row,col = pixel_coord_to_grid(coords)
             try:
@@ -914,9 +933,43 @@ def attach_functions_to_viewer(viewer):
     def display_intensity(viewer, event):
         
         if SESSION.mode == "Context":
-            _ ,coords,vals = find_mouse(event.position)
-            
-            if (not vals) or (vals is None) or (next(iter(vals.values())) is None):
+            kw_res = find_mouse(event.position)
+            cell = kw_res["cell"]
+            coords = kw_res["coords"]
+            vals = kw_res["vals"]
+            # import pickle
+            # with open("cell_tup.pkl","wb") as f:
+            #     pickle.dump(cell_tup,f)
+            # exit()
+            if cell is not None:
+                cid = cell["Object Id"]
+                layer = cell["Analysis Region"] if ANNOTATIONS_PRESENT else "All"
+                ckey = f'{layer} {cid}'
+                try:
+                    cell_dict = SESSION.current_cells[ckey]
+                except KeyError:
+                    fetch_notes(cell, SESSION.intensity_columns)
+                    center_x = int((cell['XMax']+cell['XMin'])/2)
+                    center_y = int((cell['YMax']+cell['YMin'])/2)
+                    vcs = cell[SESSION.validation_columns]
+                    validation_call = str(vcs[vcs == 1].index.values[0]).replace(f"Validation | ", "")
+
+                    cell_dict = {'Layer':layer,"cid": cid,"center_x": center_x,'center_y': center_y,
+                                            'validation_call': validation_call, 'XMax' : cell['XMax'],'XMin':cell['XMin'],
+                                            'YMax' : cell['YMax'],'YMin':cell['YMin']}
+                    
+                    SESSION.current_cells[ckey] = cell_dict
+                    SESSION.status_list[ckey] = validation_call
+                    fetch_notes(cell, SESSION.intensity_columns)
+                # Now that we have the cell dict, proceed to display
+                SESSION.cell_under_mouse =  cell_dict # save info
+                set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], ckey)
+                
+
+            # print(f"Vals is type {type(vals)} and content is {vals}")
+            # exit()
+            # Deal with pixel intensities
+            if (vals is None) or (next(iter(vals.values())) is None):
                 # Don't do anything else - the cursor is out of bounds of the image
                 VIEWER.status = 'Out of bounds'
                 return True 
@@ -927,7 +980,7 @@ def attach_functions_to_viewer(viewer):
             VIEWER.status = f'Context Mode pixel intensities at {coords}: {output_str}'
         elif SESSION.mode == "Gallery" or SESSION.mode == "Multichannel":
             cell_name,coords,vals = find_mouse(event.position, scope = 'grid') 
-            if (not vals) or (vals is None):
+            if vals is None:
                 # Don't do anything else
                 VIEWER.status = 'Out of bounds'
                 return True
@@ -1537,11 +1590,13 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     possible_fluors = ['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence']
     suffixes = ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity']
     all_possible_intensities = [x for x in headers if (any(s in x for s in suffixes) and (any(f in x for f in possible_fluors)))]
+    SESSION.intensity_columns = all_possible_intensities
     # for fl in possible_fluors:
     #         for sf in suffixes:
     #             all_possible_intensities.append(f'{fl} {sf}')
     v = list(STATUS_COLORS.keys())
     validation_cols = [f"Validation | " + s for s in v]
+    SESSION.validation_columns = validation_cols
     cols_to_keep = ["Object Id","Analysis Region", "Notes", "XMin","XMax","YMin", "YMax"] + phenotypes + all_possible_intensities + validation_cols
     cols_to_keep = halo_export.columns.intersection(cols_to_keep)
     halo_export = halo_export.loc[:, cols_to_keep]
@@ -1599,6 +1654,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
             specific_cid = specific_cell['ID']
             specific_layer = specific_cell['Annotation Layer']
             
+            #TODO fix this
             if ANNOTATIONS_PRESENT and specific_layer:
                 singlecell_df = phen_only_df[(phen_only_df['Object Id']==int(specific_cid)) & (phen_only_df['Analysis Region']==str(specific_layer))]
             else:
@@ -1613,11 +1669,29 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     # set widget to current page number 
     combobox_widget.setCurrentIndex(page_number-1)
     SESSION.saved_notes['page'] = combobox_widget.currentText()
+    
+    
+    
+    # Save cells that form ALL pages for this session. They could appear in Context Mode.
+    SESSION.session_cells = phen_only_df
+    SESSION.session_cells["center_x"] = ((SESSION.session_cells['XMax']+SESSION.session_cells['XMin'])/2).astype(int)
+    SESSION.session_cells["center_y"] = ((SESSION.session_cells['YMax']+SESSION.session_cells['YMin'])/2).astype(int)
+    points = SESSION.session_cells[["center_x","center_y"]].to_numpy()
+    SESSION.kdtree = spatial.KDTree(points)
+    #(SESSION.kdtree.query_ball_point([ 1366, 15053], 100)) # x,y, dist -> index in table of 
+
+
+    # import pickle
+    # with open("session_cells.pkl","wb") as out:
+    #     pickle.dump(phen_only_df, out)
+    # exit()
+
     # Get the appropriate set
     if page_number != last_page:
         cell_set = phen_only_df[(page_number-1)*page_size: page_number*page_size]
     else:
         cell_set = phen_only_df[(page_number-1)*page_size:]
+
     
     print(f"#$%#$% local sort is {sort_by_intensity}")
 
