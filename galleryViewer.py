@@ -193,35 +193,36 @@ def toggle_absorption():
     if SESSION.absorption_mode ==True:
         SESSION.absorption_mode = False
         for layer in VIEWER.layers:
-            fluor = layer.name
-            if 'Status Layer' in fluor or "Context" in fluor:
+            
+            if 'Status Layer' in layer.name or "Context" in layer.name:
                 continue
-            elif "Nuclei Boxes" in fluor:
+            elif "Nuclei Boxes" in layer.name:
                 layer.edge_color = '#ffffff'
                 layer.text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':"white"}
                 continue
-            elif 'Absorption' in fluor:
+            elif "Absorption" in layer.name:
                 layer.visible = False
                 continue
-            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor.split()[1]])
+            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[layer.name.split()[1]])
             layer.blending = 'Additive'
     else:
         SESSION.absorption_mode = True
         for layer in VIEWER.layers:
-            fluor = layer.name
-            if 'Status Layer' in fluor or "Context" in fluor:
+            
+            if 'Status Layer' in layer.name or "Context" in layer.name:
                 continue
-            elif "Nuclei Boxes" in fluor:
+            elif "Nuclei Boxes" in layer.name:
                 layer.edge_color="#000000"
                 layer.text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':"black"}
                 continue
-            elif 'Absorption' in fluor:
-                layer.visible = True
-                im = layer.data
-                im[:,:] = [255,255,255,255]
-                layer.data = im.astype(np.uint8)
+            elif "Absorption" in layer.name:
+                if SESSION.mode == layer.name.split()[0]:
+                    layer.visible = True
+                    im = layer.data
+                    im[:,:] = [255,255,255,255]
+                    layer.data = im.astype(np.uint8)
                 continue
-            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor.split()[1]]+' inverse')
+            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[layer.name.split()[1]]+' inverse')
             layer.blending = 'Minimum'
     change_statuslayer_color(copy.copy(SESSION.current_cells))
 
@@ -293,6 +294,7 @@ def toggle_session_mode(target_mode):
     if target_mode=="Context":
                 
         target_cell_info = SESSION.cell_under_mouse
+        SESSION.context_target = target_cell_info
         cell_num = str(target_cell_info["cid"])
         print(cell_num)
         
@@ -400,7 +402,8 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
             VIEWER.status = 'There was a problem saving, so the next set of cells was not loaded. Close your data file?'
             return False
     if SESSION.mode == "Context":
-        return None # Don't allow loading of new cells when in context mode.
+        toggle_session_mode("Gallery")
+        # return None # Don't allow loading of new cells when in context mode.
     # Take note of new starting point
     global PAGE_SIZE
     page_number = int(page_cb_widget.currentText().split()[-1])
@@ -706,7 +709,7 @@ def change_statuslayer_color(cells):
             if pos in CHANNELS and fluor != 'Composite':
                 if SESSION.mode=="Multichannel": # Only add channels if we are in 'show all' mode. Otherwise only composite will show up
                     if col ==1:
-                        page_status_layer[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id))
+                        page_status_layer[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Multichannel")
                     col+=1 # so that next luminescence image is tiled 
                     continue
                 elif SESSION.mode=="Gallery": # This stuff is only necessary in composite mode 
@@ -1060,6 +1063,14 @@ def attach_functions_to_viewer(viewer):
         # cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
         widget.setText(f"{SESSION.cell_under_mouse['Layer']} {SESSION.cell_under_mouse['cid']}")
 
+        if SESSION.mode == "Context":
+            pgc = ALL_CUSTOM_WIDGETS['page cell layer']
+            pgc.setCurrentText(SESSION.cell_under_mouse['Layer'])
+            pge = ALL_CUSTOM_WIDGETS['page cell id']
+            pge.setText(str(SESSION.cell_under_mouse['cid']))
+
+
+
     @viewer.bind_key('Control-c')
     @viewer.bind_key('Shift-c')
     def set_all_unseen(viewer):
@@ -1384,7 +1395,9 @@ def set_viewer_to_neutral_zoom(viewer, reset_session = False):
         viewer.camera.center = (350*sc, 300*sc)
         SESSION.last_multichannel_camera_coordinates["center"] = viewer.camera.center
         SESSION.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom
-
+    elif SESSION.mode=="Context":
+        # Move to cell location on the global image
+        VIEWER.camera.center = (SESSION.context_target["center_y"]*sc,SESSION.context_target["center_x"]*sc)
     if reset_session:
         SESSION.last_gallery_camera_coordinates["center"] = (350*sc,450*sc)
         SESSION.last_multichannel_camera_coordinates["center"] = (350*sc, 300*sc)
@@ -1446,7 +1459,7 @@ def tsv_wrapper(viewer):
             VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible = not VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible
         except KeyError:
             pass
-        
+
         if SESSION.mode == "Context" and SESSION.nuclei_boxes_vis:
             # try to remove any previous box layers if there are any
             try:
@@ -1962,6 +1975,7 @@ def main(preprocess_class = None):
         page_cell_combo = QComboBox(); page_cell_combo.addItems(ANNOTATIONS_PRESENT); page_cell_combo.setFixedWidth(200)
         next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry,page_cell_combo, intensity_sort_box))
         page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, page_cell_combo, intensity_sort_box, next_page_button], name = 'Page selection', area = 'right')
+        ALL_CUSTOM_WIDGETS["page cell layer"] = page_cell_combo
     else:
         next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry, None, intensity_sort_box))
         page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, intensity_sort_box, next_page_button], name = 'Page selection', area = 'right')
@@ -2007,6 +2021,7 @@ def main(preprocess_class = None):
     ALL_CUSTOM_WIDGETS['show status layer radio']=status_layer_show; ALL_CUSTOM_WIDGETS['hide status layer radio']=status_layer_hide
     ALL_CUSTOM_WIDGETS['show status box radio']=status_box_show; ALL_CUSTOM_WIDGETS['hide status box radio']=status_box_hide
     ALL_CUSTOM_WIDGETS['page combobox']=page_combobox
+    ALL_CUSTOM_WIDGETS['page cell id'] = page_cell_entry
     notes_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
     page_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
     mode_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
