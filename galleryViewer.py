@@ -110,12 +110,11 @@ def reuse_gamma():
     if SESSION.mode != "Context":
         VIEWER.layers[f"{SESSION.mode} Status Layer"].visible = SESSION.status_layer_vis
         VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
+    try:
         VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = SESSION.nuclei_boxes_vis
-    else:
-        try:
-            VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = True
-        except KeyError:
-            pass
+    except KeyError:
+        pass
+    
 
 
 def reuse_contrast_limits():
@@ -132,16 +131,13 @@ def reuse_contrast_limits():
         adjust_composite_limits(VIEWER.layers["Multichannel "+fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
         adjust_composite_limits(VIEWER.layers["Context "+fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
 
-
     if SESSION.mode != "Context":
         VIEWER.layers[f"{SESSION.mode} Status Layer"].visible = SESSION.status_layer_vis
         VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
+    try:
         VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = SESSION.nuclei_boxes_vis
-    else:
-        try: # Always try to enable box when loading context mode. 
-            VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = True
-        except KeyError:
-            pass
+    except KeyError:
+        pass
 
 ## --- Bottom bar functions and GUI elements 
 
@@ -645,7 +641,7 @@ def generate_status_box(status, cid, kind = "Gallery"):
         return np.array()
 
     if NO_LABEL_BOX:
-        number_only = write_cid_text_to_array(userInfo.imageSize+(edge_width*2), layer_length, upsample[SESSION.mode], color_tuple, cid)
+        number_only = write_cid_text_to_array(userInfo.imageSize+(edge_width*2), layer_length, upsample[kind], color_tuple, cid)
         return number_only
 
     top_or_bottom = [color_tuple, ] *layer_length
@@ -657,7 +653,7 @@ def generate_status_box(status, cid, kind = "Gallery"):
     z = np.repeat(x,[corner_box_size,(layer_length-(2*edge_width))+edge_width-(corner_box_size),edge_width],axis=1)
     # above_mid = np.repeat(z,corner_box_size-edge_width, axis=0)
 
-    top = write_cid_text_to_array(corner_box_size, layer_length, upsample[SESSION.mode], color_tuple, cid)
+    top = write_cid_text_to_array(corner_box_size, layer_length, upsample[kind], color_tuple, cid)
     # text_added = text_added | above_mid
     # top = np.append([top_or_bottom],above_mid,axis=0)
     # print(f"SHAPES: tob {np.array([top_or_bottom]).shape} and text_added {text_added.shape}")
@@ -690,10 +686,13 @@ def change_statuslayer_color(cells):
 
 
     # Starting to add
-    if SESSION.mode=="Gallery": size_multiplier = 1
-    elif SESSION.mode=="Multichannel": size_multiplier = len(CHANNELS)
- 
-    page_status_layer = black_background('RGB',size_multiplier)
+    if SESSION.mode=="Gallery": 
+        page_status_layer = black_background('RGB',1, userInfo.cells_per_row)
+    elif SESSION.mode=="Multichannel": 
+        page_status_layer = black_background('RGB',SESSION.cells_per_row["Multichannel"],SESSION.cells_per_row["Multichannel"])
+        
+    
+
     col = 0
     row = 0
     cells = list(cells.values())
@@ -888,6 +887,7 @@ def attach_functions_to_viewer(viewer):
         vals = {} # will hold fluor : pixel intensity pairs 
 
         if coords[0] < 0 or coords[1]<0:
+            if SESSION.mode == "Context": return {"cell":None,"coords": None,"vals": None}
             return "None" , None, None
         if SESSION.mode == "Context":
             for fluor in CHANNELS_STR:
@@ -941,6 +941,11 @@ def attach_functions_to_viewer(viewer):
             # with open("cell_tup.pkl","wb") as f:
             #     pickle.dump(cell_tup,f)
             # exit()
+            if (vals is None) or (next(iter(vals.values())) is None):
+                # Don't do anything else - the cursor is out of bounds of the image
+                VIEWER.status = 'Out of bounds'
+                return True 
+            
             if cell is not None:
                 cid = cell["Object Id"]
                 layer = cell["Analysis Region"] if ANNOTATIONS_PRESENT else "All"
@@ -969,15 +974,13 @@ def attach_functions_to_viewer(viewer):
             # print(f"Vals is type {type(vals)} and content is {vals}")
             # exit()
             # Deal with pixel intensities
-            if (vals is None) or (next(iter(vals.values())) is None):
-                # Don't do anything else - the cursor is out of bounds of the image
-                VIEWER.status = 'Out of bounds'
-                return True 
+            
             output_str = ''
             for fluor, val in vals.items():
                 if val != "-": val = int(val)
                 output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {val}   </font>'
-            VIEWER.status = f'Context Mode pixel intensities at {coords}: {output_str}'
+            sc = STATUSES_TO_HEX[SESSION.status_list[str(ckey)]] if cell is not None else "#ffffff"
+            VIEWER.status = f'<font color="{sc}">Context Mode</font> pixel intensities at {coords}: {output_str}'
         elif SESSION.mode == "Gallery" or SESSION.mode == "Multichannel":
             cell_name,coords,vals = find_mouse(event.position, scope = 'grid') 
             if vals is None:
@@ -1002,14 +1005,21 @@ def attach_functions_to_viewer(viewer):
             sc = STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]]
             VIEWER.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
 
-    @viewer.bind_key('Space')
+    @viewer.bind_key('j')
+    @viewer.bind_key('Space', overwrite = True)
+    @viewer.bind_key('Ctrl-Space', overwrite = True)
     def toggle_status(viewer):
         
-        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-        if val is None:
-            return None
-        coords = np.round(data_coordinates).astype(int)
-        row,col = pixel_coord_to_grid(coords)
+        if SESSION.mode == "Context": 
+            cell = SESSION.cell_under_mouse
+            if cell is None:
+                return False # leave if the mouse is not near a cell (not sure that this could even happen)
+            cell_name = f"{cell['Layer']} {cell['cid']}"
+            
+        else:
+            cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
+            if val is None:
+                return None
 
         cur_status = SESSION.status_list[str(cell_name)]
         cur_index = list(status_colors.keys()).index(cur_status)
@@ -1017,16 +1027,25 @@ def attach_functions_to_viewer(viewer):
         SESSION.status_list[str(cell_name)] = next_status
         set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
 
-        if SESSION.mode=="Gallery": 
+        # Change gallery mode status layer
+        try:
+            row, col = list(SESSION.grid_to_ID["Gallery"].keys())[list(SESSION.grid_to_ID["Gallery"].values()).index(cell_name)].split(",")
+            row, col = (int(row),int(col))
             imdata = viewer.layers["Gallery Status Layer"].data
             imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2), 
-                              (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+                            (col-1)*(userInfo.imageSize+2):col*(userInfo.imageSize+2)] = generate_status_box(next_status,str(cell_name), "Gallery")
             viewer.layers["Gallery Status Layer"].data = imdata.astype('int')
-        elif SESSION.mode=="Multichannel":
+
+            # Change multichannel mode status layer
+            row, col = list(SESSION.grid_to_ID["Multichannel"].keys())[list(SESSION.grid_to_ID["Multichannel"].values()).index(cell_name)].split(",")
+            row, col = (int(row),int(col))
             imdata = viewer.layers["Multichannel Status Layer"].data
             imdata[(row-1)*(userInfo.imageSize+2):row*(userInfo.imageSize+2),
-                :] = generate_status_box(next_status,str(cell_name), SESSION.mode)
+                :] = generate_status_box(next_status,str(cell_name), "Multichannel")
             viewer.layers["Multichannel Status Layer"].data = imdata.astype('int')
+        except (KeyError, ValueError):
+            # Changing a cell status that isn't in the current page using Context Mode.
+            pass 
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
@@ -1398,6 +1417,8 @@ def sv_wrapper(viewer):
 def tsv_wrapper(viewer):
     @viewer.bind_key('h')
     def toggle_statuslayer_visibility(viewer):
+        if SESSION.mode == "Context":
+            toggle_nuclei_boxes(viewer)
         show_vis_radio = ALL_CUSTOM_WIDGETS['show status layer radio']
         hide_vis_radio = ALL_CUSTOM_WIDGETS['hide status layer radio']
         if show_vis_radio.isChecked():
@@ -1421,7 +1442,45 @@ def tsv_wrapper(viewer):
     @viewer.bind_key('Shift-h')
     def toggle_nuclei_boxes(viewer):
         SESSION.nuclei_boxes_vis = not SESSION.nuclei_boxes_vis
-        VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible = not VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible
+        try:
+            VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible = not VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible
+        except KeyError:
+            pass
+        
+        if SESSION.mode == "Context" and SESSION.nuclei_boxes_vis:
+            # try to remove any previous box layers if there are any
+            try:
+                VIEWER.layers.selection.active = VIEWER.layers["Context Nuclei Boxes"]
+                VIEWER.layers.remove_selected()
+            except KeyError:
+                pass
+            
+            vy, vx = viewer.cursor.position
+            sc = 1 if SESSION.image_scale is None else SESSION.image_scale
+            print(f"{vx, vy}")
+            # Find cells in session table near target
+            nearby_inds = SESSION.kdtree.query_ball_point([vx/sc,vy/sc], 125) # [x,y], dist -> indices in table
+            nearby_cells = SESSION.session_cells.iloc[nearby_inds]
+
+            # Add box around cells
+            nuclei_box_coords = []
+            cids = []
+            for index, cell in nearby_cells.iterrows():
+                x1 = int(cell["XMin"]); x2 = int(cell["XMax"])
+                y1 = int(cell["YMin"]); y2 = int(cell["YMax"])
+                nuclei_box_coords.append([[y1,x1] , [y2,x2]])
+                cids.append(str(cell["Object Id"]))
+
+            if nuclei_box_coords:
+                features = {'cid': cids}
+                nb_color_str = 'black' if SESSION.absorption_mode else 'white' 
+                nb_color_hex = '#000000' if SESSION.absorption_mode else '#ffffff'
+                nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_str}
+                sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
+                VIEWER.add_shapes(nuclei_box_coords, name="Context Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
+                                                    face_color='#00000000', scale=sc, features=features, text = nb_text )
+                VIEWER.layers.selection.active = VIEWER.layers["Gallery Status Layer"]  
+
 
 
     @viewer.bind_key('Control-k')
@@ -1974,6 +2033,7 @@ def main(preprocess_class = None):
     preprocess_class._append_status_br('Initializing Napari session...')
 
     set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 1.0 gamma, 0 black in, 255 white in
+    attach_functions_to_viewer(viewer)
     add_layers(viewer,pyramid,tumor_cell_XYs, int(userInfo.imageSize/2))
     #TODO
     #Enable scale bar
@@ -1994,7 +2054,6 @@ def main(preprocess_class = None):
     sv_wrapper(viewer)
     tsv_wrapper(viewer)
     chn_key_wrapper(viewer)
-    attach_functions_to_viewer(viewer)
     set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
     if preprocess_class is not None: preprocess_class.close() # close other window
     with tifffile.imread(userInfo.qptiff, aszarr=True) as zs:
