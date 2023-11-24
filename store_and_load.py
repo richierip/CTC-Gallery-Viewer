@@ -66,6 +66,7 @@ class sessionVariables:
         self.kdtree = None # Will hold scipy.spatial.cKDTree data structure, for use in finding nearest neighbors
         self.intensity_columns = []
         self.validation_columns = []
+        self.mouse_coords = (0,0) # (y,x)
 
 class userPresets:
     ''' This class is used to store user-selected parameters on disk persistently,

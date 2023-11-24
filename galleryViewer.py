@@ -298,18 +298,28 @@ def toggle_session_mode(target_mode):
         cell_num = str(target_cell_info["cid"])
         print(cell_num)
         
+        sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary.
+
         # save current coordinates
         if SESSION.mode=="Gallery": 
+            row, col = list(SESSION.grid_to_ID["Gallery"].keys())[list(SESSION.grid_to_ID["Gallery"].values()).index(f"{target_cell_info['Layer']} {cell_num}")].split(",")
+            row, col = (int(row),int(col))
+            cellCanvasX = ((row-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
+            cellCanvasY = ((col-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
+            z,y,x = VIEWER.camera.center
+            offsetX = x - cellCanvasX 
+            offsetY = y - cellCanvasY 
             SESSION.last_gallery_camera_coordinates["center"] = VIEWER.camera.center
             SESSION.last_gallery_camera_coordinates["z"] = VIEWER.camera.zoom
 
         elif SESSION.mode=="Multichannel": 
+            offsetX = 0
+            offsetY = 0
             SESSION.last_multichannel_camera_coordinates["center"] = VIEWER.camera.center
             SESSION.last_multichannel_camera_coordinates["z"] = VIEWER.camera.zoom
 
         # Move to cell location on the global image
-        sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary.
-        VIEWER.camera.center = (target_cell_info["center_y"]*sc,target_cell_info["center_x"]*sc) # these values seem to work best
+        VIEWER.camera.center = ((target_cell_info["center_y"]+offsetY)*sc,(target_cell_info["center_x"]+offsetX)*sc) # these values seem to work best
         # viewer.camera.zoom = 1.2 / sc
 
         # try to remove any previous box layers if there are any
@@ -859,6 +869,9 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
 
     return True
 
+###################################################################
+######---------------- Viewer Key Bindings, -----------------######
+###################################################################
 def attach_functions_to_viewer(viewer):
 
     ##----------------- Live functions that control mouseover behavior on images 
@@ -881,7 +894,10 @@ def attach_functions_to_viewer(viewer):
     '''Locate mouse on the canvas. Returns the name of the cell under the mouse, current mouse 
         coordinates, and pixel values for each channel in a dict'''
     def find_mouse(data_coordinates, scope = 'world'):
-   
+        
+        print(f"{data_coordinates}")
+        SESSION.mouse_coords = data_coordinates
+
                 # retrieve cell ID name
         # Scale data coordinates to image. Then round to nearest int, representing the coord or the image pixel under the mouse
         sc = 1.0 if SESSION.image_scale is None else SESSION.image_scale
@@ -933,6 +949,9 @@ def attach_functions_to_viewer(viewer):
                 return str(image_name), (local_x,local_y), vals
 
     @viewer.mouse_move_callbacks.append
+    def display_intensity_wrapper(viewer, event):
+        display_intensity(viewer,event)
+
     def display_intensity(viewer, event):
         
         if SESSION.mode == "Context":
@@ -1378,42 +1397,7 @@ def attach_functions_to_viewer(viewer):
         else:
             toggle_session_mode("Context")
 
-    return True
 
-
-######------------------------- Misc + Viewer keybindings ---------------------######
-
-#TODO make a button to do this as well?
-def set_viewer_to_neutral_zoom(viewer, reset_session = False):
-    sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-    viewer.camera.zoom = 1.2 / sc
-    if SESSION.mode=="Gallery":
-        viewer.camera.center = (350*sc,450*sc) # these values seem to work best
-        SESSION.last_gallery_camera_coordinates["center"] = viewer.camera.center
-        SESSION.last_gallery_camera_coordinates["z"] = viewer.camera.zoom
-    elif SESSION.mode=="Multichannel":
-        viewer.camera.center = (350*sc, 300*sc)
-        SESSION.last_multichannel_camera_coordinates["center"] = viewer.camera.center
-        SESSION.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom
-    elif SESSION.mode=="Context":
-        # Move to cell location on the global image
-        VIEWER.camera.center = (SESSION.context_target["center_y"]*sc,SESSION.context_target["center_x"]*sc)
-    if reset_session:
-        SESSION.last_gallery_camera_coordinates["center"] = (350*sc,450*sc)
-        SESSION.last_multichannel_camera_coordinates["center"] = (350*sc, 300*sc)
-        SESSION.last_gallery_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
-        SESSION.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
-
-def add_custom_colors():
-    for colormap in cell_colors:
-        if colormap == 'gray': continue
-        elif colormap =='pink': colormap='Pink'
-        exec(f'my_map = custom_maps.create_{colormap}_lut()')
-        exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
-        exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
-    return True
-
-def sv_wrapper(viewer):
     @viewer.bind_key('s')
     def save_validation(viewer):
         print(f'Using stored dataframe')
@@ -1427,7 +1411,6 @@ def sv_wrapper(viewer):
             viewer.status = 'There was a problem. Close your data file?'
         return None
 
-def tsv_wrapper(viewer):
     @viewer.bind_key('h')
     def toggle_statuslayer_visibility(viewer):
         if SESSION.mode == "Context":
@@ -1494,7 +1477,9 @@ def tsv_wrapper(viewer):
                                                     face_color='#00000000', scale=sc, features=features, text = nb_text )
                 VIEWER.layers.selection.active = VIEWER.layers["Gallery Status Layer"]  
 
-
+    class dummyCursor:
+        def __init__(self, y, x) -> None:
+            self.position = (y,x)
 
     @viewer.bind_key('Control-k')
     def restore_canvas(viewer):
@@ -1508,19 +1493,37 @@ def tsv_wrapper(viewer):
     def scroll_up(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        viewer.camera.center = (y-((userInfo.imageSize+2)*sc),x)
+        step_size = ((userInfo.imageSize+2)*sc)
+
+        viewer.camera.center = (y-step_size,x)
+
+        curY, curX = SESSION.mouse_coords
+        display_intensity(viewer, dummyCursor(curY-step_size, curX))
+        # SESSION.mouse_coords = (curX, curY-step_size)
 
     @viewer.bind_key('Down')
     def scroll_down(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        viewer.camera.center = (y+((userInfo.imageSize+2)*sc),x)
+        step_size = ((userInfo.imageSize+2)*sc)
+
+        viewer.camera.center = (y+step_size,x)
+
+        curY, curX = SESSION.mouse_coords
+        display_intensity(viewer, dummyCursor(curY+step_size, curX))
+        # SESSION.mouse_coords = (curX, curY+step_size)
     
     @viewer.bind_key('Left')
     def scroll_left(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        viewer.camera.center = (y,x-((userInfo.imageSize+2)*sc))
+        step_size = ((userInfo.imageSize+2)*sc)
+
+        viewer.camera.center = (y,x-step_size)
+        curY, curX = SESSION.mouse_coords
+        display_intensity(viewer, dummyCursor(curY,curX-step_size))
+        # SESSION.mouse_coords = (curX-step_size, curY)
+
         #TODO trigger mouse update here
         # napari.Viewer.window.qt_viewer._process_mouse_event
         # viewer.window.qt_viewer.canvas.events.mouse_press(pos=(x, y), modifiers=(), button=0)
@@ -1530,7 +1533,12 @@ def tsv_wrapper(viewer):
     def scroll_right(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        viewer.camera.center = (y,x+((userInfo.imageSize+2)*sc))
+        step_size = ((userInfo.imageSize+2)*sc)
+        viewer.camera.center = (y,x+step_size)
+        curY, curX = SESSION.mouse_coords
+        # SESSION.mouse_coords = (curX+step_size, curY)\
+        display_intensity(viewer, dummyCursor(curY, curX+step_size))
+
 
     # On Macs, ctrl-arrow key is taken by something else.
     @viewer.bind_key('Shift-Right')  
@@ -1540,12 +1548,14 @@ def tsv_wrapper(viewer):
     def zoom_in(viewer):
         viewer.camera.zoom *= 1.15
 
+
     @viewer.bind_key('Shift-Left')  
     @viewer.bind_key('Shift-Down') 
     @viewer.bind_key('Control-Left')  
     @viewer.bind_key('Control-Down')   
     def zoom_out(viewer):
         viewer.camera.zoom /= 1.15  
+
     
     @viewer.bind_key('a')
     def trigger_absorption(viewer):
@@ -1574,8 +1584,39 @@ def tsv_wrapper(viewer):
     @viewer.bind_key('Alt-m')
     def open_guide(viewer):
         os.startfile(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
-        
 
+
+######------------------------- Misc + Viewer keybindings ---------------------######
+
+#TODO make a button to do this as well?
+def set_viewer_to_neutral_zoom(viewer, reset_session = False):
+    sc = 1 if SESSION.image_scale is None else SESSION.image_scale
+    viewer.camera.zoom = 1.2 / sc
+    if SESSION.mode=="Gallery":
+        viewer.camera.center = (350*sc,450*sc) # these values seem to work best
+        SESSION.last_gallery_camera_coordinates["center"] = viewer.camera.center
+        SESSION.last_gallery_camera_coordinates["z"] = viewer.camera.zoom
+    elif SESSION.mode=="Multichannel":
+        viewer.camera.center = (350*sc, 300*sc)
+        SESSION.last_multichannel_camera_coordinates["center"] = viewer.camera.center
+        SESSION.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom
+    elif SESSION.mode=="Context":
+        # Move to cell location on the global image
+        VIEWER.camera.center = (SESSION.context_target["center_y"]*sc,SESSION.context_target["center_x"]*sc)
+    if reset_session:
+        SESSION.last_gallery_camera_coordinates["center"] = (350*sc,450*sc)
+        SESSION.last_multichannel_camera_coordinates["center"] = (350*sc, 300*sc)
+        SESSION.last_gallery_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
+        SESSION.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
+
+def add_custom_colors():
+    for colormap in cell_colors:
+        if colormap == 'gray': continue
+        elif colormap =='pink': colormap='Pink'
+        exec(f'my_map = custom_maps.create_{colormap}_lut()')
+        exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
+        exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
+    return True
 
 
 def chn_key_wrapper(viewer):
@@ -2066,8 +2107,6 @@ def main(preprocess_class = None):
 
     # Finish up, and set keybindings
     preprocess_class._append_status('<font color="#7dbc39">  Done.</font><br> Goodbye')
-    sv_wrapper(viewer)
-    tsv_wrapper(viewer)
     chn_key_wrapper(viewer)
     set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
     if preprocess_class is not None: preprocess_class.close() # close other window
