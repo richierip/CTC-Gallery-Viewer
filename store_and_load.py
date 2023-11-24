@@ -73,11 +73,12 @@ class userPresets:
     with values I have chosen (can modify these in the init below, or with certain global 
     variables above.) '''
 
-    def __init__(self, channels = copy.copy(CHANNELS_STR), qptiff = None, 
+    def __init__(self, channels = copy.copy(CHANNELS_STR), qptiff_path = None, 
                 phenotype = None, imageSize = 100, specific_cell = None, 
                 channelOrder = CHANNEL_ORDER, page_size = 56, global_sort = "Sort object table by Cell Id",
                 cells_per_row = 8, statuses = None, view_settings = copy.copy(VIEW_SETTINGS)):
-        self.qptiff = qptiff # String - image path
+        self.qptiff_path = qptiff_path # String - image path
+        self.last_system_folder_visited = "C:/"
         self.objectDataPath = '' # String - object data path
         self.objectDataFrame = None # Pandas DataFrame created using read_csv. Storing this saves time when wanting the df later
         self.imageSize = imageSize # Int - size of EACH punchout around a cell

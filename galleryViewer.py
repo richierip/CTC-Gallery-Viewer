@@ -1836,7 +1836,7 @@ def GUI_execute(preprocess_class):
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
     SESSION = userInfo.session
 
-    qptiff = userInfo.qptiff
+    qptiff = userInfo.qptiff_path
     PHENOTYPES = list(userInfo.phenotype_mappings.keys())
     ANNOTATIONS = list(userInfo.annotation_mappings.keys())
     ANNOTATIONS_PRESENT = userInfo.analysisRegionsInData
@@ -2071,7 +2071,7 @@ def main(preprocess_class = None):
     chn_key_wrapper(viewer)
     set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
     if preprocess_class is not None: preprocess_class.close() # close other window
-    with tifffile.imread(userInfo.qptiff, aszarr=True) as zs:
+    with tifffile.imread(userInfo.qptiff_path, aszarr=True) as zs:
         SESSION.zarr_store = zs
         sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
         for i, fluor in enumerate(userInfo.channelOrder):

@@ -1,10 +1,10 @@
 #############################################################################
 
 import typing
-from PyQt5.QtCore import QObject, Qt, QThread
+from PyQt5.QtCore import QObject, Qt, QThread, QTimer
 from PyQt5.QtGui import QIcon, QPixmap,QColor,QFont
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,QMainWindow, QGridLayout, QDesktopWidget, 
-                             QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QMenuBar, QAction)
+                             QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QMenuBar, QAction, QFileDialog)
 
 import sys
 import os
@@ -19,6 +19,7 @@ import warnings
 warnings.filterwarnings("ignore")
 import pandas as pd
 import copy
+import pathlib
 
 # Used in fetching and processing metadata
 from random import choice
@@ -111,11 +112,17 @@ class ViewerPresets(QDialog):
             new_anno_label += f'{key}<br>'
         self.userInfo.annotation_mappings_label = new_anno_label
 
+        self.status_label = QLabel("init")
+        self.status_label.setStyleSheet('color:#075cbf ; font-size: 15pt')
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setVisible(False)
+
+        self.createTopLeftGroupBox()
+        self.createTopRightGroupBox()
+        # self.createProgressBar()
 
         # entry box for .qptiff        
         self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
-        if self.userInfo.qptiff is not None:
-            self.qptiffEntry.insert(self.userInfo.qptiff)
         # Want to do this in any case
         self.qptiffEntry.setPlaceholderText('Enter path to .qptiff')
 
@@ -127,8 +134,6 @@ class ViewerPresets(QDialog):
         entryLabel.setMaximumWidth(600)
 
         self.dataEntry = QLineEdit()  # Put retrieved previous answer here
-        if self.userInfo.objectDataPath is not None:
-            self.dataEntry.insert(self.userInfo.objectDataPath)
         self.dataEntry.setPlaceholderText('Enter path to .csv')
         self.dataEntry.setFixedWidth(800)
         # dataEntry.setAlignment(Qt.AlignLeft)
@@ -137,14 +142,9 @@ class ViewerPresets(QDialog):
         dataEntryLabel.setAlignment(Qt.AlignCenter)
         dataEntryLabel.setMaximumWidth(600)
 
-        self.previewObjectDataButton = QPushButton("Fetch CSV metadata")
-        if "csv" not in self.dataEntry.text() :
-            self.previewObjectDataButton.setEnabled(False)
-
-        self.previewImageDataButton = QPushButton("Fetch image metadata")
+        self.previewObjectDataButton = QPushButton("Choose Data")
+        self.previewImageDataButton = QPushButton("Choose Image")
         self.previewObjectDataButton.setDefault(True)
-        if (".qptiff" not in self.qptiffEntry.text()) and (".tif" not in self.qptiffEntry.text()):
-            self.previewImageDataButton.setEnabled(False)
 
         
         self.viewSettingsEntry = QLineEdit()
@@ -161,14 +161,6 @@ class ViewerPresets(QDialog):
         self.findDataButton = QPushButton("Load images into viewer")
         self.findDataButton.setDefault(False)
 
-        self.status_label = QLabel("init")
-        self.status_label.setStyleSheet('color:#075cbf ; font-size: 15pt')
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setVisible(False)
-
-        self.createTopLeftGroupBox()
-        self.createTopRightGroupBox()
-        # self.createProgressBar()
 
         self.findDataButton.pressed.connect(self.loadGallery)
         self.qptiffEntry.textEdited.connect(self.saveQptiff)
@@ -223,6 +215,15 @@ class ViewerPresets(QDialog):
 
         self.setWindowTitle(f"GalleryViewer v{VERSION_NUMBER}")
 
+        # preprocess things if user has entered paths in a previous session
+        if self.userInfo.qptiff_path is not None:
+            self.qptiffEntry.insert(pathlib.Path(self.userInfo.qptiff_path).name)
+            # self.prefillImageData(fetch=False)
+        if self.userInfo.objectDataPath is not None:
+            self.dataEntry.insert(pathlib.Path(self.userInfo.objectDataPath).name)
+            self.prefillObjectData(fetch=False)
+        
+
     def process_menu_action(self,q):
         if 'manual' in q.text().lower():
             try:
@@ -251,17 +252,21 @@ class ViewerPresets(QDialog):
 
 
     def saveQptiff(self):
-        self.userInfo.qptiff = os.path.normpath(self.qptiffEntry.text().strip('"')).strip('.')
-        if (".qptiff" in self.qptiffEntry.text()) or (".tif" in self.qptiffEntry.text()):
-            self.previewImageDataButton.setEnabled(True)
-        else:
-            self.previewImageDataButton.setEnabled(False)
+        cleanpath = os.path.normpath(self.qptiffEntry.text().strip('"')).strip('.')
+        if os.path.exists(cleanpath):
+            self.userInfo.qptiff_path = cleanpath
+        # if (".qptiff" in self.qptiffEntry.text()) or (".tif" in self.qptiffEntry.text()):
+        #     self.previewImageDataButton.setEnabled(True)
+        # else:
+        #     self.previewImageDataButton.setEnabled(False)
     def saveObjectData(self):
-        self.userInfo.objectDataPath = os.path.normpath(self.dataEntry.text().strip('"')).strip('.')
-        if ".csv" in self.dataEntry.text():
-            self.previewObjectDataButton.setEnabled(True)
-        else:
-            self.previewObjectDataButton.setEnabled(False)
+        cleanpath = os.path.normpath(self.dataEntry.text().strip('"')).strip('.')
+        if os.path.exists(cleanpath):
+            self.userInfo.objectDataPath = cleanpath
+        # if ".csv" in self.dataEntry.text():
+        #     self.previewObjectDataButton.setEnabled(True)
+        # else:
+        #     self.previewObjectDataButton.setEnabled(False)
 
     def saveViewSettings(self):
         self.userInfo.view_settings_path = os.path.normpath(self.viewSettingsEntry.text().strip('"')).strip('.')
@@ -409,7 +414,7 @@ class ViewerPresets(QDialog):
     def _log_problem(self, logpath, e):
         # Log the crash and report key variables
 
-        params = f"\nImage path: {self.userInfo.qptiff} \nData path: {self.userInfo.objectDataPath}\n"
+        params = f"\nImage path: {self.userInfo.qptiff_path} \nData path: {self.userInfo.objectDataPath}\n"
         params += f"Punchout size: {self.userInfo.imageSize} \nUser selected channels: {self.userInfo.channels}\n"
         params += f"Available colors: {store_and_load.CELL_COLORS} \n"
         params += f"Batch/page size: {self.userInfo.page_size} \nSort: {self.userInfo.global_sort}\n"
@@ -422,7 +427,16 @@ class ViewerPresets(QDialog):
         logging.basicConfig(filename=logpath, encoding='utf-8', level=logging.DEBUG)
         logging.exception(f"{params}\n ------ Autogenerated crash report ------ \n{e}")
 
-    def prefillObjectData(self):
+    def fetchObjectDataPath(self):
+        path = self.userInfo.last_system_folder_visited
+        print(path)
+        fileName, _ = QFileDialog.getOpenFileName(self,"Select a HALO Object Data file", path,"HALO Object Data (*.csv)")
+        self.userInfo.last_system_folder_visited = os.path.normpath(pathlib.Path(fileName).parent)
+        self.userInfo.objectDataPath = os.path.normpath(fileName)
+        self.dataEntry.clear()
+        self.dataEntry.insert(pathlib.Path(fileName).name)
+
+    def prefillObjectData(self, fetch = True):
         def _generate_no_anno_string(phenos):
             status = ''
             if phenos == 0:
@@ -443,28 +457,35 @@ class ViewerPresets(QDialog):
             return status
         
         try:
+            if fetch: 
+                self.fetchObjectDataPath()
             res = self._prefillObjectData()
             annos = self.annotationCombo.count()
             phenos = self.phenotypeCombo.count()
-            self.previewObjectDataButton.setEnabled(False)
             self.status_label.setVisible(True)
 
 
             if res == 'no annotations':
                 status = _generate_no_anno_string(phenos)
                 self.status_label.setText(status)
-                self.previewObjectDataButton.setStyleSheet(f"color: #4c9b8f") 
+                self.setWidgetColorBackground(self.dataEntry, "#55ff55")
+                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
+                # self.previewObjectDataButton.setStyleSheet(f"color: #4c9b8f") 
             elif res == 'passed':
                 status = _generate_typical_string(annos,phenos)
                 self.status_label.setText(status)
-                self.previewObjectDataButton.setStyleSheet(f"color: #4c9b8f")
+                # self.previewObjectDataButton.setStyleSheet(f"color: #4c9b8f")
+                self.setWidgetColorBackground(self.dataEntry, "#55ff55")
+                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
             elif res == 'name conflict':
                 if annos == 0:
                     status = _generate_no_anno_string(phenos)
                 else: status = _generate_typical_string(annos,phenos)
                 status +='<br><font color="#ffa000">Warning - the image given has a different name than what was used to generate the object data</font>'
                 self.status_label.setText(status)
-                self.previewObjectDataButton.setStyleSheet(f"color: #ffa000")
+                self.setWidgetColorBackground(self.dataEntry, "#4c9b8f")
+                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
+                # self.previewObjectDataButton.setStyleSheet(f"color: #ffa000")
         except Exception as e:
             folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
             if not os.path.exists(folder):
@@ -474,16 +495,14 @@ class ViewerPresets(QDialog):
             # Inform user of possible issue
             self.status_label.setVisible(True)
             status = '<font color="#ffa000">Warning: Failed to properly ingest the file\'s metadata.\
-              The viewer expects a QPTIFF from an Akoya Polaris,<br> and an object data <i>.csv</i> generated by a Halo analysis app. It might have problems with this data.</font>'
+              The viewer expects a QPTIFF from an Akoya Polaris,<br> and an object data <i>.csv</i> generated by a Halo analysis app.\
+                It might have problems with this data.<br> Check the error logs.</font>'
             self.status_label.setText(status)
-            self.previewObjectDataButton.setEnabled(False)
-            self.previewObjectDataButton.setStyleSheet(f"color: #ffa000")
+            self.setWidgetColorBackground(self.dataEntry, "#ffa000")
+            QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
     
     def _prefillObjectData(self):
-        path = self.dataEntry.text().strip('"')
-        if ".csv" not in path:
-            return None
-        headers = pd.read_csv(path, index_col=False, nrows=0).columns.tolist() 
+        headers = pd.read_csv(self.userInfo.objectDataPath, index_col=False, nrows=0).columns.tolist() 
         possible_fluors = ['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence']
         suffixes = ['Positive Classification', 'Positive Nucleus Classification','Positive Cytoplasm Classification',
                     'Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity', '% Nucleus Completeness', '% Cytoplasm Completeness',
@@ -501,7 +520,7 @@ class ViewerPresets(QDialog):
         self.phenotypeCombo.addItems(include)
         # Assess annotation regions in csv
         try:
-            regions = list(pd.read_csv(path, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique()) 
+            regions = list(pd.read_csv(self.userInfo.objectDataPath, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique()) 
             print(regions)
             self.annotationCombo.setVisible(True); self.annotationEdit.setVisible(False)
             self.annotationCombo.addItems(regions)
@@ -516,36 +535,61 @@ class ViewerPresets(QDialog):
             return 'no annotations'
         # Check if image location in CSV matches with image given to viewer
         try:
-            im_location_csv = pd.read_csv(path, index_col=False, nrows=1, usecols=['Image Location']).iloc[0,0]
+            im_location_csv = pd.read_csv(self.userInfo.objectDataPath, index_col=False, nrows=1, usecols=['Image Location']).iloc[0,0]
             # get everything after the last / , i.e. the image name.
             # Do it this way since some people use a mapped drive path, some use CIFS, some use UNC path with IP address
-            im_name_csv = sub(r'.*?\\',"", im_location_csv) 
-            path = self.userInfo.qptiff
-            if im_name_csv != sub(r'.*?\\',"", path):
+            im_name_csv = pathlib.Path(im_location_csv).name
+        
+            if im_name_csv != pathlib.Path(self.userInfo.qptiff_path).name:
                 return 'name conflict'
         except ValueError: 
             try: # Attempt to check the alternative column name that might be present
-                im_location_csv = pd.read_csv(path, index_col=False, nrows=1, usecols=['Image File Name']).iloc[0,0]
-                path = self.userInfo.qptiff
-                if im_name_csv != sub(r'.*?\\',"", path):
+                im_location_csv = pd.read_csv(self.userInfo.objectDataPath, index_col=False, nrows=1, usecols=['Image File Name']).iloc[0,0]
+                im_name_csv = pathlib.Path(im_location_csv).name
+                
+                if im_name_csv != pathlib.Path(self.userInfo.qptiff_path).name:
                     return 'name conflict'
             except ValueError:
                 pass 
             pass # No name columns that I know of, move on.
         return 'passed'
 
-    def prefillImageData(self):
+    def setWidgetColorBackground(self, widg, color):
+        widg.setStyleSheet(f"background: {color}")
+
+    # def flashCorrect(self):
+    #     self.textInput.configure(bg = 'green')
+    #     self.window.after(150, self.resetInputColor)
+
+    def fetchImagePath(self):
+        path = self.userInfo.last_system_folder_visited
+        fileName, x = QFileDialog.getOpenFileName(self,"Select an image to load", path,"Akoya QPTIFF (*.qptiff);;Akoya QPTIFF (*.QPTIFF)")  
+        
+        self.userInfo.last_system_folder_visited = os.path.normpath(pathlib.Path(fileName).parent)
+        self.userInfo.qptiff_path = os.path.normpath(fileName)
+        self.qptiffEntry.clear()
+        self.qptiffEntry.insert(pathlib.Path(fileName).name)
+
+    def prefillImageData(self, fetch = True):
         try:
+            if fetch:
+                self.fetchImagePath()
             res = self._prefillImageData()
             if res == 'passed':
                 self.status_label.setVisible(True)
                 status = f'<font color="#4c9b8f">Successfully processed image metadata! {len(self.userInfo.channelOrder)} channel image is ready for viewing. </font>'
                 self.status_label.setText(status)
-                self.previewImageDataButton.setEnabled(False)
-                self.previewImageDataButton.setStyleSheet(f"color: #4c9b8f")
+                # self.previewImageDataButton.setEnabled(False)
+                # self.previewImageDataButton.setStyleSheet(f"color: #4c9b8f")
+                self.setWidgetColorBackground(self.qptiffEntry, "#55ff55")
+                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.qptiffEntry, "#ffffff"))
             elif res == 'name conflict':
-                pass #TODO something here
+                #TODO something here
+                self.setWidgetColorBackground(self.qptiffEntry, "#ef881a")
+                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.qptiffEntry, "#ffffff"))
         except Exception as e:
+            self.setWidgetColorBackground(self.qptiffEntry, "#ff5555")
+            QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.qptiffEntry, "#ffffff"))
             folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
             if not os.path.exists(folder):
                 os.makedirs(folder)
@@ -556,14 +600,14 @@ class ViewerPresets(QDialog):
             status = '<font color="#ffa000">Warning: Failed to properly ingest the files\' metadata.\
               The viewer expects a QPTIFF from an Akoya Polaris,<br> and an object data <i>.csv</i> generated by a Halo analysis app</font>'
             self.status_label.setText(status)
-            self.previewImageDataButton.setEnabled(False)
-            self.previewImageDataButton.setStyleSheet(f"color: #ffa000")
+            # self.previewImageDataButton.setEnabled(False)
+            # self.previewImageDataButton.setStyleSheet(f"color: #ffa000")
 
     def _retrieve_image_scale(self):
         ''' Get pixel per um value for the image'''
         try:
         #     return None
-            path = self.userInfo.qptiff
+            path = self.userInfo.qptiff_path
             with tifffile.TiffFile(path) as tif:
                 description = tif.pages[0].tags['ImageDescription'].value
             root = ET.fromstring(description)
@@ -580,10 +624,8 @@ class ViewerPresets(QDialog):
             # exit()
             return None
 
-
-
     def _prefillImageData(self):
-        path = self.userInfo.qptiff
+        path = self.userInfo.qptiff_path
         # Parse annoying TIF metadata
         # It seems to be stored in XML format under the 'ImageDescription' TIF tag. 
         with tifffile.TiffFile(path) as tif:
@@ -1039,14 +1081,12 @@ class ViewerPresets(QDialog):
 
         self.saveViewSettings()
         store_and_load.storeObject(self.userInfo, 'data/presets')
-        self.userInfo.session.image_display_name = sub(r'.*?\\',"", self.userInfo.qptiff) # save name of image for display later
+        self.userInfo.session.image_display_name = pathlib.Path(self.userInfo.qptiff_path).name # save name of image for display later
         self.userInfo.session.image_scale = self._retrieve_image_scale()
         # If user fetched metadata, save changes to color mappings
         # self.saveColors()
 
 
-        # print(f'QPTIFF: {self.userInfo.qptiff}')
-        # print(f'OBJECTDATA : {self.userInfo.objectData}')
         print(f'CHANNELS : {self.userInfo.channels}')
 
         # self.app.setStyleSheet('')
