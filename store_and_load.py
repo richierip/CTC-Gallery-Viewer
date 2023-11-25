@@ -54,7 +54,7 @@ class sessionVariables:
         self.page_status_layers = {"Gallery": [], "Multichannel": []}
         self.session_cells = pd.DataFrame()
         self.cell_under_mouse = {} # Will update with below info for one cell
-        self.context_target = None # Saves information for the cell of interest in Context Mode
+        self.context_target = {} # Saves information for the cell of interest in Context Mode
         self.current_cells =  {'Layer':str,"cid": int,"center_x": int,'center_y': int,
                                 'validation_call': str, 'XMax' : float,'XMin':float,
                                 'YMax' : float,'YMin':float} # Holds dict of dict for the cells that are loaded on the current page in the viewer

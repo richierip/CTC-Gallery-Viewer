@@ -304,11 +304,11 @@ def toggle_session_mode(target_mode):
         if SESSION.mode=="Gallery": 
             row, col = list(SESSION.grid_to_ID["Gallery"].keys())[list(SESSION.grid_to_ID["Gallery"].values()).index(f"{target_cell_info['Layer']} {cell_num}")].split(",")
             row, col = (int(row),int(col))
-            cellCanvasX = ((row-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
-            cellCanvasY = ((col-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
+            cellCanvasY = ((row-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
+            cellCanvasX = ((col-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
             z,y,x = VIEWER.camera.center
-            offsetX = x - cellCanvasX 
-            offsetY = y - cellCanvasY 
+            offsetX = (x/sc) - cellCanvasX 
+            offsetY = (y/sc) - cellCanvasY 
             SESSION.last_gallery_camera_coordinates["center"] = VIEWER.camera.center
             SESSION.last_gallery_camera_coordinates["z"] = VIEWER.camera.zoom
 
@@ -317,6 +317,9 @@ def toggle_session_mode(target_mode):
             offsetY = 0
             SESSION.last_multichannel_camera_coordinates["center"] = VIEWER.camera.center
             SESSION.last_multichannel_camera_coordinates["z"] = VIEWER.camera.zoom
+
+        # print(f"Viewer canvas center is {y} {x} | cells canvas center is {cellCanvasY} {cellCanvasX}")
+        # print(f"target y,x = {target_cell_info['center_y']} {target_cell_info['center_x']} ||  {offsetY} {offsetX} ")
 
         # Move to cell location on the global image
         VIEWER.camera.center = ((target_cell_info["center_y"]+offsetY)*sc,(target_cell_info["center_x"]+offsetX)*sc) # these values seem to work best
@@ -895,7 +898,7 @@ def attach_functions_to_viewer(viewer):
         coordinates, and pixel values for each channel in a dict'''
     def find_mouse(data_coordinates, scope = 'world'):
         
-        print(f"{data_coordinates}")
+        # print(f"{data_coordinates}")
         SESSION.mouse_coords = data_coordinates
 
                 # retrieve cell ID name
@@ -952,8 +955,7 @@ def attach_functions_to_viewer(viewer):
     def display_intensity_wrapper(viewer, event):
         display_intensity(viewer,event)
 
-    def display_intensity(viewer, event):
-        
+    def display_intensity(viewer, event): 
         if SESSION.mode == "Context":
             kw_res = find_mouse(event.position)
             cell = kw_res["cell"]
@@ -1026,6 +1028,11 @@ def attach_functions_to_viewer(viewer):
         
             sc = STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]]
             VIEWER.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
+
+    #TODO trigger pixel readout update when pan or zoom occurs
+
+    # viewer.camera.events.connect(display_intensity)
+    # napari.Viewer.camera.zoom.
 
     @viewer.bind_key('j')
     @viewer.bind_key('Space', overwrite = True)
@@ -1395,7 +1402,11 @@ def attach_functions_to_viewer(viewer):
         if SESSION.mode == "Context":
             toggle_session_mode(SESSION.last_mode)
         else:
-            toggle_session_mode("Context")
+            try:
+                toggle_session_mode("Context")
+            except ValueError:
+                # Might trigger when SESSION.cell_under_mouse holds information on a cell from context mode
+                VIEWER.status = f"Can't enter Context Mode right now. Move your mouse around a bit first please"
 
 
     @viewer.bind_key('s')
@@ -1546,15 +1557,38 @@ def attach_functions_to_viewer(viewer):
     @viewer.bind_key('Control-Right')  
     @viewer.bind_key('Control-Up')   
     def zoom_in(viewer):
-        viewer.camera.zoom *= 1.15
+        step_size = 1.15
+        # _,y,x = viewer.camera.center
+        # curY, curX = SESSION.mouse_coords
+        # print(f"Before moving, camera coords are {viewer.camera.center}")
+        # print(f"Mouse coords are z, {curY} {curX}")
+        # print(f"Will move to {curY+(y-curY)*(step_size-1)} {curX+((x-curX)*(step_size-1))}")
+        # print(f"Zoom level is {viewer.camera.zoom}\n")
+        # display_intensity(viewer, dummyCursor(curY+((y-curY)*(step_size-1)), curX+((x-curX)*(step_size-1)) ))
+        viewer.camera.zoom *= step_size
 
+
+    # @viewer.mouse_move_callbacks.append
+    # def zoom_out_wrapper(viewer, event):
+    #     zoom_out(viewer, event)
 
     @viewer.bind_key('Shift-Left')  
     @viewer.bind_key('Shift-Down') 
     @viewer.bind_key('Control-Left')  
-    @viewer.bind_key('Control-Down')   
-    def zoom_out(viewer):
-        viewer.camera.zoom /= 1.15  
+    @viewer.bind_key('Control-Down')  
+    def zoom_out(viewer, event):
+        step_size = 1.15
+        # _,y,x = viewer.camera.center
+        # curY, curX = SESSION.mouse_coords
+        # print(f"Before moving, camera coords are {viewer.camera.center}")
+        # print(f"Mouse coords are z, {curY} {curX}")
+        # print(f"Will move to {(curY - (y*(step_size-1))) / (2-step_size)} {(curX - (x*(step_size-1))) / (2-step_size)}")
+
+        # print(f"Zoom level is {viewer.camera.zoom}\n")
+        # # (step_size-1) + (1-step_size)
+        # display_intensity(viewer, dummyCursor((curY - (y*(step_size-1))) / (2-step_size), (curX - (x*(step_size-1))) / (2-step_size) ))
+        viewer.camera.zoom /= step_size  
+        
 
     
     @viewer.bind_key('a')

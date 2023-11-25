@@ -409,7 +409,7 @@ class ViewerPresets(QDialog):
         if self.phenotypeCombo.isVisible() or self.annotationCombo.isVisible():
             self.phenotypeCombo.clear()
             self.annotationCombo.clear()
-            self.prefillObjectData()
+            self.prefillObjectData(fetch=False)
 
     def _log_problem(self, logpath, e):
         # Log the crash and report key variables
