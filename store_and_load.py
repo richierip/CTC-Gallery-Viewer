@@ -12,6 +12,7 @@ Ting Lab
 import pickle
 import copy
 import pandas as pd
+from typing import Callable
 
 CELL_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'cyan', 'pink'] # List of colors available to use as colormaps
 DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7 # Each fluor will be assigned a number that is used to represent it's position in the image array
@@ -67,6 +68,8 @@ class sessionVariables:
         self.intensity_columns = []
         self.validation_columns = []
         self.mouse_coords = (0,0) # (y,x)
+        self.display_intensity_func = Callable
+        self.find_mouse_func = Callable
 
 class userPresets:
     ''' This class is used to store user-selected parameters on disk persistently,
@@ -196,7 +199,8 @@ def storeObject(obj : userPresets, filename : str):
         pickle.dump(obj, outfile)
         outfile.close()
         return True
-    except:
+    except Exception as e:
+        print(e)
         return False
         
 def loadObject(filename):

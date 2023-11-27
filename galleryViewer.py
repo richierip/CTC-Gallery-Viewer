@@ -154,6 +154,7 @@ def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData:
         _update_dictionary(fluor,Gamma)
         for m in ["Gallery", "Multichannel", "Context"]:
             adjust_composite_gamma(VIEWER.layers[f"{m} "+fluor],Gamma)
+    VIEWER.window._qt_viewer.setFocus()
 
 adjust_gamma_widget.visible=False
 
@@ -170,6 +171,7 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
         _update_dictionary(fluor,white_in)
         for m in ["Gallery", "Multichannel", "Context"]:
             adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [ADJUSTMENT_SETTINGS[fluor+" black-in"],white_in])
+    VIEWER.window._qt_viewer.setFocus()
 
 
 @magicgui(auto_call=True,
@@ -186,6 +188,7 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         _update_dictionary(fluor,black_in)
         for m in ["Gallery", "Multichannel", "Context"]:
             adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [black_in,ADJUSTMENT_SETTINGS[fluor+" white-in"]])
+    VIEWER.window._qt_viewer.setFocus()
 
 def toggle_absorption():
     #TODO make absorption work for context more?
@@ -247,6 +250,7 @@ def tally_checked_widgets():
             VIEWER.layers[lname].visible = True
         else:
             VIEWER.layers[lname].visible = False  
+    VIEWER.window._qt_viewer.setFocus()
     # return myfunc
 
 def check_creator2(list_of_names):
@@ -277,7 +281,6 @@ def fix_default_composite_adj():
 #         "choices": [("Multichannel Mode", 1), ("Composite Mode", 2)]})#,layout = 'horizontal')
 def toggle_session_mode(target_mode):
     def _save_validation(VIEWER, Mode):
-        VIEWER.status = 'Saving ...'
         res = userInfo._save_validation(to_disk=False)
         if res:
             VIEWER.status = f'{Mode} Mode enabled. Decisions loaded successfully.'
@@ -291,16 +294,22 @@ def toggle_session_mode(target_mode):
     if target_mode==SESSION.mode: return None
     SESSION.last_mode = SESSION.mode # save for later
 
+    # Save last coordinates
+    if SESSION.mode == "Gallery":
+        SESSION.last_gallery_camera_coordinates["center"] = VIEWER.camera.center
+        SESSION.last_gallery_camera_coordinates["z"] = VIEWER.camera.zoom
+    elif SESSION.mode == "Multichannel":
+        SESSION.last_multichannel_camera_coordinates["center"] = VIEWER.camera.center
+        SESSION.last_multichannel_camera_coordinates["z"] = VIEWER.camera.zoom
+    
     if target_mode=="Context":
-                
         target_cell_info = SESSION.cell_under_mouse
         SESSION.context_target = target_cell_info
         cell_num = str(target_cell_info["cid"])
-        print(cell_num)
-        
+        # print(cell_num)
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary.
 
-        # save current coordinates
+        # Find offset coordinates
         if SESSION.mode=="Gallery": 
             row, col = list(SESSION.grid_to_ID["Gallery"].keys())[list(SESSION.grid_to_ID["Gallery"].values()).index(f"{target_cell_info['Layer']} {cell_num}")].split(",")
             row, col = (int(row),int(col))
@@ -309,18 +318,12 @@ def toggle_session_mode(target_mode):
             z,y,x = VIEWER.camera.center
             offsetX = (x/sc) - cellCanvasX 
             offsetY = (y/sc) - cellCanvasY 
-            SESSION.last_gallery_camera_coordinates["center"] = VIEWER.camera.center
-            SESSION.last_gallery_camera_coordinates["z"] = VIEWER.camera.zoom
 
         elif SESSION.mode=="Multichannel": 
+            # Could do it here, but not certain that it's preferable over centering the cell.
             offsetX = 0
             offsetY = 0
-            SESSION.last_multichannel_camera_coordinates["center"] = VIEWER.camera.center
-            SESSION.last_multichannel_camera_coordinates["z"] = VIEWER.camera.zoom
-
-        # print(f"Viewer canvas center is {y} {x} | cells canvas center is {cellCanvasY} {cellCanvasX}")
-        # print(f"target y,x = {target_cell_info['center_y']} {target_cell_info['center_x']} ||  {offsetY} {offsetX} ")
-
+        
         # Move to cell location on the global image
         VIEWER.camera.center = ((target_cell_info["center_y"]+offsetY)*sc,(target_cell_info["center_x"]+offsetX)*sc) # these values seem to work best
         # viewer.camera.zoom = 1.2 / sc
@@ -353,55 +356,56 @@ def toggle_session_mode(target_mode):
         VIEWER.add_shapes(nuclei_box_coords, name="Context Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
                                             face_color='#00000000', scale=sc, features=features, text = nb_text )
         VIEWER.layers.selection.active = VIEWER.layers["Gallery Status Layer"]  
+        
+        _, (mX,mY), _ = SESSION.find_mouse_func(VIEWER.cursor.position, scope="local")
+        # print(f"mx {mX} and mY {mY}")
+        
         # finally, set mode
         SESSION.mode = target_mode
         # Turn on / off the correct layers
         reuse_gamma()
+
+        # Change cursor value
+        sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary.
+        class dummyCursor:
+            def __init__(self, y, x) -> None:
+                self.position = (y,x)
+        SESSION.display_intensity_func(VIEWER, dummyCursor((target_cell_info["center_y"]+mY-(userInfo.imageSize+2)/2)*sc,(target_cell_info["center_x"]+mX-(userInfo.imageSize+2)/2)*sc))
+
+        VIEWER.window._qt_viewer.setFocus() # return focus
         # Done. Leave function, no need to save cells
         return True 
     
-    # Now, we must be changing to Gallery OR Multichannel
-    if SESSION.mode == "Context":
-        # If we are coming from Context Mode, just change coordinates back and restore visibility
-        if target_mode == "Gallery":
-            VIEWER.camera.center = SESSION.last_gallery_camera_coordinates["center"]
-            VIEWER.camera.zoom = SESSION.last_gallery_camera_coordinates["z"]
-        elif target_mode == "Multichannel":
+    elif target_mode == "Multichannel" or target_mode =="Gallery":
+        
+
+        if SESSION.mode != "Context": # Now, we must be changing to Gallery OR Multichannel. Want to save to DataFrame, not disk
+            _save_validation(VIEWER, target_mode)
+            print(f"Number of cells in current page is {len(SESSION.current_cells)} and type is {type(SESSION.current_cells)}")
+            
+
+        if target_mode == "Multichannel":
+            sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary
+            row, col = list(SESSION.grid_to_ID["Multichannel"].keys())[list(SESSION.grid_to_ID["Multichannel"].values()).index(f"{SESSION.cell_under_mouse['Layer']} {str(SESSION.cell_under_mouse['cid'])}")].split(",")
+            row, col = (int(row),int(col))
+            cellCanvasY = ((row-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
+            cellCanvasX = ((col-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
+            SESSION.last_multichannel_camera_coordinates["center"] = (cellCanvasY*sc, cellCanvasX*sc)
+            # print(f"Targeting {cellCanvasY,cellCanvasX}")
             VIEWER.camera.center = SESSION.last_multichannel_camera_coordinates["center"]
             VIEWER.camera.zoom = SESSION.last_multichannel_camera_coordinates["z"]
-
         
-        # VIEWER.layers.selection.active = VIEWER.layers["Status Layer"]
-    
+        elif target_mode == "Gallery":
+            VIEWER.camera.center = SESSION.last_gallery_camera_coordinates["center"]
+            VIEWER.camera.zoom = SESSION.last_gallery_camera_coordinates["z"]
+        else:
+            raise Exception(f"Invalid parameter passed to toggle_session_mode: {target_mode}. Must be 'Gallery' or 'Multichannel'.")
+        
+
         SESSION.mode = target_mode
         # Change visibilities of the correct layers
         reuse_gamma()
-        return True
-    else:
-        # Now, we are switching between Gallery and Multichannel mode. We might want to save. 
-        # Save data to file from current set
-        VIEWER.status = 'Saving data to file...'
-        _save_validation(VIEWER, target_mode)
-
-
-        print(f"Number of cells in current page is {len(SESSION.current_cells)} and type is {type(SESSION.current_cells)}")
-        if target_mode == "Multichannel": # change to Show All
-            VIEWER.camera.center = SESSION.last_multichannel_camera_coordinates["center"]
-            VIEWER.camera.zoom = SESSION.last_multichannel_camera_coordinates["z"]
-            SESSION.mode = target_mode
-
-        elif target_mode == "Gallery": # change to composite only
-            VIEWER.camera.center = SESSION.last_gallery_camera_coordinates["center"]
-            VIEWER.camera.zoom = SESSION.last_gallery_camera_coordinates["z"]
-            SESSION.mode = target_mode
-
-        else:
-            raise Exception(f"Invalid parameter passed to toggle_session_mode: {target_mode}. Must be 'Gallery' or 'Multichannel'.")
-            # Perform adjustments before exiting function
-        reuse_contrast_limits() # Only checked fluors will be visible
-        reuse_gamma() 
-
-        # set_viewer_to_neutral_zoom(VIEWER) # Fix zoomed out issue
+        VIEWER.window._qt_viewer.setFocus()
         return True
 
 
@@ -468,8 +472,8 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
     reuse_gamma() 
     set_viewer_to_neutral_zoom(VIEWER, reset_session=True) # Fix zoomed out issue
     VIEWER.layers.selection.active = VIEWER.layers["Gallery Status Layer"]  
-
-    return None
+    VIEWER.window._qt_viewer.setFocus()
+    return True
     
 # @magicgui(auto_call=True,
 #         Status_Bar_Visibility={"widget_type": "RadioButtons","orientation": "vertical",
@@ -481,6 +485,7 @@ def toggle_statuslayer_visibility(show_widget):
     else: SESSION.status_layer_vis = False
     # Find status layers and toggle visibility
     VIEWER.layers[f"{SESSION.mode} Status Layer"].visible = SESSION.status_layer_vis
+    VIEWER.window._qt_viewer.setFocus()
     return True
 
 def toggle_statusbox_visibility(show_widget):
@@ -525,6 +530,7 @@ def toggle_statusbox_visibility(show_widget):
                         im[i:i+16, j:j+16, 3] = 0 # box
                 layer.data = im
                 # print(im.shape)
+    VIEWER.window._qt_viewer.setFocus()
     return True
 
 def set_notes_label(display_note_widget, ID):
@@ -598,6 +604,7 @@ def set_notes_label(display_note_widget, ID):
     else:
         note = prefix + intensity_str + f'<br><font size="5pt" color="white">{note}</font>'
     display_note_widget.setText(note)
+    VIEWER.window._qt_viewer.setFocus()
     return True
 ######------------------------- Image loading and processing functions ---------------------######
 
@@ -905,7 +912,7 @@ def attach_functions_to_viewer(viewer):
         # Scale data coordinates to image. Then round to nearest int, representing the coord or the image pixel under the mouse
         sc = 1.0 if SESSION.image_scale is None else SESSION.image_scale
         data_coordinates = tuple([x/sc for x in data_coordinates])
-        coords = np.round(data_coordinates).astype(int)
+        coords = tuple(np.round(data_coordinates).astype(int))
         vals = {} # will hold fluor : pixel intensity pairs 
 
         if coords[0] < 0 or coords[1]<0:
@@ -914,9 +921,10 @@ def attach_functions_to_viewer(viewer):
         if SESSION.mode == "Context":
             for fluor in CHANNELS_STR:
                 if fluor == "Composite": continue
-                # get_value returns a tuple here, where the first number is the image layer in the pyramid. Discard that
-                v = VIEWER.layers["Context "+fluor].get_value(data_coordinates)
-                vals[fluor] =  v[1] if v is not None else "-"
+
+                # Requesting single pixel value from Dask array layer 0
+                v = str(int(viewer.layers["Context "+fluor].data[0][coords]))
+                vals[fluor] =  v if v is not None else "-"
             
             # Now find the name of the closest cell 
             dist, closest_ind = SESSION.kdtree.query([data_coordinates[1],data_coordinates[0]])
@@ -965,6 +973,7 @@ def attach_functions_to_viewer(viewer):
             # with open("cell_tup.pkl","wb") as f:
             #     pickle.dump(cell_tup,f)
             # exit()
+            # print(kw_res)
             if (vals is None) or (next(iter(vals.values())) is None):
                 # Don't do anything else - the cursor is out of bounds of the image
                 VIEWER.status = 'Out of bounds'
@@ -1029,6 +1038,8 @@ def attach_functions_to_viewer(viewer):
             sc = STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]]
             VIEWER.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
 
+    SESSION.display_intensity_func = display_intensity
+    SESSION.find_mouse_func = find_mouse
     #TODO trigger pixel readout update when pan or zoom occurs
 
     # viewer.camera.events.connect(display_intensity)
@@ -1404,7 +1415,8 @@ def attach_functions_to_viewer(viewer):
         else:
             try:
                 toggle_session_mode("Context")
-            except ValueError:
+            except (ValueError,TypeError) as e:
+                print(e)
                 # Might trigger when SESSION.cell_under_mouse holds information on a cell from context mode
                 VIEWER.status = f"Can't enter Context Mode right now. Move your mouse around a bit first please"
 
@@ -1576,7 +1588,7 @@ def attach_functions_to_viewer(viewer):
     @viewer.bind_key('Shift-Down') 
     @viewer.bind_key('Control-Left')  
     @viewer.bind_key('Control-Down')  
-    def zoom_out(viewer, event):
+    def zoom_out(viewer):
         step_size = 1.15
         # _,y,x = viewer.camera.center
         # curY, curX = SESSION.mouse_coords
@@ -1663,7 +1675,7 @@ def chn_key_wrapper(viewer):
                 widget_obj.setChecked(False)
             else:
                 widget_obj.setChecked(True)
-
+            viewer.window._qt_viewer.setFocus()
         return toggle_channel_visibility
 
     for pos, chn in enumerate(UPDATED_CHECKBOXES):

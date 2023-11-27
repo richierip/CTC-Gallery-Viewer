@@ -219,10 +219,10 @@ class ViewerPresets(QDialog):
         if self.userInfo.qptiff_path is not None:
             self.qptiffEntry.insert(pathlib.Path(self.userInfo.qptiff_path).name)
             # self.prefillImageData(fetch=False)
-        if self.userInfo.objectDataPath is not None:
+        if self.userInfo.objectDataPath is not None and  self.userInfo.qptiff_path is not None:
             self.dataEntry.insert(pathlib.Path(self.userInfo.objectDataPath).name)
             self.prefillObjectData(fetch=False)
-        
+        self.clearFocus()
 
     def process_menu_action(self,q):
         if 'manual' in q.text().lower():
@@ -254,7 +254,8 @@ class ViewerPresets(QDialog):
     def saveQptiff(self):
         cleanpath = os.path.normpath(self.qptiffEntry.text().strip('"')).strip('.')
         if os.path.exists(cleanpath):
-            self.userInfo.qptiff_path = cleanpath
+            pass
+            # self.userInfo.qptiff_path = cleanpath
         # if (".qptiff" in self.qptiffEntry.text()) or (".tif" in self.qptiffEntry.text()):
         #     self.previewImageDataButton.setEnabled(True)
         # else:
@@ -262,7 +263,8 @@ class ViewerPresets(QDialog):
     def saveObjectData(self):
         cleanpath = os.path.normpath(self.dataEntry.text().strip('"')).strip('.')
         if os.path.exists(cleanpath):
-            self.userInfo.objectDataPath = cleanpath
+            pass
+            # self.userInfo.objectDataPath = cleanpath
         # if ".csv" in self.dataEntry.text():
         #     self.previewObjectDataButton.setEnabled(True)
         # else:
@@ -563,7 +565,7 @@ class ViewerPresets(QDialog):
 
     def fetchImagePath(self):
         path = self.userInfo.last_system_folder_visited
-        fileName, x = QFileDialog.getOpenFileName(self,"Select an image to load", path,"Akoya QPTIFF (*.qptiff);;Akoya QPTIFF (*.QPTIFF)")  
+        fileName, _ = QFileDialog.getOpenFileName(self,"Select an image to load", path,"Akoya QPTIFF (*.qptiff);;Akoya QPTIFF (*.QPTIFF)")  
         
         self.userInfo.last_system_folder_visited = os.path.normpath(pathlib.Path(fileName).parent)
         self.userInfo.qptiff_path = os.path.normpath(fileName)
@@ -602,7 +604,7 @@ class ViewerPresets(QDialog):
             self.status_label.setText(status)
             # self.previewImageDataButton.setEnabled(False)
             # self.previewImageDataButton.setStyleSheet(f"color: #ffa000")
-
+        
     def _retrieve_image_scale(self):
         ''' Get pixel per um value for the image'''
         try:
@@ -854,7 +856,6 @@ class ViewerPresets(QDialog):
         self.imageSize.setValue(self.userInfo.imageSize) # Misbehaving?
         self.imageSize.editingFinished.connect(self.saveImageSize)
         self.imageSize.setFixedWidth(100)
-
         self.specificCellChoice = QLineEdit(self.topRightGroupBox)
         self.specificCellChoice.setPlaceholderText('Leave blank for page 1')
         if self.userInfo.specific_cell is not None:
