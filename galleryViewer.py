@@ -109,7 +109,7 @@ def reuse_gamma():
 
     if SESSION.mode != "Context":
         VIEWER.layers[f"{SESSION.mode} Status Layer"].visible = SESSION.status_layer_vis
-        VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
+        # VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
     try:
         VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = SESSION.nuclei_boxes_vis
     except KeyError:
@@ -133,7 +133,7 @@ def reuse_contrast_limits():
 
     if SESSION.mode != "Context":
         VIEWER.layers[f"{SESSION.mode} Status Layer"].visible = SESSION.status_layer_vis
-        VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
+        # VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
     try:
         VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = SESSION.nuclei_boxes_vis
     except KeyError:
@@ -192,42 +192,44 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
 
 def toggle_absorption():
     #TODO make absorption work for context more?
-    if SESSION.mode == "Context": return None
+    # if SESSION.mode == "Context": return None
     if SESSION.absorption_mode ==True:
         SESSION.absorption_mode = False
         for layer in VIEWER.layers:
             
-            if 'Status Layer' in layer.name or "Context" in layer.name:
+            if 'Status Layer' in layer.name:
                 continue
             elif "Nuclei Boxes" in layer.name:
                 layer.edge_color = '#ffffff'
                 layer.text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':"white"}
                 continue
-            elif "Absorption" in layer.name:
-                layer.visible = False
-                continue
+            # elif "Absorption" in layer.name:
+            #     layer.visible = False
+            #     continue
             layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[layer.name.split()[1]])
             layer.blending = 'Additive'
     else:
         SESSION.absorption_mode = True
         for layer in VIEWER.layers:
             
-            if 'Status Layer' in layer.name or "Context" in layer.name:
+            if 'Status Layer' in layer.name:
                 continue
             elif "Nuclei Boxes" in layer.name:
                 layer.edge_color="#000000"
                 layer.text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':"black"}
                 continue
-            elif "Absorption" in layer.name:
-                if SESSION.mode == layer.name.split()[0]:
-                    layer.visible = True
-                    im = layer.data
-                    im[:,:] = [255,255,255,255]
-                    layer.data = im.astype(np.uint8)
-                continue
+            # elif "Absorption" in layer.name:
+            #     if SESSION.mode == layer.name.split()[0]:
+            #         layer.visible = True
+            #         im = layer.data
+            #         im[:,:] = [255,255,255,255]
+            #         layer.data = im.astype(np.uint8)
+            #     continue
             layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[layer.name.split()[1]]+' inverse')
             layer.blending = 'Minimum'
-    change_statuslayer_color(copy.copy(SESSION.current_cells))
+    if not SESSION.mode == "Context":
+        change_statuslayer_color(copy.copy(SESSION.current_cells))
+    VIEWER.theme = "light" if SESSION.absorption_mode else "dark"
 
 def tally_checked_widgets():
     # keep track of visible channels in global list and then toggle layer visibility
@@ -536,15 +538,19 @@ def toggle_statusbox_visibility(show_widget):
 def set_notes_label(display_note_widget, ID):
     cell_num = ID.split()[-1]; cell_anno = ID.replace(' '+cell_num,'')
     if cell_anno == 'All':
-        image_name = f'Cell {cell_num}'
+        cell_name = f'Cell {cell_num}'
     else:
-        image_name = f'Cell {cell_num} from {cell_anno}'
+        cell_name = f'Cell {cell_num} from {cell_anno}'
     try:
         note = str(SESSION.saved_notes[ID])
     except KeyError: # in case the name was off
         return False
     status = SESSION.status_list[str(ID)]
-    prefix = f'{SESSION.saved_notes["page"]}<br><font color="{STATUSES_TO_HEX[status]}">{image_name}</font>'
+    if STATUSES_TO_HEX[status] != "#ffffff":
+        prefix = f'{SESSION.saved_notes["page"]}<br><font color="{STATUSES_TO_HEX[status]}">{cell_name}</font>'
+    else:
+        prefix = f'{SESSION.saved_notes["page"]}<br>{cell_name}'
+
 
     # Add intensities
     intensity_series = SAVED_INTENSITIES[ID]
@@ -837,10 +843,10 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
     mult_vis = not gal_vis
     print(f"\nMy scale is {SESSION.image_scale}")
     sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-    viewer.add_image(white_background(1, userInfo.cells_per_row).astype(np.uint8), name = "Gallery Absorption", 
-                                                  blending = 'translucent', visible = SESSION.absorption_mode and gal_vis, scale =sc )
-    viewer.add_image(white_background(cpr_m, cpr_m).astype(np.uint8), name = "Multichannel Absorption", 
-                                                  blending = 'translucent', visible = SESSION.absorption_mode and mult_vis, scale =sc )
+    # viewer.add_image(white_background(1, userInfo.cells_per_row).astype(np.uint8), name = "Gallery Absorption", 
+    #                                               blending = 'translucent', visible = SESSION.absorption_mode and gal_vis, scale =sc )
+    # viewer.add_image(white_background(cpr_m, cpr_m).astype(np.uint8), name = "Multichannel Absorption", 
+    #                                               blending = 'translucent', visible = SESSION.absorption_mode and mult_vis, scale =sc )
     for fluor in list(page_image_gallery.keys()):
         print(f"Adding layers now. fluor is {fluor}")
         if fluor == 'Composite':
@@ -1012,8 +1018,11 @@ def attach_functions_to_viewer(viewer):
             for fluor, val in vals.items():
                 if val != "-": val = int(val)
                 output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {val}   </font>'
-            sc = STATUSES_TO_HEX[SESSION.status_list[str(ckey)]] if cell is not None else "#ffffff"
-            VIEWER.status = f'<font color="{sc}">Context Mode</font> pixel intensities at {coords}: {output_str}'
+            sc = STATUSES_TO_HEX[SESSION.status_list[str(ckey)]] if cell is not None else None
+            if not sc == "#ffffff":
+                VIEWER.status = f'<font color="{sc}">Context Mode</font> pixel intensities at {coords}: {output_str}'
+            else:
+                VIEWER.status = f'Context Mode pixel intensities at {coords}: {output_str}'
         elif SESSION.mode == "Gallery" or SESSION.mode == "Multichannel":
             cell_name,coords,vals = find_mouse(event.position, scope = 'grid') 
             if vals is None:
@@ -1036,7 +1045,11 @@ def attach_functions_to_viewer(viewer):
                 output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {val}   </font>'
         
             sc = STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]]
-            VIEWER.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
+            if sc != "#ffffff":
+                VIEWER.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
+            else:
+                VIEWER.status = f'{image_name} intensities at {coords}: {output_str}'
+
 
     SESSION.display_intensity_func = display_intensity
     SESSION.find_mouse_func = find_mouse
@@ -2150,6 +2163,9 @@ def main(preprocess_class = None):
             box.setStyleSheet(f"QCheckBox {{ color: {CHANNEL_ORDER[box.objectName()].replace('blue','#0462d4')} }}")
             UPDATED_CHECKBOXES.append(box)
     viewer.window.add_dock_widget(UPDATED_CHECKBOXES,area='bottom')
+
+    #TODO set theme
+    VIEWER.theme = "dark"
 
     # Finish up, and set keybindings
     preprocess_class._append_status('<font color="#7dbc39">  Done.</font><br> Goodbye')

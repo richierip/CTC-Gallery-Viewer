@@ -40,6 +40,7 @@ VIEW_SETTINGS = {"DAPI gamma": 0.5, "OPAL570 gamma": 0.5, "OPAL690 gamma": 0.5, 
 class sessionVariables:
     ''' Stores variables that will only last for the duration of a single session'''
     def __init__(self) -> None:
+        self.viewer = None # napari.Viewer()
         self.saving_required = False
         self.status_list = {}
         self.saved_notes = {}
