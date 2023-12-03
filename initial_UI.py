@@ -20,6 +20,7 @@ warnings.filterwarnings("ignore")
 import pandas as pd
 import copy
 import pathlib
+import custom_color_functions
 
 # Used in fetching and processing metadata
 from random import choice
@@ -45,11 +46,12 @@ WIDGET_SELECTED = None
 class StatusCombo(QComboBox):
     def __init__(self, parent, userInfo):
         super(QComboBox, self).__init__(parent)
+        
         # self.setVisible(False)
         self.addItem("Don't assign")
         self.setItemData(0,QColor(255,255,255,255),Qt.BackgroundRole)
         self.setItemData(0,QColor(0,0,0,255),Qt.ForegroundRole)
-        for pos,status in enumerate(list(store_and_load.STATUSES.keys())):
+        for pos,status in enumerate(list(userInfo.statuses.keys())):
             self.addItem(status)
             self.setItemData(pos+1,QColor(*userInfo.statuses_rgba[status]),Qt.BackgroundRole)
             self.setItemData(pos+1,QColor(0,0,0,255),Qt.ForegroundRole)
@@ -62,6 +64,150 @@ class StatusCombo(QComboBox):
             self.setStyleSheet(f"background-color: rgba(255,255,255,255);color: rgb(0,0,0); selection-background-color: rgba(255,255,255,140);")
         else:
             self.setStyleSheet(f"background-color: rgba{userInfo.statuses_rgba[status]};color: rgb(0,0,0);selection-background-color: rgba(255,255,255,140);")
+
+class EditScoringDecisions(QDialog):
+    def __init__(self, app: QApplication, user_data: store_and_load.userPresets):
+        super(EditScoringDecisions, self).__init__()
+        self.app = app
+        self.user_data = user_data
+        self.statuses_hex = copy.copy(user_data.statuses_hex)
+        self.statuses = copy.copy(user_data.statuses)
+        self.available_statuses_keybinds = copy.copy(user_data.available_statuses_keybinds)
+
+        # Arrange title bar buttons
+        self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowTitleHint,False)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint,False)
+        self.setWindowTitle('Scoring preferences')
+        self.setWindowIcon(QIcon('data/mghiconwhite.png'))        
+
+        self.decisionBox = QGroupBox("Scoring decisions, colors, and keybinds")
+        self.buttonBox = QGroupBox()
+        self.save_button = QPushButton("Save and exit")
+        self.add_button = QPushButton("Add new")
+        self.remove_button = QPushButton("Remove last")
+        self.add_button.pressed.connect(self.add_label)
+        self.remove_button.pressed.connect(self.remove_label)
+        self.save_button.pressed.connect(self.save)
+        self.decision_entry = QLineEdit(); self.decision_entry.setPlaceholderText("Scoring decision")
+        self.color_entry = QLineEdit(); self.color_entry.setPlaceholderText("Color")
+        self.keybind_widget = QComboBox()
+        self.keybind_widget.addItems([x.upper() for x in self.available_statuses_keybinds])
+
+
+        self.saveBoxLayout = QGridLayout()
+        self.saveBoxLayout.addWidget(self.decision_entry,0,0)
+        self.saveBoxLayout.addWidget(self.color_entry,1,0)
+        self.saveBoxLayout.addWidget(self.keybind_widget,2,0)
+
+        self.saveBoxLayout.addWidget(self.add_button, 0,1)
+        self.saveBoxLayout.addWidget(self.remove_button, 1,1)
+        self.saveBoxLayout.addWidget(self.save_button, 2,1)
+        # self.saveBox.setLayout(self.saveBoxLayout)
+
+        self.decisionBoxLayout = QGridLayout()
+        # self.decision_label = QLabel("")
+        self.make_labels()
+        # self.decisionBoxLayout.addWidget(self.decision_label)
+
+        # self.decisionBox.setLayout(self.decisionBoxLayout)
+        
+        self.buttonBox.setLayout(self.saveBoxLayout)
+        self.layout = QGridLayout()
+        self.layout.addWidget(self.decisionBox, 0 ,0)
+        self.layout.addWidget(self.buttonBox, 1,0)
+        self.setLayout(self.layout)
+        self.show()
+
+    def make_labels(self):
+
+        for i in reversed(range(self.decisionBoxLayout.count())): 
+            self.decisionBoxLayout.itemAt(i).widget().setParent(None)
+        row=0
+        for decision, color in self.statuses_hex.items():
+            keybind = self.statuses[decision]
+            d = QLabel(decision)
+            c = QLabel(f"<font color='{color}'>{color}</font>")
+            k = QLabel(f'{keybind.upper()}')
+            self.decisionBoxLayout.addWidget(d,row,0 )
+            self.decisionBoxLayout.addWidget(c,row,1 )
+            self.decisionBoxLayout.addWidget(k,row,2 )
+            row+=1
+        # self.decision_label.setText(display_str)
+        self.decisionBox.setLayout(self.decisionBoxLayout)
+        self.decisionBoxLayout.update()
+
+        self.app.processEvents()
+    # def make_label_text(self):
+        
+    #     style = "p {line-height:1.5} .dec{font-family: Metropolis;font-size:30px}"
+    #     style+=".col{font-family: Metropolis}"
+    #     style += ".key{font-family: Metropolis}"
+    #     print("here")
+    #     self.decision_label.setStyleSheet(style)
+    #     display_str = '<html><head/><body>  <p>'
+    #     for decision, color in self.statuses_hex.items():
+    #         keybind = self.statuses[decision]
+    #         space = "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+    #         newl = f"<div class='cola'> {decision} {space}</div>"
+    #         newl += f"<div class='colb'><font color={color}>{color}</div>" + space
+    #         newl += f"<div class='colc'>{keybind}</div> <br>"
+    #         display_str += newl
+    #     display_str += '</p></body></html>'
+    #     self.decision_label.setText(display_str)
+        
+        
+    #     self.app.processEvents()
+        # self.set_layout()
+
+    def add_label(self):
+
+        new_color = self.color_entry.text().replace(" ","").strip('"')
+        new_scoring_decision = self.decision_entry.text()
+
+        if custom_color_functions.isColor(new_color) and len(new_scoring_decision) >=1:
+            try:
+                new_color = custom_color_functions.colormap[new_color] # in case the user passed a string name for a color
+            except KeyError:
+                pass
+            try:
+                new_color = '#%02x%02x%02x' % new_color
+                if not custom_color_functions.isColor(new_color):
+                    raise TypeError
+            except TypeError:
+                pass
+            
+            # now we should have a hex value
+
+            # self.available_statuses_keybinds.remove(new_keybind)
+            self.statuses_hex[new_scoring_decision] = new_color
+            self.statuses[new_scoring_decision] = self.keybind_widget.currentText()
+            self.keybind_widget.removeItem(self.keybind_widget.currentIndex())
+            self.decision_entry.clear()
+            self.color_entry.clear()
+            self.make_labels()
+        
+    def remove_label(self):
+        if len(self.statuses) <=1:
+            return False
+        
+        x = self.statuses.popitem()
+        self.keybind_widget.insertItem(0, x[1])
+        self.statuses_hex.popitem()
+        self.make_labels()
+
+    def save(self):
+        self.user_data.statuses = self.statuses
+        self.user_data.statuses_hex = self.statuses_hex
+        self.user_data.available_statuses_keybinds = [self.keybind_widget.itemText(i) for i in range(self.keybind_widget.count())]
+        self.user_data.remake_rgba()
+        self.close()
+
+
+
+        
+
 
 ''' This class contains the whole dialog box that the user interacts with and all it's widgets. Also contains
     an instance of the userPresets class, which will be passed to the viewer code. '''
@@ -128,19 +274,19 @@ class ViewerPresets(QDialog):
 
         self.qptiffEntry.setFixedWidth(800)
         # qptiffEntry.setAlignment(Qt.AlignLeft)
-        entryLabel = QLabel("Image: ")
-        entryLabel.setBuddy(self.qptiffEntry)
-        entryLabel.setAlignment(Qt.AlignCenter)
-        entryLabel.setMaximumWidth(600)
+        # entryLabel = QLabel("Image: ")
+        # entryLabel.setBuddy(self.qptiffEntry)
+        # entryLabel.setAlignment(Qt.AlignCenter)
+        # entryLabel.setMaximumWidth(600)
 
         self.dataEntry = QLineEdit()  # Put retrieved previous answer here
         self.dataEntry.setPlaceholderText('Enter path to .csv')
         self.dataEntry.setFixedWidth(800)
         # dataEntry.setAlignment(Qt.AlignLeft)
-        dataEntryLabel = QLabel("Object Data: ")
-        dataEntryLabel.setBuddy(self.dataEntry)
-        dataEntryLabel.setAlignment(Qt.AlignCenter)
-        dataEntryLabel.setMaximumWidth(600)
+        # dataEntryLabel = QLabel("Object Data: ")
+        # dataEntryLabel.setBuddy(self.dataEntry)
+        # dataEntryLabel.setAlignment(Qt.AlignCenter)
+        # dataEntryLabel.setMaximumWidth(600)
 
         self.previewObjectDataButton = QPushButton("Choose Data")
         self.previewImageDataButton = QPushButton("Choose Image")
@@ -152,10 +298,10 @@ class ViewerPresets(QDialog):
         self.viewSettingsEntry.setPlaceholderText('Enter path to a .viewsettings file (optional)')
         self.viewSettingsEntry.setFixedWidth(800)
 
-        viewSettingsLabel = QLabel("View Settings: ")
-        viewSettingsLabel.setBuddy(self.viewSettingsEntry)
-        viewSettingsLabel.setAlignment(Qt.AlignCenter)
-        viewSettingsLabel.setMaximumWidth(600)
+        # viewSettingsLabel = QLabel("View Settings: ")
+        # viewSettingsLabel.setBuddy(self.viewSettingsEntry)
+        # viewSettingsLabel.setAlignment(Qt.AlignCenter)
+        # viewSettingsLabel.setMaximumWidth(600)
 
         # Push button to start reading image data and start up napari by remotely executing main method of main script
         self.findDataButton = QPushButton("Load images into viewer")
@@ -172,6 +318,8 @@ class ViewerPresets(QDialog):
         # Menu bar
         self.menubar = QMenuBar()
         pref = self.menubar.addMenu('Preferences')
+        scoring = QAction("Modify scoring decisions and colors", self)
+        scoring.setShortcut("Ctrl+P")
         manual = QAction("Open the manual", self)
         manual.setShortcut("Ctrl+M")
         reset = QAction("Reset GUI to defaults", self)
@@ -179,7 +327,7 @@ class ViewerPresets(QDialog):
         github = QAction("View source code",self)
         errors = QAction("Check error logs",self)
         errors.setShortcut("Ctrl+E")
-        pref.addActions((manual,reset, errors, github))
+        pref.addActions((scoring,manual,reset, errors, github))
         pref.triggered[QAction].connect(self.process_menu_action)
 
         topLayout = QGridLayout()
@@ -187,12 +335,12 @@ class ViewerPresets(QDialog):
         topLayout.addWidget(cc_logo,0,0)
         topLayout.addWidget(titleLabel,0,1, 1,2, Qt.AlignLeft)
         topLayout.setSpacing(20)
-        topLayout.addWidget(entryLabel,1,0,1,0)
+        # topLayout.addWidget(entryLabel,1,0,1,0)
         topLayout.addWidget(self.qptiffEntry,1,1)
         topLayout.addWidget(self.previewImageDataButton,1,2)
-        topLayout.addWidget(dataEntryLabel,2,0,1,0)
+        # topLayout.addWidget(dataEntryLabel,2,0,1,0)
         topLayout.addWidget(self.dataEntry,2,1)
-        topLayout.addWidget(viewSettingsLabel,3,0,1,0)
+        # topLayout.addWidget(viewSettingsLabel,3,0,1,0)
         topLayout.addWidget(self.previewObjectDataButton,2,2)
         topLayout.addWidget(self.viewSettingsEntry,3,1)
         # topLayout.addWidget(self.findDataButton,2,1)
@@ -224,8 +372,16 @@ class ViewerPresets(QDialog):
             self.prefillObjectData(fetch=False)
         self.clearFocus()
 
+    
+
+    def change_scoring_decisions(self):
+        scoring = EditScoringDecisions(self.app, self.userInfo)
+        scoring.exec()
+
     def process_menu_action(self,q):
-        if 'manual' in q.text().lower():
+        if "scoring decisions" in q.text().lower():
+            self.change_scoring_decisions()
+        elif 'manual' in q.text().lower():
             try:
                 # print(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
                 os.startfile(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
@@ -1032,13 +1188,21 @@ class ViewerPresets(QDialog):
         self._append_status('<font color="#7dbc39">  Done. </font>')
         self._append_status_br('Validating chosen annotations and phenotypes...')
         if self._validate_names():
-            self._append_status('<font color="#7dbc39">  Done. </font>')
-            df = self.assign_phenotype_statuses_to_sheet(df)
-            df = self.assign_annotation_statuses_to_sheet(df)
             try:
                 # self._append_status_br('Saving data back to file...')
                 # df.to_csv(self.userInfo.objectDataPath,index=False)
                 # self._append_status('<font color="#7dbc39">  Done. </font>')
+                for call_type in reversed(self.userInfo.statuses.keys()):
+                    try:
+                        df[f"Validation | {call_type}"]
+                    except KeyError:
+                        if call_type == 'Unseen':
+                            df.insert(8,f"Validation | {call_type}", 1)
+                        else:
+                            df.insert(8,f"Validation | {call_type}", 0)  
+                df = self.assign_phenotype_statuses_to_sheet(df)
+                df = self.assign_annotation_statuses_to_sheet(df)
+                self._append_status('<font color="#7dbc39">  Done. </font>')
                 self.userInfo.objectDataFrame = df
 
                 return 'Passed'

@@ -21,7 +21,7 @@ from matplotlib import colors as mplcolors # Necessary, do not remove
 import copy
 import time
 import store_and_load
-import custom_maps # Necessary, do not remove
+import custom_color_functions # Necessary, do not remove
 from math import ceil
 from PIL import Image, ImageFont, ImageDraw
 from re import sub
@@ -42,7 +42,7 @@ for colormap in cell_colors:
     # print(f'cmap: {colormap}')
     if colormap == 'gray': continue
     if colormap == 'pink': colormap = 'Pink'
-    exec(f'my_map = custom_maps.create_{colormap}_lut()')
+    exec(f'my_map = custom_color_functions.create_{colormap}_lut()')
     exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
     exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
 # print(f'\n---------My colormaps are now {plt.colormaps()}--------\n')
@@ -76,7 +76,7 @@ RAW_PYRAMID=None
 ALL_CUSTOM_WIDGETS = {}
 RASTERS = None
 NO_LABEL_BOX = False
-STATUS_COLORS = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red" }
+STATUS_COLORS = {}
 STATUSES_TO_HEX = store_and_load.STATUSES_HEX
 STATUSES_RGBA = {}
 UPDATED_CHECKBOXES = []
@@ -210,7 +210,7 @@ def toggle_absorption():
             # elif "Absorption" in layer.name:
             #     layer.visible = False
             #     continue
-            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[layer.name.split()[1]])
+            layer.colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[layer.name.split()[1]])
             layer.blending = 'Additive'
     else:
         SESSION.absorption_mode = True
@@ -228,7 +228,7 @@ def toggle_absorption():
             #         im[:,:] = [255,255,255,255]
             #         layer.data = im.astype(np.uint8)
             #     continue
-            layer.colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[layer.name.split()[1]]+' inverse')
+            layer.colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[layer.name.split()[1]]+' inverse')
             layer.blending = 'Minimum'
     if not SESSION.mode == "Context":
         #TODO
@@ -776,15 +776,15 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
             continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
         if SESSION.absorption_mode:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'minimum',
-                 colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse'), scale = sc, interpolation="linear", visible =gal_vis)
+                 colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse'), scale = sc, interpolation="linear", visible =gal_vis)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'minimum',
-                 colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse'), scale = sc, interpolation="linear", visible=mult_vis)
+                 colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse'), scale = sc, interpolation="linear", visible=mult_vis)
             
         else:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'additive',
-                 colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]), scale = sc, interpolation="linear", visible=gal_vis)
+                 colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[fluor]), scale = sc, interpolation="linear", visible=gal_vis)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
-                 colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]), scale = sc, interpolation="linear", visible=mult_vis)
+                 colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[fluor]), scale = sc, interpolation="linear", visible=mult_vis)
     # if composite_only:
 
     features = {'cid': cid_list}
@@ -1099,188 +1099,49 @@ def attach_functions_to_viewer(viewer):
             pgc.setCurrentText(SESSION.cell_under_mouse['Layer'])
             pge = ALL_CUSTOM_WIDGETS['page cell id']
             pge.setText(str(SESSION.cell_under_mouse['cid']))
-        
 
-    @viewer.bind_key('Control-c')
-    @viewer.bind_key('Shift-c')
-    def set_all_unseen(viewer):
-        if SESSION.mode == "Context": return None
-        next_status = 'Unseen'
-        
-        change_status_display_forAll(next_status)
+    ''' Dynamically make new functions that can change scoring decisions with a custom keypress. This
+        will allow the user to choose their own scoring decisions, colors, and keybinds'''
+    def create_score_funcs(scoring_decision, keybind):
+        @viewer.bind_key(keybind)
+        def set_score(viewer):
+            if SESSION.mode == "Context": return None
+            if SESSION.mode == "Context": 
+                cell = SESSION.cell_under_mouse
+                if cell is None:
+                    return False # leave if the mouse is not near a cell (not sure that this could even happen)
+                cell_name = f"{cell['Layer']} {cell['cid']}"     
+            else:
+                cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
+                if val is None:
+                    return None
+            
+            change_status_display(cell_name, scoring_decision)
 
-        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-        if val is None:
-            return None
-        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
-        vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
-        VIEWER.status = ">".join(vstatus_list)
- 
-    @viewer.bind_key('c')
-    def set_unseen(viewer):
-        if SESSION.mode == "Context": return None
-        next_status = 'Unseen'
-        if SESSION.mode == "Context": 
-            cell = SESSION.cell_under_mouse
-            if cell is None:
-                return False # leave if the mouse is not near a cell (not sure that this could even happen)
-            cell_name = f"{cell['Layer']} {cell['cid']}"     
-        else:
+            # change color of viewer status
+            vstatus_list = copy.copy(VIEWER.status).split('>')
+            vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
+            VIEWER.status = ">".join(vstatus_list)
+        @viewer.bind_key(f'Control-{keybind}')
+        @viewer.bind_key(f'Shift-{keybind}')
+        def set_scoring_all(viewer):
+            if SESSION.mode == "Context": return None
+            
+            change_status_display_forAll(scoring_decision)
+
             cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
             if val is None:
                 return None
-        
-        change_status_display(cell_name, next_status)
+            set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
+            vstatus_list = copy.copy(VIEWER.status).split('>')
+            vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
+            VIEWER.status = ">".join(vstatus_list)
+        return set_score, set_scoring_all
 
-        # change color of viewer status
-        vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
-        VIEWER.status = ">".join(vstatus_list)
-
-    @viewer.bind_key('Control-v')
-    @viewer.bind_key('Shift-v')
-    def set_all_nr(viewer):
-        if SESSION.mode == "Context": return None
-        next_status = 'Needs review'
-        
-        change_status_display_forAll(next_status)
-
-        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-        if val is None:
-            return None
-        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
-        vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
-        VIEWER.status = ">".join(vstatus_list)
-
-    @viewer.bind_key('v')
-    def set_nr(viewer):
-        if SESSION.mode == "Context": return None
-        next_status = 'Needs review'
-        if SESSION.mode == "Context": 
-            cell = SESSION.cell_under_mouse
-            if cell is None:
-                return False # leave if the mouse is not near a cell (not sure that this could even happen)
-            cell_name = f"{cell['Layer']} {cell['cid']}"     
-        else:
-            cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-            if val is None:
-                return None
-
-        change_status_display(cell_name, next_status)
-
-        # change color of viewer status
-        vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
-        VIEWER.status = ">".join(vstatus_list)
-
-    @viewer.bind_key('Control-b')
-    @viewer.bind_key('Shift-b')
-    def set_all_confirmed(viewer):
-        if SESSION.mode == "Context": return None
-        next_status = 'Confirmed'
-        
-        change_status_display_forAll(next_status)
-
-        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-        if val is None:
-            return None
-        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
-        vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
-        VIEWER.status = ">".join(vstatus_list)
-
-    @viewer.bind_key('b')
-    def set_confirmed(viewer):
-        if SESSION.mode == "Context": return None
-        next_status = 'Confirmed'
-        if SESSION.mode == "Context": 
-            cell = SESSION.cell_under_mouse
-            if cell is None:
-                return False # leave if the mouse is not near a cell (not sure that this could even happen)
-            cell_name = f"{cell['Layer']} {cell['cid']}"     
-        else:
-            cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-            if val is None:
-                return None
-
-        change_status_display(cell_name, next_status)
-        # change color of viewer status
-        vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
-        VIEWER.status = ">".join(vstatus_list)
-
-    @viewer.bind_key('Control-n')
-    @viewer.bind_key('Shift-n')
-    def set_all_rejected(viewer):
-        if SESSION.mode == "Context": return None
-        next_status = 'Rejected'
-        
-        change_status_display_forAll(next_status)
-
-        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-        if val is None:
-            return None
-        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
-        vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
-        VIEWER.status = ">".join(vstatus_list)
-
-    @viewer.bind_key('n')
-    def set_rejected(viewer):
-        if SESSION.mode == "Context": return None
-        next_status = 'Rejected'
-        if SESSION.mode == "Context": 
-            cell = SESSION.cell_under_mouse
-            if cell is None:
-                return False # leave if the mouse is not near a cell (not sure that this could even happen)
-            cell_name = f"{cell['Layer']} {cell['cid']}"     
-        else:
-            cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-            if val is None:
-                return None
-        change_status_display(cell_name, next_status)
-        # change color of viewer status
-        vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
-        VIEWER.status = ">".join(vstatus_list)
-
-    @viewer.bind_key('Control-m')
-    @viewer.bind_key('Shift-m')
-    def set_all_interesting(viewer):
-        if SESSION.mode == "Context": return None
-        next_status = 'Interesting'
-        
-        change_status_display_forAll(next_status)
-
-        cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-        if val is None:
-            return None
-        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
-        vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
-        VIEWER.status = ">".join(vstatus_list)
-
-
-    @viewer.bind_key('m')
-    def set_interesting(viewer):
-        if SESSION.mode == "Context": return None
-        next_status = 'Interesting'
-        if SESSION.mode == "Context": 
-            cell = SESSION.cell_under_mouse
-            if cell is None:
-                return False # leave if the mouse is not near a cell (not sure that this could even happen)
-            cell_name = f"{cell['Layer']} {cell['cid']}"     
-        else:
-            cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-            if val is None:
-                return None
-        change_status_display(cell_name, next_status)
-        # change color of viewer status
-        vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
-        VIEWER.status = ">".join(vstatus_list)
+    for scoring_decision, keybind in userInfo.statuses.items():
+        score_name = f'{scoring_decision}_func'
+        score_all_name = f"{scoring_decision}_all_func"
+        exec(f'globals()["{score_name}"], globals()["{score_all_name}"] = create_score_funcs("{scoring_decision}","{keybind}")')
 
     @viewer.bind_key('l')
     def load_context_mode(viewer):
@@ -1530,7 +1391,7 @@ def add_custom_colors():
     for colormap in cell_colors:
         if colormap == 'gray': continue
         elif colormap =='pink': colormap='Pink'
-        exec(f'my_map = custom_maps.create_{colormap}_lut()')
+        exec(f'my_map = custom_color_functions.create_{colormap}_lut()')
         exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
         exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
     return True
@@ -2031,7 +1892,7 @@ def main(preprocess_class = None):
             print(f"\nAdding full size {fluor} image")
             pyramid = [da.from_zarr(zs, n)[i] for n in range(6) ] #TODO how to know how many pyramid layers?
             viewer.add_image(pyramid, name = f'Context {fluor}', 
-                        blending = 'additive', colormap = custom_maps.retrieve_cm(CHANNEL_ORDER[fluor]),
+                        blending = 'additive', colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[fluor]),
                         interpolation = "linear", scale=sc, visible = False)
         
         # Set adjustment settings to their default now that all images are loaded

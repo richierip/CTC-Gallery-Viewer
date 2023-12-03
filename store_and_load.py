@@ -13,20 +13,19 @@ import pickle
 import copy
 import pandas as pd
 from typing import Callable
+from PIL import ImageColor
 
 CELL_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'cyan', 'pink'] # List of colors available to use as colormaps
-DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7 # Each fluor will be assigned a number that is used to represent it's position in the image array
 CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF"] # List of String names for fluors the user wants to display  
-CHANNELS = [DAPI, OPAL570, OPAL690, OPAL480, OPAL620, OPAL780, OPAL520, AF] # List of int variables (same information as above)
 
 # Currently in the default Opal Motif order. Maybe could change in the future? So use this
 #   variably to determine the order of filters so the software knows which columns in the data
 #   to use. 
 CHANNEL_ORDER = {'DAPI': 'gray', 'OPAL570': 'purple', 'OPAL690': 'blue', 'OPAL480': 'green', 'OPAL620': 'orange',
   'OPAL780': 'red', 'OPAL520': 'yellow', 'AF': 'cyan'} # mappings of fluors to user selected colors. Order is also significant, represents image data channel order
-STATUSES = {"Unseen":"gray", "Needs review":"bop orange", "Confirmed":"green", "Rejected":"red", "Interesting": "lavender" }
-STATUSES_RGBA = {"Unseen":(120,120,120,255), "Needs review":(255,127,80,255), "Confirmed":(60,179,113, 255), "Rejected":(215,40,40, 255), "Interesting": (190, 125, 219, 255) }
-STATUSES_HEX = {'Confirmed':'#00ff00', 'Rejected':'#ff0000', 'Needs review':'#ffa000', "Interesting":"#be7ddb", "Unseen":'#787878'} # A mapping of statuses to the color used to represent them
+STATUSES = {"Unseen":"c", "Needs review":"v", "Confirmed":"b", "Rejected":"n", "Interesting": "m"}
+STATUSES_HEX = {"Unseen":'#787878', 'Needs review':'#ffa000', 'Confirmed':'#00ff00', 'Rejected':'#ff0000',  "Interesting":"#be7ddb"} # A mapping of statuses to the color used to represent them
+
 VIEW_SETTINGS = {"DAPI gamma": 0.5, "OPAL570 gamma": 0.5, "OPAL690 gamma": 0.5, "OPAL480 gamma": 0.5,
                   "OPAL620 gamma": 0.5, "OPAL780 gamma": 0.5, "OPAL520 gamma": 0.5, 
                   "AF gamma": 0.5,"Sample AF gamma": 0.5,"Autofluorescence gamma": 0.5,
@@ -95,9 +94,10 @@ class userPresets:
         self.page_size = page_size # Integer - How many cells should be displayed per page
         self.global_sort = global_sort # String - Header to use to sort the object data. Default is cell ID (sheet is usually pre-sorted like this)
         self.cells_per_row = cells_per_row # Int - how many cells should be placed in a row before wrapping to the next (multichannel mode only)
-        self.statuses = copy.copy(STATUSES) # Dict of statuses and string names of color mappings, e.g. {'status A':'red'}
-        self.statuses_rgba = copy.copy(STATUSES_RGBA) # Dict of statuses and RGBA tuples color mappings, e.g. {'status A':(255,0,0,255)}
+        self.statuses = copy.copy(STATUSES) # Dict of statuses and string keybinds, e.g. {'status A':'a'}
         self.statuses_hex = copy.copy(STATUSES_HEX) # Dict of statuses and HEX codes of color mappings, e.g. {'status A':'#ff0000'}
+        self.statuses_rgba = {key: ImageColor.getcolor(val, "RGBA") for key,val in self.statuses_hex.items()} # Dict of statuses and RGBA tuples color mappings, e.g. {'status A':(255,0,0,255)}
+        self.available_statuses_keybinds = ["q","w","e","t","y","u","o","d","f","j","k","l","z","x",",",".","/","[","]",";","'"]
         self.view_settings = view_settings # Dict of view settings. Can change after reading from file. ex: {fluor A gamma: 0.5}
         self.view_settings_path = '' # Path to .viewsettings file. The file is a type of HALO export and will use XML formatting
         self.phenotype_mappings = {} # Dict of user selected phenotypes and their status mappings. Cells in the data of these phenotypes will be kept for viewing and assigned the given status 
@@ -107,6 +107,8 @@ class userPresets:
         self.analysisRegionsInData = False # Bool that tracks whether the object data has an 'Analysis Region' field with multiple annotations. Useful later
         self.session = sessionVariables()
 
+    def remake_rgba(self):
+        self.statuses_rgba = {key: ImageColor.getcolor(val, "RGBA") for key,val in self.statuses_hex.items()} # Dict of statuses and RGBA tuples color mappings, e.g. {'status A':(255,0,0,255)}
 
     '''
     Input: table generated from reading an xml into a dataframe with pandas
