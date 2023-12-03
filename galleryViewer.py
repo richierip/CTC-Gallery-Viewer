@@ -1517,18 +1517,36 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
             query += f"(`Analysis Region` == '{anno}') | "
         for pheno in pheno_list:
             query += f"(`{pheno}` == 1) |"
-        print(query)
+        # print(query)
         return query.rstrip(" |")
+    ''' Helper function to create a query that will filter by intensity'''
+    def _create_filter_query(filters):
+        query = ''
+        for fil in filters:
+            if ">" in fil:
+                intensity_column, fil = fil.split(">")
+                compare = ">"
+            elif "<" in fil:
+                intensity_column, fil = fil.split("<")
+                compare = "<"
+            else:
+                raise ValueError # Not the expected input
+            
+            query += f"(`{intensity_column.strip()}` {compare} {fil.strip()}) &"  
+        # print(query)
+        return query.rstrip(" &")
 
-    # #acquire 
-    print('page code start')
-    # Figure out which range of cells to get based on page number and size
+    # print('page code start')
+    # Apply filters here
     if annotations or phenotypes:
         phen_only_df = halo_export.query(_create_anno_pheno_query(annotations,phenotypes)).reset_index()
     else:
         phen_only_df = halo_export.reset_index()
+    if userInfo.filters:
+        phen_only_df = phen_only_df.query(_create_filter_query(userInfo.filters)).reset_index()
+
+    # Figure out which range of cells to get based on page number and size
     last_page = (len(phen_only_df.index) // page_size)+1
-    print(f"last page is {last_page}")
     global ALL_CUSTOM_WIDGETS
     combobox_widget =  ALL_CUSTOM_WIDGETS['page combobox']
     # combobox_widget.addItem('Page 1')
@@ -1850,11 +1868,19 @@ def main(preprocess_class = None):
         # If the user has given bad input, the function will raise a KeyError. Fail gracefully and inform the user
         preprocess_class._append_status('<font color="#f5551a">  Failed.</font>')
         if PHENOTYPES:
-            status+=f'<br><font color="#f5551a">The phenotype(s) {", ".join(str(x) for x in PHENOTYPES)} might not exist in the data, or other column names may have changed!</font>'
+            preprocess_class._append_status(f'<br><font color="#f5551a">The phenotype(s) {", ".join(str(x) for x in PHENOTYPES)} might not exist in the data, or other column names may have changed!</font>')
         if ANNOTATIONS:
-            status+=f'<br><font color="#f5551a">The annotations(s) {", ".join(str(x) for x in ANNOTATIONS)} might not exist in the data, or other column names may have changed!</font>'
+            preprocess_class._append_status(f'<br><font color="#f5551a">The annotations(s) {", ".join(str(x) for x in ANNOTATIONS)} might not exist in the data, or other column names may have changed!</font>')
         viewer.close()
         return None # allows the input GUI to continue running
+    except StopIteration as e:
+        print("StopIteration raised in extract_phenotype_xldata")
+        # Triggered by the next(cell_set.values()) call. If there are no cells to show, this happens
+        preprocess_class._append_status('<font color="#f5551a">  Failed.</font>')
+        preprocess_class._append_status(f'<br><font color="#f5551a">There are no cells to show. This could be a result of a phenotype with no positive calls, or a strict filter</font>')
+        viewer.close()
+        return None # allows the input GUI to continue running
+    
     preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
     preprocess_class._append_status_br('Initializing Napari session...')
 

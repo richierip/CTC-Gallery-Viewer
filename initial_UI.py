@@ -3,8 +3,8 @@
 import typing
 from PyQt5.QtCore import QObject, Qt, QThread, QTimer
 from PyQt5.QtGui import QIcon, QPixmap,QColor,QFont
-from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,QMainWindow, QGridLayout, QDesktopWidget, 
-                             QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QMenuBar, QAction, QFileDialog)
+from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,QMainWindow, QGridLayout, QDesktopWidget, QSizePolicy,QLayout,
+                             QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox,QDoubleSpinBox, QMenuBar, QAction, QFileDialog)
 
 import sys
 import os
@@ -46,33 +46,47 @@ WIDGET_SELECTED = None
 class StatusCombo(QComboBox):
     def __init__(self, parent, userInfo):
         super(QComboBox, self).__init__(parent)
-        
+        self.user_data = userInfo
         # self.setVisible(False)
         self.addItem("Don't assign")
         self.setItemData(0,QColor(255,255,255,255),Qt.BackgroundRole)
         self.setItemData(0,QColor(0,0,0,255),Qt.ForegroundRole)
-        for pos,status in enumerate(list(userInfo.statuses.keys())):
-            self.addItem(status)
-            self.setItemData(pos+1,QColor(*userInfo.statuses_rgba[status]),Qt.BackgroundRole)
-            self.setItemData(pos+1,QColor(0,0,0,255),Qt.ForegroundRole)
+        self.add_scoring_decisions()
+        
         self.setStyleSheet(f"background-color: rgba(255,255,255,255);color: rgb(0,0,0); selection-background-color: rgba(255,255,255,140);")
-        self.activated.connect(lambda: self.set_bg(userInfo))
+        self.activated.connect(lambda: self.set_bg(self.user_data))
+
+    def add_scoring_decisions(self):
+        for pos,status in enumerate(list(self.user_data.statuses.keys())):
+            self.addItem(status)
+            self.setItemData(pos+1,QColor(*self.user_data.statuses_rgba[status]),Qt.BackgroundRole)
+            self.setItemData(pos+1,QColor(0,0,0,255),Qt.ForegroundRole)
     
-    def set_bg(self, userInfo):
+    def reset_items(self):
+        for i in range(1,self.count()):
+            self.removeItem(1)
+        self.add_scoring_decisions()
+
+    def set_bg(self):
         status = self.currentText()
-        if status not in userInfo.statuses_rgba.keys():
+        if status not in self.user_data.statuses_rgba.keys():
             self.setStyleSheet(f"background-color: rgba(255,255,255,255);color: rgb(0,0,0); selection-background-color: rgba(255,255,255,140);")
         else:
-            self.setStyleSheet(f"background-color: rgba{userInfo.statuses_rgba[status]};color: rgb(0,0,0);selection-background-color: rgba(255,255,255,140);")
+            self.setStyleSheet(f"background-color: rgba{self.user_data.statuses_rgba[status]};color: rgb(0,0,0);selection-background-color: rgba(255,255,255,140);")
+
+
 
 class EditScoringDecisions(QDialog):
-    def __init__(self, app: QApplication, user_data: store_and_load.userPresets):
+    def __init__(self, app: QApplication, user_data: store_and_load.userPresets, widget_dict: dict[str:QComboBox]):
         super(EditScoringDecisions, self).__init__()
         self.app = app
         self.user_data = user_data
         self.statuses_hex = copy.copy(user_data.statuses_hex)
         self.statuses = copy.copy(user_data.statuses)
         self.available_statuses_keybinds = copy.copy(user_data.available_statuses_keybinds)
+        self.pheno_widget = widget_dict["pheno_widget"]
+        self.anno_widget = widget_dict["anno_widget"]
+
 
         # Arrange title bar buttons
         self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
@@ -182,6 +196,12 @@ class EditScoringDecisions(QDialog):
 
             # self.available_statuses_keybinds.remove(new_keybind)
             self.statuses_hex[new_scoring_decision] = new_color
+            try:
+                # If there is already a color and keybind for the scoring decision, need to add the keybind back to the list of available
+                # The rest will update in place
+                self.keybind_widget.addItem(self.statuses[new_scoring_decision].upper())
+            except KeyError:
+                pass
             self.statuses[new_scoring_decision] = self.keybind_widget.currentText()
             self.keybind_widget.removeItem(self.keybind_widget.currentIndex())
             self.decision_entry.clear()
@@ -193,7 +213,7 @@ class EditScoringDecisions(QDialog):
             return False
         
         x = self.statuses.popitem()
-        self.keybind_widget.insertItem(0, x[1])
+        self.keybind_widget.insertItem(0, x[1].upper())
         self.statuses_hex.popitem()
         self.make_labels()
 
@@ -202,6 +222,8 @@ class EditScoringDecisions(QDialog):
         self.user_data.statuses_hex = self.statuses_hex
         self.user_data.available_statuses_keybinds = [self.keybind_widget.itemText(i) for i in range(self.keybind_widget.count())]
         self.user_data.remake_rgba()
+        self.pheno_widget.reset_items()
+        self.anno_widget.reset_items()
         self.close()
 
 
@@ -221,7 +243,7 @@ class ViewerPresets(QDialog):
         self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
         self.setWindowFlag(Qt.WindowTitleHint,False)
         # self.setWindowFlag(Qt.WindowContextHelpButtonHint,False)
-
+        # self.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
 
         self.userInfo = store_and_load.loadObject('data/presets')
 
@@ -251,7 +273,7 @@ class ViewerPresets(QDialog):
             new_pheno_label += f'{key}<br>'
         self.userInfo.phenotype_mappings_label = new_pheno_label
 
-        new_anno_label = '<u>Annotation Layer</u><br>'
+        new_anno_label = '<u>Annotation</u><br>'
         if not self.userInfo.annotation_mappings.keys(): new_anno_label +='All'
         for key in self.userInfo.annotation_mappings:
             self.userInfo.annotation_mappings[key] = "Don't assign"
@@ -320,15 +342,21 @@ class ViewerPresets(QDialog):
         pref = self.menubar.addMenu('Preferences')
         scoring = QAction("Modify scoring decisions and colors", self)
         scoring.setShortcut("Ctrl+P")
-        manual = QAction("Open the manual", self)
-        manual.setShortcut("Ctrl+M")
         reset = QAction("Reset GUI to defaults", self)
         reset.setShortcut("Ctrl+R")
+        
+
+        pref.addActions((scoring,reset))
+        pref.triggered[QAction].connect(self.process_menu_action)
+
+        about = self.menubar.addMenu('About')
+        manual = QAction("Open the manual", self)
+        manual.setShortcut("Ctrl+M")
         github = QAction("View source code",self)
         errors = QAction("Check error logs",self)
         errors.setShortcut("Ctrl+E")
-        pref.addActions((scoring,manual,reset, errors, github))
-        pref.triggered[QAction].connect(self.process_menu_action)
+        about.addActions((manual,errors, github))
+        about.triggered[QAction].connect(self.process_menu_action)
 
         topLayout = QGridLayout()
         # topLayout.addStretch(1)
@@ -359,6 +387,7 @@ class ViewerPresets(QDialog):
         self.mainLayout.setRowStretch(2, 1)
         self.mainLayout.setColumnStretch(0, 1)
         self.mainLayout.setColumnStretch(1, 1)
+        self.mainLayout.setSizeConstraint(QLayout.SetFixedSize)
         self.setLayout(self.mainLayout)
 
         self.setWindowTitle(f"GalleryViewer v{VERSION_NUMBER}")
@@ -375,7 +404,7 @@ class ViewerPresets(QDialog):
     
 
     def change_scoring_decisions(self):
-        scoring = EditScoringDecisions(self.app, self.userInfo)
+        scoring = EditScoringDecisions(self.app, self.userInfo, {"pheno_widget":self.phenotypeStatuses,"anno_widget": self.annotationStatuses})
         scoring.exec()
 
     def process_menu_action(self,q):
@@ -555,18 +584,46 @@ class ViewerPresets(QDialog):
         self.userInfo.phenotype_mappings_label = self.phenoDisplay.text()
         self.userInfo.phenotype_mappings[pheno] = status
 
+    def addFilter(self):
+        if self.filterMarkerCombo.isVisible():
+            fil = self.filterMarkerCombo.currentText()
+            if fil == '':return None
+        else:
+            fil = self.filterMarker.text()
+            if fil == '':return None
+            self.filterMarker.clear()
+        
+        fil_compare_display = {"greater than": "&gt;", "less than": "&lt;"}[self.filterFunctionChoice.currentText()]
+        fil_compare_query= {"greater than": ">", "less than": "<"}[self.filterFunctionChoice.currentText()]
+        fil_number = self.filterNumber.value()
+
+        print(f'{fil} {fil_compare_display} {fil_number}<br>')
+        # Pass to label
+        current = self.filterDisplay.text()
+        current = current.replace("None",'')
+        self.filterDisplay.setText(current + f'{fil} {fil_compare_display} {fil_number}<br>')
+        self.userInfo.filters_label = self.filterDisplay.text()
+        self.userInfo.filters.append(f"{fil} {fil_compare_query} {fil_number}")   
+
     def reset_mappings(self):
+        #phenotype
         self.userInfo.phenotype_mappings = {}
         self.userInfo.phenotype_mappings_label = '<u>Phenotype</u><br>All'
         self.phenoDisplay.setText('<u>Phenotype</u><br>All')
+        #Annotations
         self.userInfo.annotation_mappings = {}
-        self.userInfo.annotation_mappings_label = '<u>Annotation Layer</u><br>All'
-        self.annotationDisplay.setText('<u>Annotation Layer</u><br>All')
+        self.userInfo.annotation_mappings_label = '<u>Annotation</u><br>All'
+        self.annotationDisplay.setText('<u>Annotation</u><br>All')
+        #Filters
+        self.userInfo.filters = []
+        self.userInfo.filters_label = '<u>Filters</u><br>None'
+        self.filterDisplay.setText('<u>Filters</u><br>None')
 
         # Refresh comboboxes
         if self.phenotypeCombo.isVisible() or self.annotationCombo.isVisible():
-            self.phenotypeCombo.clear()
-            self.annotationCombo.clear()
+            self.phenotypeCombo.clear() 
+            self.annotationCombo.clear() 
+            self.filterMarkerCombo.clear()
             self.prefillObjectData(fetch=False)
 
     def _log_problem(self, logpath, e):
@@ -667,6 +724,13 @@ class ViewerPresets(QDialog):
                     '% Cell Completeness', '% Completeness']
         exclude = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
                   'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
+        
+        intens_ = ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity']
+
+        include = [x for x in headers if any(f in x for f in intens_)]
+        self.filterMarker.setVisible(False)
+        self.filterMarkerCombo.setVisible(True)
+        self.filterMarkerCombo.addItems(include)
 
         for fl in possible_fluors:
             for sf in suffixes:
@@ -968,23 +1032,13 @@ class ViewerPresets(QDialog):
         # explanationLabel4.setAlignment(Qt.AlignRight)
         # explanationLabel5.setAlignment(Qt.AlignRight)
         # explanationLabel5 = QLabel("Number of cells <b>per row<b>")
-        self.phenotypeButton = QPushButton("Add Phenotype")
-        self.phenotypeButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
-        self.phenotypeButton.pressed.connect(self.addPheno)
-        self.annotationButton = QPushButton("Add Annotation Layer")
+        
+        #------------------ Annotation widgets
+        self.annotationButton = QPushButton("Add Annotation")
         self.annotationButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
         self.annotationButton.pressed.connect(self.addAnnotation)
 
-        #TODO attach previous choice here
-        self.phenotypeToGrab = QLineEdit(self.topRightGroupBox)
-        self.phenotypeToGrab.setPlaceholderText('Phenotype of Interest')
-        self.phenotypeToGrab.setFixedWidth(220)
-        self.phenotypeCombo = QComboBox(self.topRightGroupBox)
-        self.phenotypeCombo.setVisible(False)
-        self.phenotypeStatuses = StatusCombo(self.topRightGroupBox, self.userInfo)
-        
-
-        # Annotation layer select
+         # Annotation layer select
         self.annotationEdit = QLineEdit(self.topRightGroupBox)
         self.annotationEdit.setPlaceholderText('Single layer only')
         self.annotationEdit.setFixedWidth(220)
@@ -992,14 +1046,55 @@ class ViewerPresets(QDialog):
         self.annotationCombo.setVisible(False)
         self.annotationStatuses = StatusCombo(self.topRightGroupBox, self.userInfo)
 
-        # Pheno / annotation selection display label
-        self.phenoDisplay = QLabel(self.topRightGroupBox)
-        self.phenoDisplay.setText(self.userInfo.phenotype_mappings_label)
-        self.phenoDisplay.setAlignment(Qt.AlignTop)
-
+        # Pheno selection display label
         self.annotationDisplay = QLabel(self.topRightGroupBox)
         self.annotationDisplay.setText(self.userInfo.annotation_mappings_label)
         self.annotationDisplay.setAlignment(Qt.AlignTop)
+        # self.annotationDisplay.setStyleSheet("line-height:1.5; padding-left:15px; padding-right:15px; padding-top:0px")
+        self.annotationDisplay.setContentsMargins(15,0,15,0)
+
+        #---------- Phenotype widgets
+        self.phenotypeButton = QPushButton("Add Phenotype")
+        self.phenotypeButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
+        self.phenotypeButton.pressed.connect(self.addPheno)
+
+        # LineEdit / ComboBox
+        self.phenotypeToGrab = QLineEdit(self.topRightGroupBox)
+        self.phenotypeToGrab.setPlaceholderText('Phenotype of Interest')
+        self.phenotypeToGrab.setFixedWidth(220)
+        self.phenotypeCombo = QComboBox(self.topRightGroupBox)
+        self.phenotypeCombo.setVisible(False)
+        self.phenotypeStatuses = StatusCombo(self.topRightGroupBox, self.userInfo)
+       
+
+        # Pheno selection display label
+        self.phenoDisplay = QLabel(self.topRightGroupBox)
+        self.phenoDisplay.setText(self.userInfo.phenotype_mappings_label)
+        self.phenoDisplay.setAlignment(Qt.AlignTop)
+        self.phenoDisplay.setStyleSheet("line-height:1.5")
+
+        #---------- Filter widgets
+        self.filterButton = QPushButton("Add Filter")
+        self.filterButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
+        self.filterButton.pressed.connect(self.addFilter)
+
+        self.filterMarker = QLineEdit(self.topRightGroupBox)
+        self.filterMarker.setPlaceholderText('Marker')
+        self.filterMarker.setFixedWidth(220)
+        self.filterMarkerCombo = QComboBox(self.topRightGroupBox)
+        self.filterMarkerCombo.setVisible(False)
+        self.filterFunctionChoice = QComboBox(self.topRightGroupBox)
+        self.filterFunctionChoice.addItems(["greater than", "less than"])
+        self.filterNumber = QDoubleSpinBox(self.topRightGroupBox)
+        self.filterNumber.setRange(0,1000)
+       
+
+        # Pheno / annotation selection display label
+        self.filterDisplay = QLabel(self.topRightGroupBox)
+        self.filterDisplay.setText(self.userInfo.filters_label)
+        self.filterDisplay.setAlignment(Qt.AlignTop)
+        self.filterDisplay.setStyleSheet("line-height:1.5")
+
 
         # Reset button 
         self.resetButton = QPushButton('Reset choices',self.topRightGroupBox)
@@ -1053,26 +1148,32 @@ class ViewerPresets(QDialog):
 
 
         layout = QGridLayout()
-        layout.addWidget(self.phenotypeButton,0,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel0,0,0)
-        layout.addWidget(self.phenotypeToGrab,0,1,Qt.AlignTop) ; layout.addWidget(self.phenotypeCombo,0,1,Qt.AlignTop)
-        layout.addWidget(self.phenotypeStatuses,0,2,Qt.AlignTop)
-        layout.addWidget(self.annotationButton,1,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel1,1,0)
-        layout.addWidget(self.annotationEdit,1,1,Qt.AlignTop); layout.addWidget(self.annotationCombo,1,1,Qt.AlignTop)
-        layout.addWidget(self.annotationStatuses,1,2,Qt.AlignTop)
-        layout.addWidget(explanationLabel2,2,0,Qt.AlignTop)
-        layout.addWidget(self.imageSize,2,1,Qt.AlignTop)
-        layout.addWidget(self.resetButton,2,2,Qt.AlignTop)
-        layout.addWidget(explanationLabel3,3,0,Qt.AlignTop)
-        layout.addWidget(self.page_size_widget,3,1,Qt.AlignTop)
-        layout.addWidget(explanationLabel4,4,0,Qt.AlignTop)
-        layout.addWidget(self.row_size_widget,4,1,Qt.AlignTop)
-        layout.addWidget(explanationLabel5,5,0,Qt.AlignTop)
-        layout.addWidget(self.specificCellChoice,5,1,Qt.AlignTop)
-        layout.addWidget(self.specificCellAnnotationEdit,5,2,Qt.AlignTop)
-        layout.addWidget(self.specificCellAnnotationCombo,5,2,Qt.AlignTop)
-        layout.addWidget(self.global_sort_widget,6,0,1,2)
-        layout.addWidget(self.phenoDisplay,0,3,7,1)
-        layout.addWidget(self.annotationDisplay,0,4,7,1)
+        layout.addWidget(self.filterButton,0,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel0,0,0)
+        layout.addWidget(self.filterMarker,0,1,Qt.AlignTop) ; layout.addWidget(self.filterMarkerCombo,0,1,Qt.AlignTop)
+        layout.addWidget(self.filterFunctionChoice,0,2,Qt.AlignTop)
+        layout.addWidget(self.filterNumber,0,3,Qt.AlignTop)
+
+        layout.addWidget(self.phenotypeButton,1,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel0,0,0)
+        layout.addWidget(self.phenotypeToGrab,1,1,Qt.AlignTop) ; layout.addWidget(self.phenotypeCombo,1,1,Qt.AlignTop)
+        layout.addWidget(self.phenotypeStatuses,1,2,1,2,Qt.AlignTop)
+        layout.addWidget(self.annotationButton,2,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel1,1,0)
+        layout.addWidget(self.annotationEdit,2,1,Qt.AlignTop); layout.addWidget(self.annotationCombo,2,1,Qt.AlignTop)
+        layout.addWidget(self.annotationStatuses,2,2,1,2,Qt.AlignTop)
+        layout.addWidget(explanationLabel2,3,0,Qt.AlignTop)
+        layout.addWidget(self.imageSize,3,1,Qt.AlignTop)
+        layout.addWidget(self.resetButton,3,2,1,2,Qt.AlignTop)
+        layout.addWidget(explanationLabel3,4,0,Qt.AlignTop)
+        layout.addWidget(self.page_size_widget,4,1,Qt.AlignTop)
+        layout.addWidget(explanationLabel4,5,0,Qt.AlignTop)
+        layout.addWidget(self.row_size_widget,5,1,Qt.AlignTop)
+        layout.addWidget(explanationLabel5,6,0,Qt.AlignTop)
+        layout.addWidget(self.specificCellChoice,6,1,Qt.AlignTop)
+        layout.addWidget(self.specificCellAnnotationEdit,6,2,1,2,Qt.AlignTop)
+        layout.addWidget(self.specificCellAnnotationCombo,6,2,1,2,Qt.AlignTop)
+        layout.addWidget(self.global_sort_widget,7,0,1,2)
+        layout.addWidget(self.phenoDisplay,0,4,7,1)
+        layout.addWidget(self.annotationDisplay,0,5,7,1)
+        layout.addWidget(self.filterDisplay,0,6,7,1)
         # layout.setColumnStretch(3,6)
         # layout.setColumnStretch(4,6)
 
@@ -1165,8 +1266,8 @@ class ViewerPresets(QDialog):
         true_annotations = self._locate_annotations_col(path) # Find out if the data have multiple analysis regions (duplicate Cell IDs as well)
         if true_annotations is None: 
             self.annotationButton.setEnabled(False)
-            self.annotationDisplay.setText('<u>Annotation Layer</u><br>All')
-            self.userInfo.annotation_mappings_label = '<u>Annotation Layer</u><br>All'
+            self.annotationDisplay.setText('<u>Annotation</u><br>All')
+            self.userInfo.annotation_mappings_label = '<u>Annotation</u><br>All'
             self.userInfo.annotation_mappings = {}
             self.specificCellAnnotationEdit.setVisible(False)
             self.specificCellAnnotationCombo.setVisible(False)
@@ -1386,4 +1487,4 @@ if __name__ == '__main__':
     gallery = ViewerPresets(app)
     gallery.show()
     sys.exit(ensure_saving(gallery,app))
-    print("\nI should only see this after I close the viewer")
+    print("\nI should never see this.")

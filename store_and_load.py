@@ -105,6 +105,8 @@ class userPresets:
         self.annotation_mappings = {} # Dict of user selected annotations and their status mappings. Cells in the data of these annotations will be kept for viewing and assigned the given status 
         self.annotation_mappings_label = '<u>Annotation Layer</u><br>All'# String representation of the above info for displaying in a QLabel
         self.analysisRegionsInData = False # Bool that tracks whether the object data has an 'Analysis Region' field with multiple annotations. Useful later
+        self.filters = []
+        self.filters_label = '<u>Filters</u><br>None'
         self.session = sessionVariables()
 
     def remake_rgba(self):
