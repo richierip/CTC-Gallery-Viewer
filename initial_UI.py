@@ -53,7 +53,7 @@ class StatusCombo(QComboBox):
         self.add_scoring_decisions()
         
         self.setStyleSheet(f"background-color: rgba(255,255,255,255);color: rgb(0,0,0); selection-background-color: rgba(255,255,255,140);")
-        self.activated.connect(lambda: self.set_bg(self.user_data))
+        self.activated.connect(self.set_bg)
 
     def add_scoring_decisions(self):
         for pos,status in enumerate(list(self.user_data.statuses.keys())):
@@ -128,6 +128,7 @@ class ChannelDialog(QDialog):
         self.layout = QGridLayout()
         self.layout.addWidget(self.channelGroup, 0 ,0)
         self.layout.addWidget(self.buttonGroup, 1,0)
+        self.layout.setSizeConstraint(QLayout.SetFixedSize) # Allows window to resize to shrink when widgets are removed
         self.setLayout(self.layout)
         self.show()
     
@@ -195,22 +196,24 @@ class ChannelDialog(QDialog):
         if len(self.channelColors) <=1:
             return False
         
-        x = self.channelColors.pop()
+        x = self.channelColors.popitem()
         self.make_labels()
         self.position_spin.setRange(0,len(self.channelColors))
         self.position_spin.setValue(len(self.channelColors))
 
     def save(self):
         self.user_data.channelColors = self.channelColors
+        self.user_data.channels = list(self.channelColors.keys())
+        self.user_data.channelOrder = dict(zip(self.user_data.channels,range(len(self.user_data.channels))))
         self.user_data.remake_viewsettings()
+
         # self.user_data.remake_channelOrder()
         #TODO set channel widgets in main UI
-        
 
         for i in reversed(range(self.check_layout.count())): 
             self.check_layout.itemAt(i).widget().setParent(None)
         self.check_layout, self.check_group = self.check_group_create(self.check_layout, self.check_group)
-        # self.check_group.update()
+        self.check_group.update()
         self.app.processEvents()
         self.close()
 
@@ -272,6 +275,7 @@ class ScoringDialog(QDialog):
         self.layout = QGridLayout()
         self.layout.addWidget(self.decisionBox, 0 ,0)
         self.layout.addWidget(self.buttonBox, 1,0)
+        self.layout.setSizeConstraint(QLayout.SetFixedSize) # Allows window to resize to shrink when widgets are removed
         self.setLayout(self.layout)
         self.show()
 
@@ -560,7 +564,7 @@ class ViewerPresets(QDialog):
                 errors += len(files)
             self.status_label.setVisible(True)
             status =f'Found {errors} error logs! If you are having trouble, try resetting the viewer\'s saved preferences (ctrl+R) and restarting the program.<br> '
-            status += 'Previewing image and object csv metadata can fix issues too.<br> If problems persist, share these logs with Peter at prichieri@mgh.harvard.edu.'
+            status += 'Double check that your image and object data file contents match what is listed in Preferences.<br> If problems persist, share the latest log with Peter at prichieri@mgh.harvard.edu.'
             self.status_label.setText(status)
 
 
@@ -862,8 +866,10 @@ class ViewerPresets(QDialog):
             regions = list(pd.read_csv(self.userInfo.objectDataPath, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique()) 
             print(regions)
             self.annotationCombo.setVisible(True); self.annotationEdit.setVisible(False)
+            self.annotationCombo.clear() ;  self.annotationEdit.clear() # Remove anything that's already there
             self.annotationCombo.addItems(regions)
             self.specificCellAnnotationCombo.setVisible(True); self.specificCellAnnotationEdit.setVisible(False)
+            self.specificCellAnnotationCombo.clear() ; self.specificCellAnnotationEdit.clear() # Remove anything that is there
             self.specificCellAnnotationCombo.addItems(regions)
             if self.userInfo.specific_cell is not None:
                 try:
@@ -1140,7 +1146,7 @@ class ViewerPresets(QDialog):
         explanationLabel2 = QLabel("Cell image size in <b>pixels</b>")
         explanationLabel3 = QLabel("Number of cells <b>per page<b>")
         explanationLabel4 = QLabel("Number of cells <b>per row<b>")
-        explanationLabel5 = QLabel("Load the page with this <b>Cell ID<b>")
+        explanationLabel5 = QLabel("Load page with <b>Cell ID<b>")
         # self.explanationLabel0.setAlignment(Qt.AlignRight)
         # self.explanationLabel1.setAlignment(Qt.AlignRight)
         # explanationLabel2.setAlignment(Qt.AlignRight)

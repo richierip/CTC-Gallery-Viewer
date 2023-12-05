@@ -761,7 +761,7 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
     # viewer.add_image(SESSION.page_status_layers["Gallery"].astype(np.uint8), name='Gallery Status Layer', interpolation='linear', scale = sc, visible=gal_vis)
     # viewer.add_image(SESSION.page_status_layers["Multichannel"].astype(np.uint8), name='Multichannel Status Layer', interpolation='linear', scale = sc, visible=mult_vis)
     # viewer.layers.selection.active = viewer.layers["Status Layer"]
-
+    
     VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
     
 
@@ -1083,13 +1083,16 @@ def attach_functions_to_viewer(viewer):
         score_all_name = f"{scoring_decision}_all_func"
         exec(f'globals()["{score_name}"], globals()["{score_all_name}"] = create_score_funcs("{scoring_decision}","{keybind}")')
 
-    @viewer.bind_key('l')
-    def load_context_mode(viewer):
-        print("\nIn context mode fxn")
-        if SESSION.mode == "Context":
-            toggle_session_mode_catch_exceptions(SESSION.last_mode)
-        else:
-            toggle_session_mode_catch_exceptions("Context")
+    @viewer.mouse_drag_callbacks.append
+    def load_context_mode(viewer, event):
+        print(event.modifiers)
+        if "Control" in event.modifiers:
+
+            print("\nIn context mode fxn")
+            if SESSION.mode == "Context":
+                toggle_session_mode_catch_exceptions(SESSION.last_mode)
+            else:
+                toggle_session_mode_catch_exceptions("Context")
 
 
     @viewer.bind_key('s')
@@ -1567,7 +1570,11 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
         center_x = int((row['XMax']+row['XMin'])/2)
         center_y = int((row['YMax']+row['YMin'])/2)
         vals = row[validation_cols]
-        validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation | ", "")
+        try:
+            validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation | ", "")
+        except IndexError:
+            # row has no validation call (all zeroes). Assign to Unseen
+            validation_call = "Unseen"
 
         tumor_cell_XYs[ckey] = {'Layer':layer,"cid": cid,"center_x": center_x,'center_y': center_y,
                                 'validation_call': validation_call, 'XMax' : row['XMax'],'XMin':row['XMin'],
@@ -1717,8 +1724,7 @@ def main(preprocess_class = None):
     local_sort = None
     if GLOBAL_SORT is None:
         intensity_sort_box.setCurrentIndex(0) # Set "sort by CID" to be the default
-    else :
-        print(f"******************ELSE {local_sort}")
+    else:
         local_sort = GLOBAL_SORT
         intensity_sort_box.setCurrentText(f"Sort page by {local_sort}")
     
@@ -1805,7 +1811,13 @@ def main(preprocess_class = None):
 
     set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 1.0 gamma, 0 black in, 255 white in
     attach_functions_to_viewer(viewer)
-    add_layers(viewer,pyramid,tumor_cell_XYs, int(userInfo.imageSize/2))
+    try:
+        add_layers(viewer,pyramid,tumor_cell_XYs, int(userInfo.imageSize/2))
+    except IndexError:
+        preprocess_class._append_status('<font color="#f5551a">  Failed.<br>A requested image channel does not exist in the data!</font>')
+        # preprocess_class.findDataButton.setEnabled(True)
+        viewer.close()
+        return False
     #TODO
     #Enable scale bar
     if SESSION.image_scale:
