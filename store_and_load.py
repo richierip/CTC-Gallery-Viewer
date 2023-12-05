@@ -14,27 +14,31 @@ import copy
 import pandas as pd
 from typing import Callable
 from PIL import ImageColor
+from itertools import product
 
 CELL_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'cyan', 'pink'] # List of colors available to use as colormaps
-CHANNELS_STR = ["DAPI", "OPAL480", "OPAL520", "OPAL570", "OPAL620", "OPAL690", "OPAL780", "AF"] # List of String names for fluors the user wants to display  
+CHANNELS_STR = ["DAPI", "Opal 570", "Opal 690", "Opal 480","Opal 620","Opal 780", "Opal 520", "AF"] # List of String names for fluors the user wants to display  
 
 # Currently in the default Opal Motif order. Maybe could change in the future? So use this
 #   variably to determine the order of filters so the software knows which columns in the data
 #   to use. 
-CHANNEL_ORDER = {'DAPI': 'gray', 'OPAL570': 'purple', 'OPAL690': 'blue', 'OPAL480': 'green', 'OPAL620': 'orange',
-  'OPAL780': 'red', 'OPAL520': 'yellow', 'AF': 'cyan'} # mappings of fluors to user selected colors. Order is also significant, represents image data channel order
+# CHANNEL_ORDER = {'DAPI': 'gray', 'OPAL570': 'purple', 'OPAL690': 'blue', 'OPAL480': 'green', 'OPAL620': 'orange',
+#   'OPAL780': 'red', 'OPAL520': 'yellow', 'AF': 'cyan'} # mappings of fluors to user selected colors. Order is also significant, represents image data channel order
 STATUSES = {"Unseen":"c", "Needs review":"v", "Confirmed":"b", "Rejected":"n", "Interesting": "m"}
 STATUSES_HEX = {"Unseen":'#787878', 'Needs review':'#ffa000', 'Confirmed':'#00ff00', 'Rejected':'#ff0000',  "Interesting":"#be7ddb"} # A mapping of statuses to the color used to represent them
 
-VIEW_SETTINGS = {"DAPI gamma": 0.5, "OPAL570 gamma": 0.5, "OPAL690 gamma": 0.5, "OPAL480 gamma": 0.5,
-                  "OPAL620 gamma": 0.5, "OPAL780 gamma": 0.5, "OPAL520 gamma": 0.5, 
-                  "AF gamma": 0.5,"Sample AF gamma": 0.5,"Autofluorescence gamma": 0.5,
-                  "DAPI black-in": 0, "OPAL570 black-in": 0, "OPAL690 black-in": 0, "OPAL480 black-in": 0,
-                  "OPAL620 black-in": 0, "OPAL780 black-in": 0, "OPAL520 black-in": 0, 
-                  "AF black-in": 0,"Sample AF black-in": 0,"Autofluorescence black-in": 0,
-                  "DAPI white-in": 255, "OPAL570 white-in": 255, "OPAL690 white-in": 255, "OPAL480 white-in": 255,
-                  "OPAL620 white-in": 255, "OPAL780 white-in": 255, "OPAL520 white-in": 255, 
-                  "AF white-in": 255,"Sample AF white-in": 255,"Autofluorescence white-in": 255}
+
+vs_list = [f"{x[0]} {x[1]}" for x in product(CHANNELS_STR, ['Gamma', 'white-in', 'black-in'])]
+VIEW_SETTINGS = {v:[0.5, 255, 0][i%3] for i,v in enumerate(vs_list)}
+# VIEW_SETTINGS = {"DAPI gamma": 0.5, "OPAL570 gamma": 0.5, "OPAL690 gamma": 0.5, "OPAL480 gamma": 0.5,
+#                   "OPAL620 gamma": 0.5, "OPAL780 gamma": 0.5, "OPAL520 gamma": 0.5, 
+#                   "AF gamma": 0.5,"Sample AF gamma": 0.5,"Autofluorescence gamma": 0.5,
+#                   "DAPI black-in": 0, "OPAL570 black-in": 0, "OPAL690 black-in": 0, "OPAL480 black-in": 0,
+#                   "OPAL620 black-in": 0, "OPAL780 black-in": 0, "OPAL520 black-in": 0, 
+#                   "AF black-in": 0,"Sample AF black-in": 0,"Autofluorescence black-in": 0,
+#                   "DAPI white-in": 255, "OPAL570 white-in": 255, "OPAL690 white-in": 255, "OPAL480 white-in": 255,
+#                   "OPAL620 white-in": 255, "OPAL780 white-in": 255, "OPAL520 white-in": 255, 
+#                   "AF white-in": 255,"Sample AF white-in": 255,"Autofluorescence white-in": 255}
 
 class sessionVariables:
     ''' Stores variables that will only last for the duration of a single session'''
@@ -79,18 +83,19 @@ class userPresets:
     variables above.) '''
 
     def __init__(self, channels = copy.copy(CHANNELS_STR), qptiff_path = None, 
-                phenotype = None, imageSize = 100, specific_cell = None, 
-                channelOrder = CHANNEL_ORDER, page_size = 56, global_sort = "Sort object table by Cell Id",
-                cells_per_row = 8, statuses = None, view_settings = copy.copy(VIEW_SETTINGS)):
+                phenotype = None, imageSize = 100, specific_cell = None, page_size = 56, global_sort = "Sort object table by Cell Id",
+                cells_per_row = 8, statuses = None, ):
         self.qptiff_path = qptiff_path # String - image path
         self.last_system_folder_visited = "C:/"
         self.objectDataPath = '' # String - object data path
         self.objectDataFrame = None # Pandas DataFrame created using read_csv. Storing this saves time when wanting the df later
         self.imageSize = imageSize # Int - size of EACH punchout around a cell
         self.channels = channels # String array - user choice for channels to read and display
-        self.UI_color_display = copy.copy(CELL_COLORS) # keep track of user selected colors for fluors
+        self.active_channels = channels
         self.specific_cell = specific_cell # Dictionary of the format {'ID': (int),'Annotation Layer': (str)}, or None 
-        self.channelOrder = channelOrder #String array - Order of multichannel data found in the image
+        self.available_colors = copy.copy(CELL_COLORS)
+        self.channelColors = dict(zip(channels,CELL_COLORS)) #String array - Order of multichannel data found in the image
+        self.channelOrder = dict(zip(channels,range(len(channels))))
         self.page_size = page_size # Integer - How many cells should be displayed per page
         self.global_sort = global_sort # String - Header to use to sort the object data. Default is cell ID (sheet is usually pre-sorted like this)
         self.cells_per_row = cells_per_row # Int - how many cells should be placed in a row before wrapping to the next (multichannel mode only)
@@ -98,16 +103,34 @@ class userPresets:
         self.statuses_hex = copy.copy(STATUSES_HEX) # Dict of statuses and HEX codes of color mappings, e.g. {'status A':'#ff0000'}
         self.statuses_rgba = {key: ImageColor.getcolor(val, "RGBA") for key,val in self.statuses_hex.items()} # Dict of statuses and RGBA tuples color mappings, e.g. {'status A':(255,0,0,255)}
         self.available_statuses_keybinds = ["q","w","e","t","y","u","o","d","f","j","k","l","z","x",",",".","/","[","]",";","'"]
-        self.view_settings = view_settings # Dict of view settings. Can change after reading from file. ex: {fluor A gamma: 0.5}
+        self.view_settings = self.remake_viewsettings(pass_value=True) # Dict of view settings. Can change after reading from file. ex: {fluor A gamma: 0.5}
         self.view_settings_path = '' # Path to .viewsettings file. The file is a type of HALO export and will use XML formatting
         self.phenotype_mappings = {} # Dict of user selected phenotypes and their status mappings. Cells in the data of these phenotypes will be kept for viewing and assigned the given status 
-        self.phenotype_mappings_label = '<u>Phenotype</u><br>All' # String representation of the above info for displaying in a QLabel
+        self.phenotype_mappings_label = '<u>Phenotypes</u><br>All' # String representation of the above info for displaying in a QLabel
         self.annotation_mappings = {} # Dict of user selected annotations and their status mappings. Cells in the data of these annotations will be kept for viewing and assigned the given status 
-        self.annotation_mappings_label = '<u>Annotation Layer</u><br>All'# String representation of the above info for displaying in a QLabel
+        self.annotation_mappings_label = '<u>Annotations</u><br>All'# String representation of the above info for displaying in a QLabel
         self.analysisRegionsInData = False # Bool that tracks whether the object data has an 'Analysis Region' field with multiple annotations. Useful later
         self.filters = []
         self.filters_label = '<u>Filters</u><br>None'
         self.session = sessionVariables()
+        self.possible_fluors_in_data = ['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence']
+        self.non_phenotype_fluor_suffixes_in_data = ['Positive Classification', 'Positive Nucleus Classification','Positive Cytoplasm Classification',
+                    'Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity', '% Nucleus Completeness', '% Cytoplasm Completeness',
+                    '% Cell Completeness', '% Completeness']
+        self.non_phenotype_fluor_cols_in_data = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
+                  'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
+
+
+    ''' Restore viewsettings to [chn] gamma : 0.5, [chn] whitein:255, [chn] blackin:0
+        for all channels in the data'''
+    def remake_viewsettings(self, pass_value = False):
+        vs_list = [f"{x[0]} {x[1]}" for x in product(list(self.channelOrder.keys()), ['gamma', 'white-in', 'black-in'])]
+        self.view_settings = {v:[0.5, 255, 0][i%3] for i,v in enumerate(vs_list)}
+        if pass_value:
+            return {v:[0.5, 255, 0][i%3] for i,v in enumerate(vs_list)}
+    
+    # def remake_channelColors(self):
+    #     self.channelColors = dict(zip(self.channels,CELL_COLORS))
 
     def remake_rgba(self):
         self.statuses_rgba = {key: ImageColor.getcolor(val, "RGBA") for key,val in self.statuses_hex.items()} # Dict of statuses and RGBA tuples color mappings, e.g. {'status A':(255,0,0,255)}

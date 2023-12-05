@@ -47,8 +47,7 @@ for colormap in cell_colors:
     exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
 # print(f'\n---------My colormaps are now {plt.colormaps()}--------\n')
 
-cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink', 'cyan'] # for local execution
-CHANNEL_ORDER = {}
+# cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink', 'cyan'] # for local execution
 qptiff = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\Exp02a01_02_Scan1.qptiff"
 OBJECT_DATA_PATH = r"C:\Users\prich\Desktop\Projects\MGH\CTC_Example\ctc_example_data.csv" # path to halo export
 PAGE_SIZE = 15 # How many cells will be shown in next page
@@ -57,18 +56,10 @@ SPECIFIC_CELL = None # Dictionary with the format {'ID': (int),'Annotation Layer
 PHENOTYPES = ['Tumor'] #'CTC 488pos'
 ANNOTATIONS = []
 GLOBAL_SORT = None
-DAPI = 0; OPAL480 = 3; OPAL520 = 6; OPAL570 = 1; OPAL620 = 4; OPAL690 = 2; OPAL780 = 5; AF=7; Composite = 8
 
 userInfo = store_and_load.loadObject('data/presets')
 SESSION = userInfo.session # will store non-persistent global variables that need to be accessible
 
-# CHANNELS = [DAPI, OPAL480, OPAL520, OPAL570, OPAL620, OPAL690,OPAL780,AF,Composite] # Default. Not really that useful info since channel order was added.
-CHANNELS = [DAPI, OPAL520,OPAL690, Composite] # for local execution / debugging
-CHANNEL_ORDER = {'DAPI':'blue', 'OPAL570':'blue', 'OPAL690':'blue', 'OPAL480':'blue', 'OPAL620':'blue', 
-                 'OPAL780':'blue', 'OPAL520':'blue', 'AF':'blue', 'Composite':'None'} # to save variable position data for channels (they can be in any order...)
-CHANNELS_STR = list(userInfo.channelOrder.keys()) #["DAPI", "OPAL520", "OPAL690", "Composite"] # for local execution / debugging
-CHANNELS_STR.append("Composite") # Seems like this has to happen on a separate line
-ADJUSTED = copy.copy(CHANNELS_STR)
 VIEWER = None
 ADJUSTMENT_SETTINGS={"DAPI gamma": 0.5}; ORIGINAL_ADJUSTMENT_SETTINGS = {}
 SAVED_INTENSITIES={}; 
@@ -97,10 +88,10 @@ def reuse_gamma():
     # Make everything silent
     for layer in VIEWER.layers:
         layer.visible = False
-    for fluor in CHANNELS_STR:
+    for fluor in userInfo.channels:
         if fluor == 'Composite':
             continue
-        if "Composite" in ADJUSTED or fluor in ADJUSTED: 
+        if "Composite" in userInfo.active_channels or fluor in userInfo.active_channels: 
             VIEWER.layers[f"{SESSION.mode} {fluor}"].visible = True
         # Now change settings for both, whether or not they are displayed right now.
         adjust_composite_gamma(VIEWER.layers["Gallery "+fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
@@ -124,10 +115,10 @@ def reuse_contrast_limits():
         # Make everything silent
     for layer in VIEWER.layers:
         layer.visible = False
-    for fluor in CHANNELS_STR:
+    for fluor in userInfo.channels:
         if fluor == 'Composite':
             continue
-        if "Composite" in ADJUSTED or fluor in ADJUSTED: 
+        if "Composite" in userInfo.active_channels or fluor in userInfo.active_channels: 
             VIEWER.layers[f"{SESSION.mode} {fluor}"].visible = True
         # Now change settings for both, whether or not they are displayed right now.
         adjust_composite_limits(VIEWER.layers["Gallery "+fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
@@ -153,7 +144,7 @@ def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData:
     def _update_dictionary(name, val):
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' gamma'] = val
-    for fluor in ADJUSTED:
+    for fluor in userInfo.active_channels:
         if fluor == 'Composite':
             continue
         _update_dictionary(fluor,Gamma)
@@ -170,7 +161,7 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
     def _update_dictionary(name, val):
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' white-in'] = val
-    for fluor in ADJUSTED:
+    for fluor in userInfo.active_channels:
         if fluor == 'Composite':
             continue
         _update_dictionary(fluor,white_in)
@@ -187,7 +178,7 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS[name+' black-in'] = val
     
-    for fluor in ADJUSTED:
+    for fluor in userInfo.active_channels:
         if fluor == 'Composite':
             continue
         _update_dictionary(fluor,black_in)
@@ -210,7 +201,8 @@ def toggle_absorption():
             # elif "Absorption" in layer.name:
             #     layer.visible = False
             #     continue
-            layer.colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[layer.name.split()[1]])
+            sess = layer.name.split()[0] + " "
+            layer.colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[layer.name.replace(sess,"")])
             layer.blending = 'Additive'
     else:
         SESSION.absorption_mode = True
@@ -228,7 +220,8 @@ def toggle_absorption():
             #         im[:,:] = [255,255,255,255]
             #         layer.data = im.astype(np.uint8)
             #     continue
-            layer.colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[layer.name.split()[1]]+' inverse')
+            sess = layer.name.split()[0] + " "
+            layer.colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[layer.name.replace(sess,"")]+' inverse')
             layer.blending = 'Minimum'
     if not SESSION.mode == "Context":
         #TODO
@@ -238,22 +231,21 @@ def toggle_absorption():
 
 def tally_checked_widgets():
     # keep track of visible channels in global list and then toggle layer visibility
-    global ADJUSTED
-    ADJUSTED = []
+    userInfo.active_channels = []
     for checkbox in UPDATED_CHECKBOXES:
         check = checkbox.isChecked()
         checkbox_name = checkbox.objectName()
-    # print(f"{checkbox_name} has been clicked and will try to remove from {ADJUSTED}")
+    # print(f"{checkbox_name} has been clicked and will try to remove from {userInfo.active_channels}")
         if check:
-            ADJUSTED.append(str(checkbox_name))
+            userInfo.active_channels.append(str(checkbox_name))
 
     # Make visible all channels according to rules
-    for fluor in CHANNELS_STR:
+    for fluor in userInfo.channels:
         # Different set of layers if we are in context mode
         lname = f'{SESSION.mode} {fluor}'
         if fluor == "Composite":
             continue
-        if "Composite" in ADJUSTED or fluor in ADJUSTED:
+        if "Composite" in userInfo.active_channels or fluor in userInfo.active_channels:
             VIEWER.layers[lname].visible = True
         else:
             VIEWER.layers[lname].visible = False  
@@ -271,14 +263,8 @@ def check_creator2(list_of_names):
         cb.toggled.connect(tally_checked_widgets)
     return all_boxes
 
-all_boxes = check_creator2(CHANNELS_STR)
+all_boxes = check_creator2(userInfo.channels)
 
-# This is called in GUI_execute, because the global 'ADJUSTED' variable will be changed at that time. 
-# We want to make sure that the backend bookkeeping is congruent with the front-end checkbox, which is 
-#   unchecked by now.  
-def fix_default_composite_adj():
-    global ADJUSTED
-    ADJUSTED = list(filter(lambda a: a != "Composite", ADJUSTED))
 
 ## --- Side bar functions and GUI elements 
 
@@ -458,7 +444,7 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
     if intensity_sort_widget.currentIndex() == 0:
         sort_option = None
     else:
-        sort_option = intensity_sort_widget.currentText().split()[3]
+        sort_option = intensity_sort_widget.currentText().replace("Sort by ","")
 
 
     # Save data to file from current set
@@ -508,51 +494,6 @@ def toggle_statuslayer_visibility(show_widget):
     VIEWER.window._qt_viewer.setFocus()
     return True
 
-# def toggle_statusbox_visibility(show_widget):
-#     return None #TODO
-#     if SESSION.mode == "Context": return False
-#     if show_widget.isChecked(): SESSION.status_box_vis = True
-#     else: SESSION.status_box_vis = False
-#     # Find status layers and toggle visibility
-#     if SESSION.status_box_vis:
-#         for layer in VIEWER.layers:
-#             if layer.name == f'{SESSION.mode} Status Layer':
-#                 im = layer.data
-#                 if SESSION.mode=="Gallery":
-#                     mult = 1
-#                 elif SESSION.mode=="Multichannel":
-#                     mult = 4
-#                 for j in range(0,((userInfo.imageSize+2)*CELLS_PER_ROW), (userInfo.imageSize+2)):#rows
-#                     for i in range(0,(ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(userInfo.imageSize+2))+1, (userInfo.imageSize+2)):#cols
-#                         im[i:i+1, j:j+userInfo.imageSize+2, 3] = 255 # top
-#                         im[i:i+userInfo.imageSize+2,j:j+1, 3] = 255 # left
-#                         im[i+userInfo.imageSize+1:i+userInfo.imageSize+2, j:j+userInfo.imageSize+2, 3] = 255 # right
-#                         im[i:i+userInfo.imageSize+2,j+userInfo.imageSize+1:j+userInfo.imageSize+2, 3] = 255 # bottom
-#                         if j == 0 or SESSION.mode=="Gallery":
-#                             im[i:i+16, j:j+16, 3] = 255
-
-#                 layer.data = im
-#                 # for col in range(1,CELLS_PER_ROW,1):
-                    
-#     else: # Don't show box
-#         for layer in VIEWER.layers:
-#             if layer.name == f'{SESSION.mode} Status Layer':
-#                 im = layer.data
-#                 if SESSION.mode=="Gallery":
-#                     mult = 1
-#                 elif SESSION.mode=="Multichannel":
-#                     mult = 4
-#                 for j in range(0,((userInfo.imageSize+2)*CELLS_PER_ROW), (userInfo.imageSize+2)):
-#                     for i in range(0,(ceil((PAGE_SIZE*mult)/CELLS_PER_ROW)*(userInfo.imageSize+2))+1, (userInfo.imageSize+2)):
-#                         im[i:i+1, j:j+userInfo.imageSize+2, 3] = 0 # top
-#                         im[i:i+userInfo.imageSize+2,j:j+1, 3] = 0 # left
-#                         im[i+userInfo.imageSize+1:i+userInfo.imageSize+2, j:j+userInfo.imageSize+2, 3] = 0 # right
-#                         im[i:i+userInfo.imageSize+2,j+userInfo.imageSize+1:j+userInfo.imageSize+2, 3] = 0 # bottom
-#                         im[i:i+16, j:j+16, 3] = 0 # box
-#                 layer.data = im
-#                 # print(im.shape)
-#     VIEWER.window._qt_viewer.setFocus()
-#     return True
 
 def set_notes_label(display_note_widget, ID):
     cell_num = ID.split()[-1]; cell_anno = ID.replace(' '+cell_num,'')
@@ -575,41 +516,40 @@ def set_notes_label(display_note_widget, ID):
     intensity_series = SAVED_INTENSITIES[ID]
     names = list(intensity_series.index)
     intensity_str = ''
-    for pos in CHANNELS:
-        fluor = list(CHANNEL_ORDER.keys())[pos]
+    for fluor in userInfo.channels:
         if fluor == 'Composite':
             continue
         # fluor = str(cell).replace(" Cell Intensity","")
         fluor = str(fluor)
-        intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">{fluor.replace("OPAL","Opal ")}'
+        intensity_str += f'<br><font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">{fluor}'
         def add_values(intensity_str, fluor, intensity_lookup):
             flag = True
-            name = intensity_lookup.replace("OPAL","Opal ") + ': No data'
+            name = intensity_lookup + ': No data'
             try:
-                cyto = intensity_lookup.replace("OPAL","Opal ")
+                cyto = intensity_lookup
                 cyto = [x for x in names if (cyto in x and 'Cytoplasm Intensity' in x)][0]
                 val = round(float(intensity_series[cyto]),1)
-                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cyto: {val}</font>'
+                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}"> cyto: {val}</font>'
                 flag = False
                 name = cyto.replace(' Cytoplasm Intensity','')
             except (KeyError, IndexError): pass
             try:
-                nuc = intensity_lookup.replace("OPAL","Opal ")
+                nuc = intensity_lookup
                 nuc = [x for x in names if (nuc in x and 'Nucleus Intensity' in x)][0]
                 val = round(float(intensity_series[nuc]),1)
-                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> nuc: {val}</font>'
+                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}"> nuc: {val}</font>'
                 flag = False
                 name = nuc.replace(' Nucleus Intensity','')
             except (KeyError, IndexError): pass
             try:
-                cell = intensity_lookup.replace("OPAL","Opal ")
+                cell = intensity_lookup
                 cell = [x for x in names if (cell in x and 'Cell Intensity' in x)][0]
                 val = round(float(intensity_series[cell]),1)
-                intensity_str += f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}"> cell: {val}</font>'
+                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}"> cell: {val}</font>'
                 flag = False
                 name = cell.replace(' Cell Intensity','')
             except (KeyError, IndexError): pass
-            return intensity_str.replace(intensity_lookup.replace("OPAL","Opal "),name), flag
+            return intensity_str.replace(intensity_lookup,name), flag
         intensity_str, error = add_values(intensity_str, fluor,fluor)
         possible_af_strings = ['AF', 'Autofluorescence', 'Sample AF']
         if error and fluor in possible_af_strings:
@@ -622,7 +562,7 @@ def set_notes_label(display_note_widget, ID):
         # Should have something from the fluorescence column if it's there
 
 
-        # intensity_str += f'<br><font color="{CHANNEL_ORDER[fluor.replace(" ","").upper()].replace("blue","#0462d4")}">{fluor} cyto: {round(float(intensity_series[cyto]),1)} nuc: {round(float(intensity_series[nuc]),1)} cell: {round(float(intensity_series[cell]),1)}</font>'
+        # intensity_str += f'<br><font color="{userInfo.channelColors[fluor.replace(" ","").upper()].replace("blue","#0462d4")}">{fluor} cyto: {round(float(intensity_series[cyto]),1)} nuc: {round(float(intensity_series[nuc]),1)} cell: {round(float(intensity_series[cell]),1)}</font>'
     # Add note if it exists
     if note == '-' or note == '' or note is None: 
         note = prefix + intensity_str
@@ -675,7 +615,7 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
 
     # print(f"Shapes are {SESSION.page_status_layers['Multichannel'].shape}  || {SESSION.page_status_layers['Gallery'].shape}")
     page_image_multichannel = {} ; page_image_gallery = {}
-    for chn in CHANNELS_STR:
+    for chn in userInfo.channels:
         if chn == 'Composite':
             pass
         else:
@@ -686,7 +626,7 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
 
     nuclei_box_coords_g = []
     nuclei_box_coords_m = []
-    print(f'Adding {len(cells)} cells to viewer... Channels are {CHANNELS} // {CHANNELS_STR}')
+    print(f'Adding {len(cells)} cells to viewer... Channels are{userInfo.channels}')
     col_g = 0 
     row_g = 0 ; row_m = 0
     SESSION.grid_to_ID = {"Gallery":{}, "Multichannel":{}} # Reset this since we could be changing to multichannel mode
@@ -728,8 +668,8 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         status_box_flags_m.append([[cXm, 0], [cXm+int(userInfo.imageSize/8), int(userInfo.imageSize/8)]]) 
 
 
-        for pos, fluor in enumerate(CHANNEL_ORDER): # loop through channels
-            if pos in CHANNELS and fluor != 'Composite':
+        for fluor, pos in userInfo.channelOrder.items(): # loop through channels
+            if fluor in userInfo.channels and fluor != 'Composite':
                 # name cell layer
                 cell_name = f'Cell {cell_id} {fluor}'
 
@@ -740,7 +680,7 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
                 else:
                     # rasterio reading didn't work, so entire image should be in memory as np array
                     cell_punchout = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,pos].astype(np.uint8)
-                # print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{CHANNEL_ORDER[fluor]}')
+                # print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{userInfo.channelColors[fluor]}')
 
                 
                 # multichannel mode: individual image
@@ -776,15 +716,15 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
             continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
         if SESSION.absorption_mode:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'minimum',
-                 colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse'), scale = sc, interpolation="linear", visible =gal_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear", visible =gal_vis)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'minimum',
-                 colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[fluor]+' inverse'), scale = sc, interpolation="linear", visible=mult_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear", visible=mult_vis)
             
         else:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'additive',
-                 colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[fluor]), scale = sc, interpolation="linear", visible=gal_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear", visible=gal_vis)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
-                 colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[fluor]), scale = sc, interpolation="linear", visible=mult_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear", visible=mult_vis)
     # if composite_only:
 
     features = {'cid': cid_list}
@@ -848,7 +788,7 @@ def attach_functions_to_viewer(viewer):
         return row_num, col_num
     
     def multichannel_fetch_val(local_x,global_y, fluor):
-        offset_x = (userInfo.imageSize+2) * list(CHANNELS_STR).index(fluor)
+        offset_x = (userInfo.imageSize+2) * list(userInfo.channels).index(fluor)
         return (global_y, offset_x+local_x)
     
 
@@ -870,7 +810,7 @@ def attach_functions_to_viewer(viewer):
             if SESSION.mode == "Context": return {"cell":None,"coords": None,"vals": None}
             return "None" , None, None
         if SESSION.mode == "Context":
-            for fluor in CHANNELS_STR:
+            for fluor in userInfo.channels:
                 if fluor == "Composite": continue
 
                 # Requesting single pixel value from Dask array layer 0
@@ -893,7 +833,7 @@ def attach_functions_to_viewer(viewer):
             
             local_x = coords[1] - (userInfo.imageSize+2)*(col-1)
             local_y = coords[0] - (userInfo.imageSize+2)*(row-1)
-            for fluor in CHANNELS_STR:
+            for fluor in userInfo.channels:
                 if fluor == "Composite": continue
                 # Context mode already taken care of. Need to handle Gallery / Multichannel 
                 if SESSION.mode=="Multichannel":
@@ -962,7 +902,7 @@ def attach_functions_to_viewer(viewer):
             output_str = ''
             for fluor, val in vals.items():
                 if val != "-": val = int(val)
-                output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {val}   </font>'
+                output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">    {val}   </font>'
             sc = STATUSES_TO_HEX[SESSION.status_list[str(ckey)]] if cell is not None else None
             if not sc == "#ffffff":
                 VIEWER.status = f'<font color="{sc}">Context Mode</font> pixel intensities at {coords}: {output_str}'
@@ -987,7 +927,7 @@ def attach_functions_to_viewer(viewer):
 
             for fluor, val in vals.items():
                 if val != "-": val = int(val)
-                output_str+= f'<font color="{CHANNEL_ORDER[fluor].replace("blue","#0462d4")}">    {val}   </font>'
+                output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">    {val}   </font>'
         
             sc = STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]]
             if sc != "#ffffff":
@@ -1348,12 +1288,12 @@ def attach_functions_to_viewer(viewer):
     
     @viewer.bind_key('i')
     def toggle_interpolation(viewer):
-        current = VIEWER.layers[f"Gallery {CHANNELS_STR[0]}"].interpolation
+        current = VIEWER.layers[f"Gallery {userInfo.channels[0]}"].interpolation
         if current == 'nearest':
             new = 'linear'
         else:
             new = 'nearest' 
-        for fluor in CHANNELS_STR:
+        for fluor in userInfo.channels:
             if fluor =='Composite': continue
             VIEWER.layers["Gallery " +fluor].interpolation = new
             VIEWER.layers["Multichannel "+fluor].interpolation = new
@@ -1386,15 +1326,6 @@ def set_viewer_to_neutral_zoom(viewer, reset_session = False):
         SESSION.last_multichannel_camera_coordinates["center"] = (350*sc, 300*sc)
         SESSION.last_gallery_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
         SESSION.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
-
-def add_custom_colors():
-    for colormap in cell_colors:
-        if colormap == 'gray': continue
-        elif colormap =='pink': colormap='Pink'
-        exec(f'my_map = custom_color_functions.create_{colormap}_lut()')
-        exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
-        exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
-    return True
 
 
 def chn_key_wrapper(viewer):
@@ -1441,13 +1372,12 @@ def fetch_notes(cell_row, intensity_col_names):
 def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None, page_number = 1, 
                             specific_cell = None, sort_by_intensity = None, combobox_widget = None):
     
-    # 'OPAL520' # None means 'don't do it', while a channel name means 'put highest at the top'
+    # None means 'don't do it', while a channel name means 'put highest at the top'
     if sort_by_intensity is None:
         sort_by_intensity = "Object Id"
-    elif "opal" in sort_by_intensity.lower() or "DAPI" == sort_by_intensity:
-        sort_by_intensity = sort_by_intensity.replace('OPAL','Opal ') + ' Cell Intensity'
     else:
-        sort_by_intensity = "Sample AF Cell Intensity"
+        sort_by_intensity = sort_by_intensity
+   
     print(f"SORTBYINTENSITY IS {sort_by_intensity}")
 
     # get defaults from global space
@@ -1496,7 +1426,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     global_sort_status = True
     if GLOBAL_SORT is not None:
         try:
-            GLOBAL_SORT = [x for x in all_possible_intensities if all(y in x for y in GLOBAL_SORT.split(" "))][0]
+            GLOBAL_SORT = [x for x in all_possible_intensities if all(y in x for y in GLOBAL_SORT.replace("Cell Intensity",""))][0]
             halo_export = halo_export.sort_values(by = GLOBAL_SORT, ascending = False, kind = 'mergesort')
         except:
             print('Global sort failed. Will sort by Cell Id instead.')
@@ -1667,8 +1597,8 @@ def replace_note(cell_widget, note_widget):
 
 ''' Reset globals and proceed to main '''
 def GUI_execute(preprocess_class):
-    global userInfo, qptiff, PAGE_SIZE, CHANNELS_STR, CHANNEL_ORDER, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
-    global CHANNELS, ADJUSTED, OBJECT_DATA_PATH, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
+    global userInfo, qptiff, PAGE_SIZE, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
+    global  OBJECT_DATA_PATH, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
     global ANNOTATIONS_PRESENT, ORIGINAL_ADJUSTMENT_SETTINGS, SESSION
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
     SESSION = userInfo.session
@@ -1682,27 +1612,17 @@ def GUI_execute(preprocess_class):
     SPECIFIC_CELL = userInfo.specific_cell
     OBJECT_DATA_PATH = userInfo.objectDataPath
     CELLS_PER_ROW = userInfo.cells_per_row
-    CHANNEL_ORDER = userInfo.channelOrder
-    if "Composite" not in list(CHANNEL_ORDER.keys()): CHANNEL_ORDER['Composite'] = 'None'
-    CHANNELS = []
-    CHANNELS_STR = []
-    for pos,chn in enumerate(list(CHANNEL_ORDER.keys())):
-        # print(f'enumerating {chn} and {pos} for {CHANNELS_STR}')
-        exec(f"globals()['{chn}'] = {pos}") # Important to do this for ALL channels
-        if chn in userInfo.channels:
-            # print(f'IF triggered with {chn} and {pos}')
-            exec(f"globals()['CHANNELS'].append({chn})")
-            CHANNELS_STR.append(chn)
-    # print(f'GUI execute channels are {CHANNELS}')
-    CHANNELS.append(len(CHANNEL_ORDER)-1) ; CHANNELS_STR.append('Composite')
-    ADJUSTED = copy.copy(CHANNELS_STR)
+    
+    if "Composite" not in list(userInfo.channelColors.keys()): userInfo.channelColors['Composite'] = 'None'
+    
+
+    userInfo.active_channels = copy.copy(userInfo.channels)
     if userInfo.global_sort == "Sort object table by Cell Id":
         GLOBAL_SORT = None
-    elif "OPAL" in userInfo.global_sort:
-        chn = userInfo.global_sort.split()[4].replace("OPAL","Opal ")
-        GLOBAL_SORT = f"{chn} Cell Intensity"
-    else:
-        GLOBAL_SORT = f"Sample AF Cell Intensity"
+    else :
+        chn = userInfo.global_sort.replace("Sort object table by ","")
+        GLOBAL_SORT = chn
+
     # set saving flag so that dataframe will be written upon exit
     userInfo.session.saving_required = True # make the app save it's data on closing
     main(preprocess_class)
@@ -1792,17 +1712,16 @@ def main(preprocess_class = None):
 
     intensity_sort_box = QComboBox()
     intensity_sort_box.addItem("Sort page by Cell Id")
-    for i, chn in enumerate(CHANNELS_STR[:-1]):
-        intensity_sort_box.addItem(f"Sort page by {chn} Intensity")
+    for i, chn in enumerate(userInfo.channels):
+        intensity_sort_box.addItem(f"Sort page by {chn} Cell Intensity")
     local_sort = None
     if GLOBAL_SORT is None:
         intensity_sort_box.setCurrentIndex(0) # Set "sort by CID" to be the default
-    elif "Opal" in GLOBAL_SORT:
-        local_sort = f"OPAL{GLOBAL_SORT.split()[1]}"
-        intensity_sort_box.setCurrentText(f"Sort page by {local_sort} Intensity")
-    else:
-        local_sort = "AF"
-        intensity_sort_box.setCurrentText(f"Sort page by Sample {local_sort} Intensity")
+    else :
+        print(f"******************ELSE {local_sort}")
+        local_sort = GLOBAL_SORT
+        intensity_sort_box.setCurrentText(f"Sort page by {local_sort}")
+    
 
     next_page_button = QPushButton("Change Page")
 
@@ -1894,10 +1813,12 @@ def main(preprocess_class = None):
         viewer.scale_bar.unit = "um"
 
     # Filter checkboxes down to relevant ones only and update color
+    all_boxes = check_creator2(userInfo.channels)
+
     for i in range(len(all_boxes)):
         box = all_boxes[i]
-        if box.objectName() in CHANNELS_STR:
-            box.setStyleSheet(f"QCheckBox {{ color: {CHANNEL_ORDER[box.objectName()].replace('blue','#0462d4')} }}")
+        if box.objectName() in userInfo.channels:
+            box.setStyleSheet(f"QCheckBox {{ color: {userInfo.channelColors[box.objectName()].replace('blue','#0462d4')} }}")
             UPDATED_CHECKBOXES.append(box)
     viewer.window.add_dock_widget(UPDATED_CHECKBOXES,area='bottom')
 
@@ -1912,13 +1833,14 @@ def main(preprocess_class = None):
     with tifffile.imread(userInfo.qptiff_path, aszarr=True) as zs:
         SESSION.zarr_store = zs
         sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-        for i, fluor in enumerate(userInfo.channelOrder):
-            if i not in CHANNELS or fluor == 'Composite':
+        for fluor in userInfo.channels:
+            if fluor == 'Composite':
                 continue
+            pos = userInfo.channelOrder[fluor]
             print(f"\nAdding full size {fluor} image")
-            pyramid = [da.from_zarr(zs, n)[i] for n in range(6) ] #TODO how to know how many pyramid layers?
+            pyramid = [da.from_zarr(zs, n)[pos] for n in range(6) ] #TODO how to know how many pyramid layers?
             viewer.add_image(pyramid, name = f'Context {fluor}', 
-                        blending = 'additive', colormap = custom_color_functions.retrieve_cm(CHANNEL_ORDER[fluor]),
+                        blending = 'additive', colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]),
                         interpolation = "linear", scale=sc, visible = False)
         
         # Set adjustment settings to their default now that all images are loaded

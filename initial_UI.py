@@ -30,12 +30,11 @@ from re import sub
 import webbrowser # for opening github
 import warnings
 warnings.catch_warnings
+from typing import List, Callable
 
 VERSION_NUMBER = '1.2.1'
 FONT_SIZE = 12
-#DAPI = 0; OPAL570 = 1; OPAL690 = 2; OPAL480 = 3; OPAL620 = 4; OPAL780 = 5; OPAL520 = 6; AF=7
-CHANNELS_STR = ["DAPI", "OPAL570", "OPAL690", "OPAL480", "OPAL620", "OPAL780", "OPAL520", "AF"]
-AVAILABLE_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'pink', 'cyan']
+
 COLOR_TO_RGB = {'gray': '(170,170,170, 255)', 'purple':'(160,32,240, 255)', 'blue':'(100,100,255, 255)',
                     'green':'(60,179,113, 255)', 'orange':'(255,127,80, 255)', 'red': '(215,40,40, 255)',
                     'yellow': '(255,215,0, 255)', 'pink': '(255,105,180, 255)', 'cyan' : '(0,220,255, 255)'}
@@ -75,10 +74,152 @@ class StatusCombo(QComboBox):
             self.setStyleSheet(f"background-color: rgba{self.user_data.statuses_rgba[status]};color: rgb(0,0,0);selection-background-color: rgba(255,255,255,140);")
 
 
+''' A QDialog that the user can interact with to select scoring decision names, color values,
+    and keybindings. Loads with defaults initialized in the user data class'''
+class ChannelDialog(QDialog):
+    def __init__(self, app: QApplication, user_data: store_and_load.userPresets, 
+                 check_layout : QGridLayout, check_group : QGroupBox, check_group_create: Callable):
+        super(ChannelDialog, self).__init__()
+        self.app = app
+        self.user_data = user_data
+        self.channelColors = copy.copy(user_data.channelColors)
+        self.check_layout = check_layout
+        self.check_group = check_group
+        self.check_group_create = check_group_create
+       
+        # Arrange title bar buttons
+        self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowTitleHint,False)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint,False)
+        self.setWindowTitle('Select Channels')
+        self.setWindowIcon(QIcon('data/mghiconwhite.png'))        
 
-class EditScoringDecisions(QDialog):
+        self.channelGroup = QGroupBox("Channel names and order in the image data")
+        self.buttonGroup = QGroupBox()
+        self.save_button = QPushButton("Save and exit")
+        self.add_button = QPushButton("Add new")
+        self.remove_button = QPushButton("Remove last")
+        self.add_button.pressed.connect(self.add_channel)
+        self.remove_button.pressed.connect(self.remove_channel)
+        self.save_button.pressed.connect(self.save)
+        self.channel_entry = QLineEdit(); self.channel_entry.setPlaceholderText("Channel name")
+        self.position_spin = QSpinBox(); self.position_spin.setRange(0,len(self.channelColors))
+        self.position_spin.setValue(len(self.channelColors))
+
+
+        self.buttonBoxLayout = QGridLayout()
+        self.buttonBoxLayout.addWidget(self.channel_entry,0,0)
+        self.buttonBoxLayout.addWidget(self.position_spin,1,0)
+
+        self.buttonBoxLayout.addWidget(self.add_button, 0,1)
+        self.buttonBoxLayout.addWidget(self.remove_button, 1,1)
+        self.buttonBoxLayout.addWidget(self.save_button, 2,0,1,2)
+        # self.saveBox.setLayout(self.saveBoxLayout)
+
+        self.channelBoxLayout = QGridLayout()
+        # self.decision_label = QLabel("")
+        self.make_labels()
+        # self.decisionBoxLayout.addWidget(self.decision_label)
+
+        # self.decisionBox.setLayout(self.decisionBoxLayout)
+        
+        self.buttonGroup.setLayout(self.buttonBoxLayout)
+        self.layout = QGridLayout()
+        self.layout.addWidget(self.channelGroup, 0 ,0)
+        self.layout.addWidget(self.buttonGroup, 1,0)
+        self.setLayout(self.layout)
+        self.show()
+    
+    def make_labels(self):
+        for i in reversed(range(self.channelBoxLayout.count())): 
+            self.channelBoxLayout.itemAt(i).widget().setParent(None)
+        row=0
+        for pos, chn in enumerate(list((self.channelColors.keys()))):
+            c = QLabel(str(chn))
+            n = QLabel(str(pos))
+            self.channelBoxLayout.addWidget(c,row,0 )
+            self.channelBoxLayout.addWidget(n,row,1 )
+            row+=1
+        # self.decision_label.setText(display_str)
+        self.channelGroup.setLayout(self.channelBoxLayout)
+        self.channelBoxLayout.update()
+        self.app.processEvents()
+    
+    def add_channel(self):
+        def _setWidgetColorBackground(widg, color):
+            widg.setStyleSheet(f"background-color: {color}")
+
+        # def _setWidgetColorBackground(widg, color):
+        #     widg.setStyleSheet(f"background: {color}")
+        new_chn = self.channel_entry.text()
+        self.channel_entry.clear()
+        new_pos = self.position_spin.value()
+
+        if len(new_chn) <1:
+            return None
+
+        if new_chn in self.channelColors.keys():
+            _setWidgetColorBackground(self.channel_entry, "#ff5555")
+            QTimer.singleShot(800, lambda:_setWidgetColorBackground(self.channel_entry, "#ffffff"))
+            
+            for i in range(self.channelBoxLayout.count()):
+                widg = self.channelBoxLayout.itemAt(i).widget()
+                if widg.text() == new_chn:
+                    _setWidgetColorBackground(widg, "#ff5555")
+                    QTimer.singleShot(800, lambda: _setWidgetColorBackground(widg, "#ededed"))
+                    widg2 = self.channelBoxLayout.itemAt(i+1).widget()
+                    _setWidgetColorBackground(widg2, "#ff5555")
+                    QTimer.singleShot(800, lambda: _setWidgetColorBackground(widg2, "#ededed"))
+                    break
+            return None
+        
+        unused_colors = copy.copy(self.user_data.available_colors)
+        for col in self.channelColors.values():
+            if col in unused_colors:
+                unused_colors.remove(col)
+
+        # For this new fluor, give it a color
+        if len(unused_colors) < 1:
+            random_color = choice(self.user_data.available_colors)
+        else:
+            random_color = choice(unused_colors)
+
+        # Add new channel to dictionary
+        self.channelColors[new_chn] = random_color
+        self.make_labels()
+        self.position_spin.setRange(0,len(self.channelColors))
+        self.position_spin.setValue(new_pos+1)
+
+    def remove_channel(self):
+        if len(self.channelColors) <=1:
+            return False
+        
+        x = self.channelColors.pop()
+        self.make_labels()
+        self.position_spin.setRange(0,len(self.channelColors))
+        self.position_spin.setValue(len(self.channelColors))
+
+    def save(self):
+        self.user_data.channelColors = self.channelColors
+        self.user_data.remake_viewsettings()
+        # self.user_data.remake_channelOrder()
+        #TODO set channel widgets in main UI
+        
+
+        for i in reversed(range(self.check_layout.count())): 
+            self.check_layout.itemAt(i).widget().setParent(None)
+        self.check_layout, self.check_group = self.check_group_create(self.check_layout, self.check_group)
+        # self.check_group.update()
+        self.app.processEvents()
+        self.close()
+
+
+''' A QDialog that the user can interact with to select scoring decision names, color values,
+    and keybindings. Loads with defaults initialized in the user data class'''
+class ScoringDialog(QDialog):
     def __init__(self, app: QApplication, user_data: store_and_load.userPresets, widget_dict: dict[str:QComboBox]):
-        super(EditScoringDecisions, self).__init__()
+        super(ScoringDialog, self).__init__()
         self.app = app
         self.user_data = user_data
         self.statuses_hex = copy.copy(user_data.statuses_hex)
@@ -151,29 +292,7 @@ class EditScoringDecisions(QDialog):
         # self.decision_label.setText(display_str)
         self.decisionBox.setLayout(self.decisionBoxLayout)
         self.decisionBoxLayout.update()
-
         self.app.processEvents()
-    # def make_label_text(self):
-        
-    #     style = "p {line-height:1.5} .dec{font-family: Metropolis;font-size:30px}"
-    #     style+=".col{font-family: Metropolis}"
-    #     style += ".key{font-family: Metropolis}"
-    #     print("here")
-    #     self.decision_label.setStyleSheet(style)
-    #     display_str = '<html><head/><body>  <p>'
-    #     for decision, color in self.statuses_hex.items():
-    #         keybind = self.statuses[decision]
-    #         space = "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
-    #         newl = f"<div class='cola'> {decision} {space}</div>"
-    #         newl += f"<div class='colb'><font color={color}>{color}</div>" + space
-    #         newl += f"<div class='colc'>{keybind}</div> <br>"
-    #         display_str += newl
-    #     display_str += '</p></body></html>'
-    #     self.decision_label.setText(display_str)
-        
-        
-    #     self.app.processEvents()
-        # self.set_layout()
 
     def add_label(self):
 
@@ -227,10 +346,6 @@ class EditScoringDecisions(QDialog):
         self.close()
 
 
-
-        
-
-
 ''' This class contains the whole dialog box that the user interacts with and all it's widgets. Also contains
     an instance of the userPresets class, which will be passed to the viewer code. '''
 class ViewerPresets(QDialog):
@@ -248,9 +363,9 @@ class ViewerPresets(QDialog):
         self.userInfo = store_and_load.loadObject('data/presets')
 
         # For TESTING
-        print(f'Initial test print for colors: {self.userInfo.UI_color_display}')
+        print(f'Initial test print for colors: {self.userInfo.channelColors}')
 
-        self.myColors = []
+        self.myColors = [] # Holds color selection comboboxes for the channel selection widgets
         self.setWindowIcon(QIcon('data/mghiconwhite.png'))
 
         # Set title area / logo
@@ -266,14 +381,14 @@ class ViewerPresets(QDialog):
 
 
         # reset status mappings for selected annotations and phenotypes
-        new_pheno_label = '<u>Phenotype</u><br>'
+        new_pheno_label = '<u>Phenotypes</u><br>'
         if not self.userInfo.phenotype_mappings.keys(): new_pheno_label +='All'
         for key in self.userInfo.phenotype_mappings:
             self.userInfo.phenotype_mappings[key] = "Don't assign"
             new_pheno_label += f'{key}<br>'
         self.userInfo.phenotype_mappings_label = new_pheno_label
 
-        new_anno_label = '<u>Annotation</u><br>'
+        new_anno_label = '<u>Annotations</u><br>'
         if not self.userInfo.annotation_mappings.keys(): new_anno_label +='All'
         for key in self.userInfo.annotation_mappings:
             self.userInfo.annotation_mappings[key] = "Don't assign"
@@ -344,9 +459,11 @@ class ViewerPresets(QDialog):
         scoring.setShortcut("Ctrl+P")
         reset = QAction("Reset GUI to defaults", self)
         reset.setShortcut("Ctrl+R")
+        channels = QAction("Select image channels", self)
+        channels.setShortcut("Ctrl+i")
         
 
-        pref.addActions((scoring,reset))
+        pref.addActions((scoring,channels,reset))
         pref.triggered[QAction].connect(self.process_menu_action)
 
         about = self.menubar.addMenu('About')
@@ -404,12 +521,18 @@ class ViewerPresets(QDialog):
     
 
     def change_scoring_decisions(self):
-        scoring = EditScoringDecisions(self.app, self.userInfo, {"pheno_widget":self.phenotypeStatuses,"anno_widget": self.annotationStatuses})
+        scoring = ScoringDialog(self.app, self.userInfo, {"pheno_widget":self.phenotypeStatuses,"anno_widget": self.annotationStatuses})
         scoring.exec()
+
+    def change_channels(self):
+        channels = ChannelDialog(self.app, self.userInfo, self.topLeftGroupLayout, self.topLeftGroupBox , self.createTopLeftGroupBox)
+        channels.exec()
 
     def process_menu_action(self,q):
         if "scoring decisions" in q.text().lower():
             self.change_scoring_decisions()
+        elif "channels" in q.text().lower():
+            self.change_channels()
         elif 'manual' in q.text().lower():
             try:
                 # print(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
@@ -419,10 +542,15 @@ class ViewerPresets(QDialog):
                 status ='<font color="#ffa000">Can\'t find a guide for this version!</font><br>Check for old versions in the server\'s Imagers/ImageProcessing/GalleryViewer/ folder.'
                 self.status_label.setText(status)
         elif 'reset' in q.text().lower():
-            os.remove(os.path.normpath(r'./data/presets'))
-            self.status_label.setVisible(True)
-            status ='<br><font color="#ffa000">Cleared all saved metadata!</font> Close this window to allow the changes to take effect'
-            self.status_label.setText(status)
+            try:
+                os.remove(os.path.normpath(r'./data/presets'))
+                self.status_label.setVisible(True)
+                status ='<font color="#ffa000">Cleared all saved metadata!</font> Close this window to allow the changes to take effect'
+                self.status_label.setText(status)
+            except FileNotFoundError:
+                self.status_label.setVisible(True)
+                status ='<font color="#ffa000">I haven\'t saved any data yet.</font>'
+                self.status_label.setText(status)
         elif 'source code' in q.text().lower():
             webbrowser.open("https://github.com/richierip/CTC-Gallery-Viewer", new = 2)
         elif "error logs" in q.text().lower():
@@ -468,7 +596,7 @@ class ViewerPresets(QDialog):
             if not os.path.exists(folder):
                 os.makedirs(folder)
             logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime('%Y-%m-%d_silent_viewsettings_issue_%H%M%S.txt')))
-            self.userInfo.view_settings = store_and_load.VIEW_SETTINGS # use defaults
+            self.userInfo.remake_viewsettings() # use defaults
             self._log_problem(logpath,e)
 
     def saveSpecificCell(self):
@@ -497,10 +625,8 @@ class ViewerPresets(QDialog):
         self.userInfo.global_sort = self.global_sort_widget.currentText()
 
     def saveChannel(self):
-        print(f'\nTrying to save the channel')
         for button in self.mycheckbuttons:
-            channelName = button.objectName()
-            print(f"{channelName} and {self.userInfo.channels}")
+            channelName = button.objectName().replace("_"," ")
             if button.isChecked():
                 self.userInfo.attempt_channel_add(channelName)
             elif not button.isChecked():
@@ -513,21 +639,11 @@ class ViewerPresets(QDialog):
             
 
             # print(f'My trigger was {colorWidget.objectName()}')
-            colorChannel = colorWidget.objectName()
+            channelName = colorWidget.objectName().replace("_"," ")
             # print(f'#### Channel order fsr: {store_and_load.CHANNELS_STR} \n')
-            colorPos = store_and_load.CHANNELS_STR.index(colorChannel)
-            # print(f'2. Position of {colorChannel} in CHANNEL_ORDER is {colorPos}')
-            self.userInfo.UI_color_display.pop(colorPos)
-            # print(f'3. Our intermediate step is this: {self.userInfo.UI_color_display}')
-            self.userInfo.UI_color_display.insert(colorPos, colorWidget.currentText())
-            # print(f'4. Now color should be in right spot. Here is the thing {self.userInfo.UI_color_display}')
-
-            # # Now do it for visual display:
-            # colorPos = CHANNELS_STR.index(colorChannel)
-            # self.userInfo.UI_color_display.pop(colorPos)
-            # self.userInfo.UI_color_display.insert(colorPos, colorWidget.currentText())
-            # Save info to channelOrder
-            self.userInfo.channelOrder[colorChannel] = colorWidget.currentText()
+            print(self.userInfo.channels)
+            
+            self.userInfo.channelColors[channelName] = colorWidget.currentText()
 
     def addAnnotation(self):
         # Get status and color from combobox
@@ -608,12 +724,12 @@ class ViewerPresets(QDialog):
     def reset_mappings(self):
         #phenotype
         self.userInfo.phenotype_mappings = {}
-        self.userInfo.phenotype_mappings_label = '<u>Phenotype</u><br>All'
-        self.phenoDisplay.setText('<u>Phenotype</u><br>All')
+        self.userInfo.phenotype_mappings_label = '<u>Phenotypes</u><br>All'
+        self.phenoDisplay.setText('<u>Phenotypes</u><br>All')
         #Annotations
         self.userInfo.annotation_mappings = {}
-        self.userInfo.annotation_mappings_label = '<u>Annotation</u><br>All'
-        self.annotationDisplay.setText('<u>Annotation</u><br>All')
+        self.userInfo.annotation_mappings_label = '<u>Annotations</u><br>All'
+        self.annotationDisplay.setText('<u>Annotations</u><br>All')
         #Filters
         self.userInfo.filters = []
         self.userInfo.filters_label = '<u>Filters</u><br>None'
@@ -634,6 +750,7 @@ class ViewerPresets(QDialog):
         params += f"Available colors: {store_and_load.CELL_COLORS} \n"
         params += f"Batch/page size: {self.userInfo.page_size} \nSort: {self.userInfo.global_sort}\n"
         params += f"Specific cell chosen?: {self.userInfo.specific_cell} \nExpected order of multichannel data: {self.userInfo.channelOrder}\n"
+        params += f"Color mappings: {self.userInfo.channelColors}\n"
         params += f"Phenotype mappings: {self.userInfo.phenotype_mappings}\n"
         params += f"Annotation mappings: {self.userInfo.annotation_mappings}\n"
         params += f"View settings path: {self.userInfo.view_settings_path}\n"
@@ -810,6 +927,7 @@ class ViewerPresets(QDialog):
                 self.setWidgetColorBackground(self.qptiffEntry, "#ef881a")
                 QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.qptiffEntry, "#ffffff"))
         except Exception as e:
+            print(e)
             self.setWidgetColorBackground(self.qptiffEntry, "#ff5555")
             QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.qptiffEntry, "#ffffff"))
             folder = os.path.normpath(os.path.join(os.getcwd(), 'runtime logs/'))
@@ -864,31 +982,29 @@ class ViewerPresets(QDialog):
         def rename_key(key):
             af_possibilities = ["SampleAF", 'Sample AF', 'Autofluorescence']
             if key in af_possibilities: key = 'AF'
-            return key.replace(" ", '').upper()
-        # rename keys 
+            return key
+        
+        # rename keys to ensure channels are mapped to a color we have a colormap for  
         for key in list(fluors.keys()):
             fluors[rename_key(key)] = fluors.pop(key).lower().replace('white', 'gray').replace('lime','green').replace('pink','Pink')
-        print(fluors)
-        unused_colors = copy.copy(AVAILABLE_COLORS)
+        unused_colors = copy.copy(self.userInfo.available_colors)
         for col in fluors.values():
             if col in unused_colors:
                 unused_colors.remove(col)
-        
         for key, value in fluors.items():
-            if value in AVAILABLE_COLORS: 
+            if value in self.userInfo.available_colors: 
                 continue
             else:
                 if len(unused_colors) < 1:
-                    random_color = choice(AVAILABLE_COLORS)
+                    random_color = choice(self.userInfo.available_colors)
                 else:
                     random_color = choice(unused_colors)
                     unused_colors.remove(random_color)
                 fluors[key] = random_color
-        print(fluors)
 
         # Change display widgets to reflect change
-        for pos,combo in enumerate(self.myColors):
-            widget_name = combo.objectName()
+        for combo in self.myColors:
+            widget_name = combo.objectName().replace("_"," ") # object names can't have spaces, so they were replaced with dashes
             widget_color = fluors[widget_name]
             # print(widget_name +  "  |  " + widget_color)
             # colorComboName = button.objectName() + "_colors"
@@ -896,35 +1012,32 @@ class ViewerPresets(QDialog):
             combo.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[widget_color]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
         for button in self.mycheckbuttons:
             button.setChecked(False)
-            widget_name = button.objectName()
+            widget_name = button.objectName().replace("_"," ")
+            print(f"WIDGET NAME IS {widget_name}")
+
             if widget_name in list(fluors.keys()):
                 button.setChecked(True)
-        
         # Save info to class
-        self.userInfo.channelOrder = fluors
-        display_list =  sorted(fluors.items())
-        display_list = [x[1] for x in display_list]
-        display_list.append(display_list.pop(0))
-        self.userInfo.UI_color_display = display_list
+        self.userInfo.channelColors = fluors
+        self.userInfo.channels = []
+        for pos, fluor in enumerate(list(fluors.keys())):
+            self.userInfo.channels.append(fluor)
+            self.userInfo.channelOrder[fluor] = int(pos)
+        
         self.saveChannel()
         # self.saveColors()
         return 'passed'
 
             
-    def createTopLeftGroupBox(self):
-        self.topLeftGroupBox = QGroupBox("Channels and Colors")
-
-        self.dapiCheck = QCheckBox("DAPI"); self.dapiCheck.setObjectName('DAPI')
-        self._480Check = QCheckBox("Opal 480"); self._480Check.setObjectName('OPAL480')
-        self._520Check = QCheckBox("Opal 520"); self._520Check.setObjectName('OPAL520')
-        self._570Check = QCheckBox("Opal 570"); self._570Check.setObjectName('OPAL570')
-        self._620Check = QCheckBox("Opal 620"); self._620Check.setObjectName('OPAL620')
-        self._690Check = QCheckBox("Opal 690"); self._690Check.setObjectName('OPAL690')
-        self._780Check = QCheckBox("Opal 780"); self._780Check.setObjectName('OPAL780')
-        self.autofluorescenceCheck = QCheckBox("AF"); self.autofluorescenceCheck.setObjectName('AF')
-        self.mycheckbuttons= [self.dapiCheck, self._480Check, self._520Check, self._570Check,self._620Check, self._690Check, self._780Check, self.autofluorescenceCheck]
+    def createTopLeftGroupBox(self, layout = QGridLayout(), groupbox = QGroupBox("Channels and Colors") ):
+        self.topLeftGroupBox = groupbox
         
-        layout = QGridLayout()
+        self.mycheckbuttons = []
+        for chn, pos in self.userInfo.channelOrder.items():
+            check = QCheckBox(chn)
+            check.setObjectName(chn.replace(" ","_"))
+            self.mycheckbuttons.append(check)
+        self.topLeftGroupLayout = layout
         
         def create_func(colorWidget):
             def set_color_index(index):
@@ -952,12 +1065,13 @@ class ViewerPresets(QDialog):
                 # colorWidget.setStyleSheet(f"color: {colorWidget.currentText()}; font-size: {FONT_SIZE}pt;")
             return set_color_index 
         # Space / time saving way to create 16 widgets and change their parameters
+        row = 0 ; col = 0
         for pos,button in enumerate(self.mycheckbuttons):
             colorComboName = button.objectName() + "_colors"
             exec(f'{colorComboName} = QComboBox()')
             colored_items = [f'<font color="{item}">{item}</font>' for item in store_and_load.CELL_COLORS]
             exec(f'{colorComboName}.addItems(store_and_load.CELL_COLORS)')
-            exec(f'{colorComboName}.setCurrentText("{self.userInfo.UI_color_display[pos]}")')
+            exec(f'{colorComboName}.setCurrentText("{self.userInfo.channelColors[button.objectName().replace("_"," ")]}")')
 
             # exec(f'{colorComboName}.setItemData(0,QColor("red"),Qt.ForegroundRole)')
             # test = QComboBox()
@@ -998,23 +1112,25 @@ class ViewerPresets(QDialog):
              
             # exec(f'{colorComboName}.highlighted.connect(change_color)')
             exec(f'{colorComboName}.setObjectName("{button.objectName()}")')
-            if button.objectName() in self.userInfo.channels and button.objectName != 'AF':
+            if button.objectName().replace("_"," ") in self.userInfo.channels and button.objectName().replace("_"," ") != 'AF':
                 button.setChecked(True)
             else:
                 button.setChecked(False)
             button.toggled.connect(self.saveChannel) #IMPORTANT that this comes after setting check values
             exec(f'self.myColors.append({colorComboName})')
             exec(f'{colorComboName}.activated.connect(self.saveColors)')
-            col = [0,0,0,0,2,2,2,2][pos]
-            layout.addWidget(button, pos%4,col)
-            exec(f'layout.addWidget({colorComboName},{pos%4}, {col+1})')
+            
+            self.topLeftGroupLayout.addWidget(button, row//4,col%4)
+            exec(f'layout.addWidget({colorComboName},{row//4}, {(col%4)+1})')
+            row+=2; col+=2
 
             
         for colorWidget in self.myColors:
             # Set each the color of each QSpin
             colorWidget.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[colorWidget.currentText()]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
 
-        self.topLeftGroupBox.setLayout(layout)    
+        self.topLeftGroupBox.setLayout(self.topLeftGroupLayout)    
+        return self.topLeftGroupLayout, self.topLeftGroupBox
     
     def createTopRightGroupBox(self):
         self.topRightGroupBox = QGroupBox("Cells to Read")
@@ -1141,8 +1257,8 @@ class ViewerPresets(QDialog):
         self.global_sort_widget = QComboBox(self.topRightGroupBox)
         self.global_sort_widget.addItem("Sort object table by Cell Id")
         print(f"setting widget to be {self.userInfo.global_sort}")
-        for i, chn in enumerate(CHANNELS_STR):
-            self.global_sort_widget.addItem(f"Sort object table by {chn} Intensity")
+        for i, chn in enumerate(self.userInfo.channels):
+            self.global_sort_widget.addItem(f"Sort object table by {chn} Cell Intensity")
         self.global_sort_widget.setCurrentText(self.userInfo.global_sort)
         self.global_sort_widget.currentTextChanged.connect(self.saveGlobalSort)
 
@@ -1266,8 +1382,8 @@ class ViewerPresets(QDialog):
         true_annotations = self._locate_annotations_col(path) # Find out if the data have multiple analysis regions (duplicate Cell IDs as well)
         if true_annotations is None: 
             self.annotationButton.setEnabled(False)
-            self.annotationDisplay.setText('<u>Annotation</u><br>All')
-            self.userInfo.annotation_mappings_label = '<u>Annotation</u><br>All'
+            self.annotationDisplay.setText('<u>Annotations</u><br>All')
+            self.userInfo.annotation_mappings_label = '<u>Annotations</u><br>All'
             self.userInfo.annotation_mappings = {}
             self.specificCellAnnotationEdit.setVisible(False)
             self.specificCellAnnotationCombo.setVisible(False)
@@ -1285,7 +1401,10 @@ class ViewerPresets(QDialog):
     '''Read in the object data file and assign user chosen validation calls to the data, if needed'''
     def assign_statuses_to_sheet(self):
         self._replace_status('Reading object data... ')
-        df = pd.read_csv(self.userInfo.objectDataPath)
+        try:
+            df = pd.read_csv(self.userInfo.objectDataPath)
+        except FileNotFoundError:
+            return "No file"
         self._append_status('<font color="#7dbc39">  Done. </font>')
         self._append_status_br('Validating chosen annotations and phenotypes...')
         if self._validate_names():
@@ -1339,11 +1458,18 @@ class ViewerPresets(QDialog):
             self.status_label.setVisible(True)
             status = '<font color="#f5551a">  Failed to assign status mappings</font><br>Check your annotations and phenotypes before trying again'
             self.status_label.setText(status)
+            self.findDataButton.setEnabled(True)
             return None
         elif res == 'PermissionError':
-             self.status_label.setVisible(True)
-             self.status_label.setText('<font color="#f5551a">Access to object data file was denied</font><br>Close the sheet before trying again')
-             return None
+            self.status_label.setVisible(True)
+            self.status_label.setText('<font color="#f5551a">Access to object data file was denied</font><br>Close the sheet before trying again')
+            self.findDataButton.setEnabled(True)
+            return None
+        elif res == "No file":
+            self.status_label.setVisible(True)
+            self.status_label.setText('<font color="#f5551a">Can\'t find the object data file.</font><br>Check the filepath input')
+            self.findDataButton.setEnabled(True)
+            return None
 
         self.saveViewSettings()
         store_and_load.storeObject(self.userInfo, 'data/presets')
@@ -1352,10 +1478,15 @@ class ViewerPresets(QDialog):
         # If user fetched metadata, save changes to color mappings
         # self.saveColors()
 
-
+        self.userInfo.channels.append("Composite")
         print(f'CHANNELS : {self.userInfo.channels}')
+        print(f'CHANNELS ORDER : {self.userInfo.channelOrder}')
+        print(f'CHANNELS colors : {self.userInfo.channelColors}')
+        # print(f'View Settings : {self.userInfo.view_settings}')
 
         # self.app.setStyleSheet('')
+        # Now the galleryViewer file loads the presets 
+
         try:
             print('Calling GUI execute...')
             # Reset stylesheet
@@ -1386,8 +1517,6 @@ class ThreadSave(QThread):
     def run(self):
         if self.target:
             self.target(self.gallery)
-
-
 
 def ensure_saving(gallery : ViewerPresets, app, window = QDialog(), 
                   notice = QLabel(),button = QPushButton()) -> None:
@@ -1460,7 +1589,6 @@ def ensure_saving(gallery : ViewerPresets, app, window = QDialog(),
             notice.setText('<font color="#a05459">There was an issue.</font><br>Send the error log to Peter.')
         app.processEvents() 
     return None
-
 
 
 if __name__ == '__main__':
