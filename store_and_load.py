@@ -15,6 +15,8 @@ import pandas as pd
 from typing import Callable
 from PIL import ImageColor
 from itertools import product
+from PyQt5.QtGui import QFont
+from dataclasses import dataclass
 
 CELL_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'cyan', 'pink'] # List of colors available to use as colormaps
 CHANNELS_STR = ["DAPI", "Opal 570", "Opal 690", "Opal 480","Opal 620","Opal 780", "Opal 520", "AF"] # List of String names for fluors the user wants to display  
@@ -59,6 +61,7 @@ class sessionVariables:
         self.page_status_layers = {"Gallery": [], "Multichannel": []}
         self.session_cells = pd.DataFrame()
         self.cell_under_mouse = {} # Will update with below info for one cell
+        self.cell_under_mouse_changed = False # Stores a flag to signal this event
         self.context_target = {} # Saves information for the cell of interest in Context Mode
         self.current_cells =  {'Layer':str,"cid": int,"center_x": int,'center_y': int,
                                 'validation_call': str, 'XMax' : float,'XMin':float,
@@ -75,6 +78,14 @@ class sessionVariables:
         self.mouse_coords = (0,0) # (y,x)
         self.display_intensity_func = Callable
         self.find_mouse_func = Callable
+        self.side_dock_groupboxes = {}
+        self.widget_dictionary = {}
+
+@dataclass
+class ViewerFonts:
+    """Hold various fonts to be used in the GUI and Viewer sidebar widget area"""
+    small :QFont = QFont("Verdana", 6, weight=QFont.Normal)
+
 
 class userPresets:
     ''' This class is used to store user-selected parameters on disk persistently,
@@ -119,6 +130,7 @@ class userPresets:
                     '% Cell Completeness', '% Completeness']
         self.non_phenotype_fluor_cols_in_data = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
                   'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
+        self.fonts = ViewerFonts()
 
 
     ''' Restore viewsettings to [chn] gamma : 0.5, [chn] whitein:255, [chn] blackin:0
@@ -224,9 +236,11 @@ def storeObject(obj : userPresets, filename : str):
     ''' Write the class object to a file. Default location is data/presets'''
     try:
         obj.session = sessionVariables() # reset per-session variables to save space
+        obj.fonts = None
         outfile = open(filename, 'wb' )
         pickle.dump(obj, outfile)
         outfile.close()
+        obj.fonts = ViewerFonts()
         return True
     except Exception as e:
         print(e)
@@ -237,9 +251,12 @@ def loadObject(filename):
     try:
         infile = open(filename,'rb')
         new_obj = pickle.load(infile)
-        new_obj.session = sessionVariables() # just make sure nothing happened here
         infile.close()
+
+        new_obj.session = sessionVariables() # just make sure nothing happened here
+        new_obj.fonts = ViewerFonts()
         return new_obj
-    except:
+    except Exception as e:
+        print(e)
         # If no data yet (first time running the viewer), load up defaults
         return userPresets()

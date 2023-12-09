@@ -4,7 +4,8 @@ import typing
 from PyQt5.QtCore import QObject, Qt, QThread, QTimer
 from PyQt5.QtGui import QIcon, QPixmap,QColor,QFont
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,QMainWindow, QGridLayout, QDesktopWidget, QSizePolicy,QLayout,
-                             QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox,QDoubleSpinBox, QMenuBar, QAction, QFileDialog)
+                            QRadioButton, QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox,QDoubleSpinBox, QMenuBar, QAction, QFileDialog,
+                            QHBoxLayout, QVBoxLayout)
 
 import sys
 import os
@@ -93,10 +94,9 @@ class ChannelDialog(QDialog):
         self.setWindowFlag(Qt.WindowTitleHint,False)
         self.setWindowFlag(Qt.WindowContextHelpButtonHint,False)
         self.setWindowTitle('Select Channels')
-        self.setWindowIcon(QIcon('data/mghiconwhite.png'))        
+        self.setWindowIcon(QIcon('data/mghiconwhite.png'))   
+        # self.setStyleSheet("background-color: '#daeef0'")     
 
-        self.channelGroup = QGroupBox("Channel names and order in the image data")
-        self.buttonGroup = QGroupBox()
         self.save_button = QPushButton("Save and exit")
         self.add_button = QPushButton("Add new")
         self.remove_button = QPushButton("Remove last")
@@ -108,26 +108,40 @@ class ChannelDialog(QDialog):
         self.position_spin.setValue(len(self.channelColors))
 
 
+        self.buttonGroup = QGroupBox()
+        # self.buttonGroup.setStyleSheet("background-color: '#ededed'")
         self.buttonBoxLayout = QGridLayout()
         self.buttonBoxLayout.addWidget(self.channel_entry,0,0)
         self.buttonBoxLayout.addWidget(self.position_spin,1,0)
-
         self.buttonBoxLayout.addWidget(self.add_button, 0,1)
         self.buttonBoxLayout.addWidget(self.remove_button, 1,1)
         self.buttonBoxLayout.addWidget(self.save_button, 2,0,1,2)
-        # self.saveBox.setLayout(self.saveBoxLayout)
-
-        self.channelBoxLayout = QGridLayout()
-        # self.decision_label = QLabel("")
-        self.make_labels()
-        # self.decisionBoxLayout.addWidget(self.decision_label)
-
-        # self.decisionBox.setLayout(self.decisionBoxLayout)
-        
         self.buttonGroup.setLayout(self.buttonBoxLayout)
+
+        
+        # Dynamically assemble channel names labels
+        self.channelGroup = QGroupBox("Channel names and order in the image data")
+        # self.channelGroup.setStyleSheet("background-color: '#ededed'")
+        self.channelBoxLayout = QGridLayout()
+        self.make_labels()
+
+        # Make top area
+        self.overrideGroup = QGroupBox("Override Viewer detected metadata?")
+        # self.overrideGroup.setStyleSheet("background-color: '#ededed'")
+        self.radio1 = QRadioButton("Yes, use the selections below")
+        self.radio2 = QRadioButton("No, let the Viewer pick")
+
+        # self.radio1.setStyleSheet(open("data/style.css").read())
+        self.overrideLayout = QHBoxLayout()
+        self.overrideLayout.addWidget(self.radio1)
+        self.overrideLayout.addWidget(self.radio2)
+        self.overrideGroup.setLayout(self.overrideLayout)
+        self.radio2.setChecked(True)
+        
         self.layout = QGridLayout()
-        self.layout.addWidget(self.channelGroup, 0 ,0)
-        self.layout.addWidget(self.buttonGroup, 1,0)
+        self.layout.addWidget(self.overrideGroup,0,0)
+        self.layout.addWidget(self.channelGroup, 1,0)
+        self.layout.addWidget(self.buttonGroup, 2,0)
         self.layout.setSizeConstraint(QLayout.SetFixedSize) # Allows window to resize to shrink when widgets are removed
         self.setLayout(self.layout)
         self.show()
@@ -151,8 +165,6 @@ class ChannelDialog(QDialog):
         def _setWidgetColorBackground(widg, color):
             widg.setStyleSheet(f"background-color: {color}")
 
-        # def _setWidgetColorBackground(widg, color):
-        #     widg.setStyleSheet(f"background: {color}")
         new_chn = self.channel_entry.text()
         self.channel_entry.clear()
         new_pos = self.position_spin.value()
@@ -162,16 +174,16 @@ class ChannelDialog(QDialog):
 
         if new_chn in self.channelColors.keys():
             _setWidgetColorBackground(self.channel_entry, "#ff5555")
-            QTimer.singleShot(800, lambda:_setWidgetColorBackground(self.channel_entry, "#ffffff"))
+            QTimer.singleShot(800, lambda:_setWidgetColorBackground(self.channel_entry, ""))
             
             for i in range(self.channelBoxLayout.count()):
                 widg = self.channelBoxLayout.itemAt(i).widget()
                 if widg.text() == new_chn:
                     _setWidgetColorBackground(widg, "#ff5555")
-                    QTimer.singleShot(800, lambda: _setWidgetColorBackground(widg, "#ededed"))
+                    QTimer.singleShot(800, lambda: _setWidgetColorBackground(widg, ""))
                     widg2 = self.channelBoxLayout.itemAt(i+1).widget()
                     _setWidgetColorBackground(widg2, "#ff5555")
-                    QTimer.singleShot(800, lambda: _setWidgetColorBackground(widg2, "#ededed"))
+                    QTimer.singleShot(800, lambda: _setWidgetColorBackground(widg2, ""))
                     break
             return None
         

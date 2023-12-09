@@ -11,8 +11,10 @@ from rasterio.windows import Window
 import napari
 from napari.types import ImageData
 from magicgui import magicgui #, magic_factory
-from PyQt5.QtWidgets import QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, QComboBox
+from PyQt5.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, 
+                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox)
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont
 import numpy as np
 import pandas as pd
 import openpyxl # necessary, do not remove
@@ -29,6 +31,8 @@ import os
 import dask.array as da
 import zarr
 import scipy.spatial as spatial
+from random import randint
+
 # from initial_UI import VERSION_NUMBER
 
 
@@ -64,7 +68,7 @@ VIEWER = None
 ADJUSTMENT_SETTINGS={"DAPI gamma": 0.5}; ORIGINAL_ADJUSTMENT_SETTINGS = {}
 SAVED_INTENSITIES={}; 
 RAW_PYRAMID=None
-ALL_CUSTOM_WIDGETS = {}
+SESSION.widget_dictionary = {}
 RASTERS = None
 NO_LABEL_BOX = False
 STATUS_COLORS = {}
@@ -195,7 +199,7 @@ def toggle_absorption():
             
             if 'Status' in layer.name:
                 continue
-            elif "Nuclei Boxes" in layer.name:
+            elif "Nuclei Boxes" in layer.name or layer.name == "Context Closest Cell Box":
                 layer.edge_color = '#ffffff'
                 continue
             # elif "Absorption" in layer.name:
@@ -210,7 +214,7 @@ def toggle_absorption():
             
             if 'Status' in layer.name:
                 continue
-            elif "Nuclei Boxes" in layer.name:
+            elif "Nuclei Boxes"  in layer.name or layer.name == "Context Closest Cell Box":
                 layer.edge_color="#000000"
                 continue
             # elif "Absorption" in layer.name:
@@ -227,7 +231,13 @@ def toggle_absorption():
         #TODO
         pass
         # change_statuslayer_color(copy.copy(SESSION.current_cells))
-    VIEWER.theme = "light" if SESSION.absorption_mode else "dark"
+    
+    # Change colors
+    newmode = "light" if SESSION.absorption_mode else "dark"
+    oldmode = "dark" if SESSION.absorption_mode else "light"
+    for name, bg in SESSION.side_dock_groupboxes.items():
+        bg.setStyleSheet(open(f"data/docked_group_box_border_{oldmode}.css").read())
+    VIEWER.theme = newmode
 
 def tally_checked_widgets():
     # keep track of visible channels in global list and then toggle layer visibility
@@ -272,16 +282,16 @@ all_boxes = check_creator2(userInfo.channels)
 # @magicgui(call_button='Change Mode',
 #         Mode={"widget_type": "RadioButtons","orientation": "vertical",
 #         "choices": [("Multichannel Mode", 1), ("Composite Mode", 2)]})#,layout = 'horizontal')
-def toggle_session_mode_catch_exceptions(target_mode):
-    try:
-        toggle_session_mode(target_mode)
-    except (ValueError,TypeError) as e:
-        print(e)
-        # Might trigger when SESSION.cell_under_mouse holds information on a cell from context mode
-        VIEWER.status = f"Can't enter {target_mode} Mode right now. Move your mouse around a bit first please"
+def toggle_session_mode_catch_exceptions(target_mode, from_mouse = True):
+    # try:
+    toggle_session_mode(target_mode, from_mouse)
+    # except (ValueError,TypeError) as e:
+    #     print(e)
+    #     # Might trigger when SESSION.cell_under_mouse holds information on a cell from context mode
+    #     VIEWER.status = f"Can't enter {target_mode} Mode right now. Move your mouse around a bit first please"
 
 
-def toggle_session_mode(target_mode):
+def toggle_session_mode(target_mode, from_mouse: bool):
     def _save_validation(VIEWER, Mode):
         res = userInfo._save_validation(to_disk=False)
         if res:
@@ -292,6 +302,9 @@ def toggle_session_mode(target_mode):
             VIEWER.status = f'{Mode} Mode enabled. But, there was a problem saving your decisions. Close your data file?'
             return False
     
+    # Change widget display
+    SESSION.widget_dictionary['switch mode combo'].setCurrentText(target_mode)
+    SESSION.widget_dictionary['page cell id'].clear() #This can only cause issues if not cleared.
     # Do nothing in these cases
     if target_mode==SESSION.mode: return None
     SESSION.last_mode = SESSION.mode # save for later
@@ -305,7 +318,24 @@ def toggle_session_mode(target_mode):
         SESSION.last_multichannel_camera_coordinates["z"] = VIEWER.camera.zoom
     
     if target_mode=="Context":
-        target_cell_info = SESSION.cell_under_mouse
+        if not from_mouse:
+            try:
+                cid = SESSION.widget_dictionary['switch mode cell'].text()
+                if ANNOTATIONS_PRESENT:
+                    layer = SESSION.widget_dictionary['switch mode annotation'].currentText()
+                    cname = f"{layer} {cid}"
+                else:
+                    cname = str(cid)
+                target_cell_info = SESSION.current_cells[cname]
+                SESSION.cell_under_mouse = target_cell_info
+                print(target_cell_info)
+            except KeyError:
+                VIEWER.status = f"Can't find cell [{cid}] in the current page."
+                return False
+        else:
+            target_cell_info = SESSION.cell_under_mouse
+            print(target_cell_info)
+
         SESSION.context_target = target_cell_info
         cell_num = str(target_cell_info["cid"])
         # print(cell_num)
@@ -338,7 +368,7 @@ def toggle_session_mode(target_mode):
             pass
 
         # Find cells in session table near target
-        nearby_inds = SESSION.kdtree.query_ball_point([target_cell_info["center_x"],target_cell_info["center_y"]], 500) # [x,y], dist -> indices in table
+        nearby_inds = SESSION.kdtree.query_ball_point([target_cell_info["center_x"],target_cell_info["center_y"]], 550) # [x,y], dist -> indices in table
         nearby_cells = SESSION.session_cells.iloc[nearby_inds]
 
         # Add box around cells
@@ -359,20 +389,22 @@ def toggle_session_mode(target_mode):
                                             face_color='#00000000', scale=sc, features=features, text = nb_text )
         VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
         
-        _, (mX,mY), _ = SESSION.find_mouse_func(VIEWER.cursor.position, scope="local")
-        # print(f"mx {mX} and mY {mY}")
+        if from_mouse:
+            _, (mX,mY), _ = SESSION.find_mouse_func(VIEWER.cursor.position, scope="local")
+            # print(f"mx {mX} and mY {mY}")
+            # Change cursor value
+            sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary.
+            class dummyCursor:
+                def __init__(self, y, x) -> None:
+                    self.position = (y,x)
+            SESSION.display_intensity_func(VIEWER, dummyCursor((target_cell_info["center_y"]+mY-(userInfo.imageSize+2)/2)*sc,(target_cell_info["center_x"]+mX-(userInfo.imageSize+2)/2)*sc))
+
         
         # finally, set mode
         SESSION.mode = target_mode
         # Turn on / off the correct layers
         reuse_gamma()
 
-        # Change cursor value
-        sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary.
-        class dummyCursor:
-            def __init__(self, y, x) -> None:
-                self.position = (y,x)
-        SESSION.display_intensity_func(VIEWER, dummyCursor((target_cell_info["center_y"]+mY-(userInfo.imageSize+2)/2)*sc,(target_cell_info["center_x"]+mX-(userInfo.imageSize+2)/2)*sc))
 
         VIEWER.window._qt_viewer.setFocus() # return focus
         # Done. Leave function, no need to save cells
@@ -411,8 +443,9 @@ def toggle_session_mode(target_mode):
         return True
 
 
-def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo, intensity_sort_widget):
+def show_next_cell_group():
     def _save_validation(VIEWER,numcells):
+
         res = userInfo._save_validation(to_disk=False)
         if res:
             VIEWER.status = f'Next {numcells} cells loaded.'
@@ -420,39 +453,43 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
         else:
             VIEWER.status = 'There was a problem saving, so the next set of cells was not loaded. Close your data file?'
             return False
+    
+    def _get_widgets():
+        widgets = SESSION.widget_dictionary
+        intensity_sort_widget = widgets["page intensity sort"]
+        if intensity_sort_widget.currentIndex() == 0:
+            sort_option = None
+        else:
+            sort_option = intensity_sort_widget.currentText().replace("Sort page by ","")
+
+        cid = widgets["page cell id"].text()
+        page_widget = widgets["page combobox"]
+        page = int(page_widget.currentText().split()[-1])
+        if ANNOTATIONS_PRESENT:
+            ann_layer = widgets["page cell layer"].currentText()
+        else:
+            ann_layer = ""
+        return page, sort_option, cid, ann_layer
+
     if SESSION.mode == "Context":
-        toggle_session_mode_catch_exceptions("Gallery")
+        toggle_session_mode_catch_exceptions("Gallery", from_mouse=False)
         # return None # Don't allow loading of new cells when in context mode.
     # Take note of new starting point
     global PAGE_SIZE
-    page_number = int(page_cb_widget.currentText().split()[-1])
-    cell_choice = single_cell_lineEdit.text()
-
-    # Ignore annotation if not in data
-    if single_cell_combo:
-        cell_annotation = single_cell_combo.currentText()
-    else:
-        cell_annotation = ''
+    page_number,sort_option, cell_choice, cell_annotation = _get_widgets()
 
     # Assemble dict from cell choice if needed
     if cell_choice == '': 
         cell_choice = None
     else:
         cell_choice = {"ID": cell_choice, "Annotation Layer": cell_annotation}
-
-    print(f"CURRENT WIDG POSITION IS {intensity_sort_widget.currentIndex()} and type is {type(intensity_sort_widget.currentIndex())}")
-    if intensity_sort_widget.currentIndex() == 0:
-        sort_option = None
-    else:
-        sort_option = intensity_sort_widget.currentText().replace("Sort by ","")
-
+    
 
     # Save data to file from current set
     #TODO Fix amount field
     if not _save_validation(VIEWER, PAGE_SIZE):
         print(f'Could not save...')
         return None
-
 
     # Load into same mode as the current
     xydata = extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
@@ -465,9 +502,7 @@ def show_next_cell_group(page_cb_widget, single_cell_lineEdit,single_cell_combo,
         VIEWER.layers.remove_selected()
         # VIEWER.layers.clear()
         add_layers(VIEWER,RAW_PYRAMID, xydata, int(userInfo.imageSize/2))
-    
-    single_cell_lineEdit.clear() # reset the widgets
-    if single_cell_combo: single_cell_combo.setCurrentIndex(0) # reset the widgets
+
     # Perform adjustments before exiting function
     #TODO
     reuse_contrast_limits()# Only checked fluors will be visible
@@ -494,13 +529,70 @@ def toggle_statuslayer_visibility(show_widget):
     VIEWER.window._qt_viewer.setFocus()
     return True
 
+def toggle_nuclei_boxes(viewer):
+    SESSION.nuclei_boxes_vis = not SESSION.nuclei_boxes_vis
 
-def set_notes_label(display_note_widget, ID):
+    try:
+        VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible = SESSION.nuclei_boxes_vis
+    except KeyError:
+        pass
+
+    if SESSION.mode == "Context" and SESSION.nuclei_boxes_vis:
+        # try to remove any previous box layers if there are any
+        try:
+            VIEWER.layers.selection.active = VIEWER.layers["Context Nuclei Boxes"]
+            VIEWER.layers.remove_selected()
+        except KeyError:
+            pass
+
+        try:
+            VIEWER.layers.selection.active = VIEWER.layers["Context Closest Cell Box"]
+            VIEWER.layers.remove_selected()
+        except KeyError:
+            pass
+        vy, vx = viewer.cursor.position
+        sc = 1 if SESSION.image_scale is None else SESSION.image_scale
+        print(f"{vx, vy}")
+        # Find cells in session table near target
+        z,y,x = viewer.camera.center
+        nearby_inds = SESSION.kdtree.query_ball_point([x/sc,y/sc], 550) # [x,y], dist -> indices in table
+        nearby_cells = SESSION.session_cells.iloc[nearby_inds]
+
+        # Add box around cells
+        nuclei_box_coords = []
+        cids = []
+        for index, cell in nearby_cells.iterrows():
+            x1 = int(cell["XMin"]); x2 = int(cell["XMax"])
+            y1 = int(cell["YMin"]); y2 = int(cell["YMax"])
+            nuclei_box_coords.append([[y1,x1] , [y2,x2]])
+            cids.append(str(cell["Object Id"]))
+
+
+        if nuclei_box_coords:
+            features = {'cid': cids}
+            nb_color_str = 'black' if SESSION.absorption_mode else 'white' 
+            nb_color_hex = '#000000' if SESSION.absorption_mode else '#ffffff'
+            nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_str}
+            sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
+            VIEWER.add_shapes(nuclei_box_coords, name="Context Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
+                                                face_color='#00000000', scale=sc, features=features, text = nb_text )
+            VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
+
+
+
+
+def set_notes_label(ID, display_text_override = None):
+    # Instead of showing a cell's info, display this text
+    if display_text_override is not None:
+        note = f'{SESSION.saved_notes["page"]}<br><br>' + display_text_override
+        SESSION.widget_dictionary['notes label'].setText(note)
+        VIEWER.window._qt_viewer.setFocus()
+        return True
     cell_num = ID.split()[-1]; cell_anno = ID.replace(' '+cell_num,'')
-    if cell_anno == 'All':
-        cell_name = f'Cell {cell_num}'
-    else:
+    if ANNOTATIONS_PRESENT:
         cell_name = f'Cell {cell_num} from {cell_anno}'
+    else:
+        cell_name = f'Cell {cell_num}'
     try:
         note = str(SESSION.saved_notes[ID])
     except KeyError: # in case the name was off
@@ -521,7 +613,7 @@ def set_notes_label(display_note_widget, ID):
             continue
         # fluor = str(cell).replace(" Cell Intensity","")
         fluor = str(fluor)
-        intensity_str += f'<br><font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">{fluor}'
+        intensity_str += f'<br><font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">{fluor}</font>'
         def add_values(intensity_str, fluor, intensity_lookup):
             flag = True
             name = intensity_lookup + ': No data'
@@ -568,7 +660,7 @@ def set_notes_label(display_note_widget, ID):
         note = prefix + intensity_str
     else:
         note = prefix + intensity_str + f'<br><font size="5pt" color="white">{note}</font>'
-    display_note_widget.setText(note)
+    SESSION.widget_dictionary['notes label'].setText(note)
     VIEWER.window._qt_viewer.setFocus()
     return True
 ######------------------------- Image loading and processing functions ---------------------######
@@ -644,7 +736,8 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         # print(f'Next round of while. Still {len(cells)} cells left. G Row {row_g}, Col {col_g} || M Row {row_m}, Col {col_m}')
         cell = cells.pop(); 
         cell_anno = cell["Layer"]; cell_id = cell['cid']; cell_x = cell['center_x']; cell_y = cell['center_y']
-        cell_status = retrieve_status(cell_anno +' '+ str(cell_id),cell['validation_call'], new_page)
+        cname = str(cell_id) if cell_anno is None else f"{cell_anno} {cell_id}"
+        cell_status = retrieve_status(cname,cell['validation_call'], new_page)
         cid_list.append(cell_id)
         edge_col_list.append(userInfo.statuses_hex[cell_status])
         # add the rest of the layers to the viewer
@@ -689,15 +782,15 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
                 # multichannel mode: composite image
                 page_image_multichannel[fluor][(row_m-1)*(userInfo.imageSize+2)+1:row_m*(userInfo.imageSize+2)-1,
                             (cpr_m-1)*(userInfo.imageSize+2)+1:cpr_m*(userInfo.imageSize+2)-1] = cell_punchout
-                SESSION.grid_to_ID["Multichannel"][f'{row_m},{col_m}'] = cell_anno + ' ' + str(cell_id)
-                SESSION.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cell_anno + ' ' + str(cell_id)
+                SESSION.grid_to_ID["Multichannel"][f'{row_m},{col_m}'] = cname
+                SESSION.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cname
                 # if col_m ==1:
                 #     SESSION.page_status_layers["Multichannel"][(row_m-1)*(userInfo.imageSize+2):row_m*(userInfo.imageSize+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Multichannel")
                 col_m+=1 # so that next luminescence image is tiled 
                 
 
                 # Gallery images 
-                SESSION.grid_to_ID["Gallery"][f'{row_g},{col_g}'] = cell_anno + ' ' + str(cell_id)
+                SESSION.grid_to_ID["Gallery"][f'{row_g},{col_g}'] = cname
                 page_image_gallery[fluor][(row_g-1)*(userInfo.imageSize+2)+1:row_g*(userInfo.imageSize+2)-1, (col_g-1)*(userInfo.imageSize+2)+1:col_g*(userInfo.imageSize+2)-1] = cell_punchout
                 # SESSION.page_status_layers["Gallery"][(row_g-1)*(userInfo.imageSize+2):row_g*(userInfo.imageSize+2), (col_g-1)*(userInfo.imageSize+2):col_g*(userInfo.imageSize+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Gallery")
     
@@ -814,12 +907,15 @@ def attach_functions_to_viewer(viewer):
                 if fluor == "Composite": continue
 
                 # Requesting single pixel value from Dask array layer 0
-                v = str(int(viewer.layers["Context "+fluor].data[0][coords]))
+                try:
+                    v = str(int(viewer.layers["Context "+fluor].data[0][coords]))
+                except IndexError:
+                    v = None # Seems like this exception can trigger sometimes if you are very far off the canvas maybe
                 vals[fluor] =  v if v is not None else "-"
             
             # Now find the name of the closest cell 
             dist, closest_ind = SESSION.kdtree.query([data_coordinates[1],data_coordinates[0]])
-            if dist < 1.5*userInfo.imageSize:
+            if dist < .6*userInfo.imageSize:
                 closest_cell = SESSION.session_cells.iloc[closest_ind]
             else:
                 closest_cell = None
@@ -850,6 +946,30 @@ def attach_functions_to_viewer(viewer):
             else:
                 return str(image_name), (local_x,local_y), vals
 
+    def box_closest_context_mode_cell(cell):
+        if not SESSION.cell_under_mouse_changed or not SESSION.nuclei_boxes_vis: # Save computation and don't do this unless needed
+            return False 
+        try:
+            VIEWER.layers.selection.active = VIEWER.layers["Context Closest Cell Box"]
+            VIEWER.layers.remove_selected()
+        except KeyError:
+            pass
+        
+        #Reset flag. Important!!!
+        SESSION.cell_under_mouse_changed = False
+        layer = cell["Layer"]; cid = cell["cid"]
+        cname = cid if layer is None else f"{layer} {cid}"
+        features = {'cid_feat': [cid]}
+        cell_bbox = [[cell["YMin"],cell["XMin"]] , [cell["YMax"],cell["XMax"]] ]
+
+        sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
+        nb_color_hex = '#000000' if SESSION.absorption_mode else '#ffffff'
+        nb_text = {'string':'{cid_feat}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_hex}
+        SESSION.status_text_object = nb_text
+        VIEWER.add_shapes([cell_bbox], name="Context Closest Cell Box", shape_type="rectangle", edge_width=2, edge_color=nb_color_hex, 
+                                            face_color='#00000000', scale=sc, text = nb_text, features=features, visible=SESSION.nuclei_boxes_vis)
+        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"] 
+
     @viewer.mouse_move_callbacks.append
     def display_intensity_wrapper(viewer, event):
         display_intensity(viewer,event)
@@ -860,6 +980,7 @@ def attach_functions_to_viewer(viewer):
             cell = kw_res["cell"]
             coords = kw_res["coords"]
             vals = kw_res["vals"]
+
             # import pickle
             # with open("cell_tup.pkl","wb") as f:
             #     pickle.dump(cell_tup,f)
@@ -872,10 +993,11 @@ def attach_functions_to_viewer(viewer):
             
             if cell is not None:
                 cid = cell["Object Id"]
-                layer = cell["Analysis Region"] if ANNOTATIONS_PRESENT else "All"
-                ckey = f'{layer} {cid}'
+                layer = cell["Analysis Region"] if ANNOTATIONS_PRESENT else None
+                ckey = f'{layer} {cid}' if ANNOTATIONS_PRESENT else str(cid)
                 try:
                     cell_dict = SESSION.current_cells[ckey]
+                    if cell_dict != SESSION.cell_under_mouse: SESSION.cell_under_mouse_changed = True
                 except KeyError:
                     fetch_notes(cell, SESSION.intensity_columns)
                     center_x = int((cell['XMax']+cell['XMin'])/2)
@@ -890,9 +1012,16 @@ def attach_functions_to_viewer(viewer):
                     SESSION.current_cells[ckey] = cell_dict
                     SESSION.status_list[ckey] = validation_call
                     fetch_notes(cell, SESSION.intensity_columns)
+                    SESSION.cell_under_mouse_changed = True # If we haven't seen this cell before, it has definitely changed.
                 # Now that we have the cell dict, proceed to display
                 SESSION.cell_under_mouse =  cell_dict # save info
-                set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], ckey)
+                set_notes_label(ckey)
+                # Draw box around closest cell
+                box_closest_context_mode_cell(cell_dict)
+            else: # Not near a cell
+                set_notes_label(None, display_text_override="No cell nearby to show!")
+
+
                 
 
             # print(f"Vals is type {type(vals)} and content is {vals}")
@@ -903,7 +1032,7 @@ def attach_functions_to_viewer(viewer):
             for fluor, val in vals.items():
                 if val != "-": val = int(val)
                 output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">    {val}   </font>'
-            sc = STATUSES_TO_HEX[SESSION.status_list[str(ckey)]] if cell is not None else None
+            sc = STATUSES_TO_HEX[SESSION.status_list[str(ckey)]] if cell is not None else ''
             if not sc == "#ffffff":
                 VIEWER.status = f'<font color="{sc}">Context Mode</font> pixel intensities at {coords}: {output_str}'
             else:
@@ -917,12 +1046,12 @@ def attach_functions_to_viewer(viewer):
             SESSION.cell_under_mouse = SESSION.current_cells[cell_name] # save info
             cell_num = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_num,'')
 
-            if cell_anno == 'All':
-                image_name = f'Cell {cell_num}'
-            else:
+            if ANNOTATIONS_PRESENT:
                 image_name = f'Cell {cell_num} from {cell_anno}'
+            else:
+                image_name = f'Cell {cell_num}'
 
-            set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
+            set_notes_label(str(cell_name))
             output_str = ''
 
             for fluor, val in vals.items():
@@ -948,7 +1077,7 @@ def attach_functions_to_viewer(viewer):
         next_color_txt = list(x/255 if next_color_txt.index(x)!=3 else 1 for x in next_color_txt)
 
         SESSION.status_list[str(cell_name)] = next_status
-        set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name)) 
+        set_notes_label(str(cell_name)) 
         # Change gallery mode status layer
         try:
             ind_target = list(SESSION.grid_to_ID["Gallery"].values()).index(str(cell_name))
@@ -1026,19 +1155,22 @@ def attach_functions_to_viewer(viewer):
         VIEWER.status = ">".join(vstatus_list)
 
     @viewer.mouse_drag_callbacks.append
-    def trigger_toggle_status(viewer, event):
+    def user_clicked(viewer, event):
         #TODO decide on the behavior for clicking on a cell
         
+        layer = SESSION.cell_under_mouse['Layer']
+        cid = str(SESSION.cell_under_mouse['cid'])
         # Allow user to click on a cell to get it's name into the entry box  
-        widget = ALL_CUSTOM_WIDGETS['notes cell entry']
-        # cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-        widget.setText(f"{SESSION.cell_under_mouse['Layer']} {SESSION.cell_under_mouse['cid']}")
-
+        if ANNOTATIONS_PRESENT:
+            SESSION.widget_dictionary['notes annotation combo'].setCurrentText(layer)
+            if SESSION.mode == "Context":
+                SESSION.widget_dictionary['page cell layer'].setCurrentText(layer)
+            SESSION.widget_dictionary['switch mode annotation'].setCurrentText(layer)
+        
+        SESSION.widget_dictionary['notes cell entry'].setText(cid)
         if SESSION.mode == "Context":
-            pgc = ALL_CUSTOM_WIDGETS['page cell layer']
-            pgc.setCurrentText(SESSION.cell_under_mouse['Layer'])
-            pge = ALL_CUSTOM_WIDGETS['page cell id']
-            pge.setText(str(SESSION.cell_under_mouse['cid']))
+            SESSION.widget_dictionary['page cell id'].setText(cid)
+        SESSION.widget_dictionary['switch mode cell'].setText(cid)
 
     ''' Dynamically make new functions that can change scoring decisions with a custom keypress. This
         will allow the user to choose their own scoring decisions, colors, and keybinds'''
@@ -1072,7 +1204,7 @@ def attach_functions_to_viewer(viewer):
             cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
             if val is None:
                 return None
-            set_notes_label(ALL_CUSTOM_WIDGETS['notes label'], str(cell_name))
+            set_notes_label(str(cell_name))
             vstatus_list = copy.copy(VIEWER.status).split('>')
             vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
             VIEWER.status = ">".join(vstatus_list)
@@ -1083,15 +1215,19 @@ def attach_functions_to_viewer(viewer):
         score_all_name = f"{scoring_decision}_all_func"
         exec(f'globals()["{score_name}"], globals()["{score_all_name}"] = create_score_funcs("{scoring_decision}","{keybind}")')
 
+    ''' This function is called on a Control+left click. USed currently to changee to context mode and back'''
     @viewer.mouse_drag_callbacks.append
     def load_context_mode(viewer, event):
         print(event.modifiers)
         if "Control" in event.modifiers:
-
-            print("\nIn context mode fxn")
+            
             if SESSION.mode == "Context":
                 toggle_session_mode_catch_exceptions(SESSION.last_mode)
             else:
+                layer =SESSION.cell_under_mouse["Layer"]
+                cid = str(SESSION.cell_under_mouse["cid"])
+                SESSION.widget_dictionary['switch mode annotation'].setCurrentText(layer)
+                SESSION.widget_dictionary['switch mode cell'].setText(cid)
                 toggle_session_mode_catch_exceptions("Context")
 
 
@@ -1111,9 +1247,9 @@ def attach_functions_to_viewer(viewer):
     @viewer.bind_key('h')
     def toggle_statuslayer_visibility(viewer):
         if SESSION.mode == "Context":
-            toggle_nuclei_boxes(viewer)
-        show_vis_radio = ALL_CUSTOM_WIDGETS['show status layer radio']
-        hide_vis_radio = ALL_CUSTOM_WIDGETS['hide status layer radio']
+            return False
+        show_vis_radio = SESSION.widget_dictionary['show status layer radio']
+        hide_vis_radio = SESSION.widget_dictionary['hide status layer radio']
         if show_vis_radio.isChecked():
             show_vis_radio.setChecked(False)
             hide_vis_radio.setChecked(True)
@@ -1123,8 +1259,8 @@ def attach_functions_to_viewer(viewer):
 
     # @viewer.bind_key('Control-h')
     # def toggle_statusbox_visibility(viewer):
-    #     show_box_radio = ALL_CUSTOM_WIDGETS['show status box radio']
-    #     hide_box_radio = ALL_CUSTOM_WIDGETS['hide status box radio']
+    #     show_box_radio = SESSION.widget_dictionary['show status box radio']
+    #     hide_box_radio = SESSION.widget_dictionary['hide status box radio']
     #     if show_box_radio.isChecked():
     #         show_box_radio.setChecked(False)
     #         hide_box_radio.setChecked(True)
@@ -1133,50 +1269,11 @@ def attach_functions_to_viewer(viewer):
     #         hide_box_radio.setChecked(False)
     
     @viewer.bind_key('Shift-h')
-    def toggle_nuclei_boxes(viewer):
-        SESSION.nuclei_boxes_vis = not SESSION.nuclei_boxes_vis
-        try:
-            VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible = not VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible
-        except KeyError:
-            pass
-
-        if SESSION.mode == "Context" and SESSION.nuclei_boxes_vis:
-            # try to remove any previous box layers if there are any
-            try:
-                VIEWER.layers.selection.active = VIEWER.layers["Context Nuclei Boxes"]
-                VIEWER.layers.remove_selected()
-            except KeyError:
-                pass
-            
-            vy, vx = viewer.cursor.position
-            sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-            print(f"{vx, vy}")
-            # Find cells in session table near target
-            nearby_inds = SESSION.kdtree.query_ball_point([vx/sc,vy/sc], 125) # [x,y], dist -> indices in table
-            nearby_cells = SESSION.session_cells.iloc[nearby_inds]
-
-            # Add box around cells
-            nuclei_box_coords = []
-            cids = []
-            for index, cell in nearby_cells.iterrows():
-                x1 = int(cell["XMin"]); x2 = int(cell["XMax"])
-                y1 = int(cell["YMin"]); y2 = int(cell["YMax"])
-                nuclei_box_coords.append([[y1,x1] , [y2,x2]])
-                cids.append(str(cell["Object Id"]))
-
-            if nuclei_box_coords:
-                features = {'cid': cids}
-                nb_color_str = 'black' if SESSION.absorption_mode else 'white' 
-                nb_color_hex = '#000000' if SESSION.absorption_mode else '#ffffff'
-                nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_str}
-                sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-                VIEWER.add_shapes(nuclei_box_coords, name="Context Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
-                                                    face_color='#00000000', scale=sc, features=features, text = nb_text )
-                VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
-
-    class dummyCursor:
-        def __init__(self, y, x) -> None:
-            self.position = (y,x)
+    def toggle_boxes_wrapper(viewer):
+        if SESSION.nuclei_boxes_vis:
+            SESSION.widget_dictionary['hide boxes'].setChecked(True)
+        else:
+            SESSION.widget_dictionary['show boxes'].setChecked(True)
 
     @viewer.bind_key('Control-k')
     def restore_canvas(viewer):
@@ -1185,6 +1282,10 @@ def attach_functions_to_viewer(viewer):
     @viewer.bind_key('k')
     def recenter_canvas(viewer):
         set_viewer_to_neutral_zoom(viewer)
+
+    class dummyCursor:
+        def __init__(self, y, x) -> None:
+            self.position = (y,x)
 
     @viewer.bind_key('Up')
     def scroll_up(viewer):
@@ -1360,10 +1461,10 @@ def set_initial_adjustment_parameters(viewsettings):
 
 def fetch_notes(cell_row, intensity_col_names):
     '''Grab notes and intensities for each cell in the list and save to global dicts'''
-    if not ANNOTATIONS_PRESENT:
-        ID = "All " + str(cell_row['Object Id'])
-    else:
+    if ANNOTATIONS_PRESENT:
         ID = str(cell_row['Analysis Region']) + ' ' + str(cell_row['Object Id'])
+    else:
+        ID = str(cell_row['Object Id'])
     SESSION.saved_notes[ID] = cell_row['Notes']
     # Find out which columns are present in the Series and subset to those
     present_intensities = sorted(list(set(list(cell_row.index)).intersection(set(intensity_col_names))))
@@ -1480,8 +1581,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
 
     # Figure out which range of cells to get based on page number and size
     last_page = (len(phen_only_df.index) // page_size)+1
-    global ALL_CUSTOM_WIDGETS
-    combobox_widget =  ALL_CUSTOM_WIDGETS['page combobox']
+    combobox_widget =  SESSION.widget_dictionary['page combobox']
     # combobox_widget.addItem('Page 1')
     # If page numbers haven't been added to the widget, do it now   
     if combobox_widget.currentIndex() == -1: # This means it's empty
@@ -1522,12 +1622,6 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     SESSION.kdtree = spatial.KDTree(points)
     #(SESSION.kdtree.query_ball_point([ 1366, 15053], 100)) # x,y, dist -> index in table of 
 
-
-    # import pickle
-    # with open("session_cells.pkl","wb") as out:
-    #     pickle.dump(phen_only_df, out)
-    # exit()
-
     # Get the appropriate set
     if page_number != last_page:
         cell_set = phen_only_df[(page_number-1)*page_size: page_number*page_size]
@@ -1564,8 +1658,8 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
 
     for index,row in cell_set.iterrows():
         cid = row["Object Id"]
-        layer = row["Analysis Region"] if ANNOTATIONS_PRESENT else "All"
-        ckey = f'{layer} {cid}'
+        layer = row["Analysis Region"] if ANNOTATIONS_PRESENT else None
+        ckey = f'{layer} {cid}' if ANNOTATIONS_PRESENT else str(cid)
         fetch_notes(row, all_possible_intensities)
         center_x = int((row['XMax']+row['XMin'])/2)
         center_y = int((row['YMax']+row['YMin'])/2)
@@ -1637,7 +1731,7 @@ def GUI_execute(preprocess_class):
 def main(preprocess_class = None):
     #TODO do this in a function because this is ugly
 
-    global RAW_PYRAMID, RASTERS, VIEWER, ALL_CUSTOM_WIDGETS
+    global RAW_PYRAMID, RASTERS, VIEWER
     if preprocess_class is not None: preprocess_class.status_label.setVisible(True)
     preprocess_class._append_status_br("Loading image as raster...")
     start_time = time.time()
@@ -1699,24 +1793,46 @@ def main(preprocess_class = None):
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
     viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
 
+
     notes_label = QLabel('Placeholder note'); notes_label.setAlignment(Qt.AlignCenter)
+    notes_label.setFont(userInfo.fonts.small)
 
     #TODO arrange these more neatly
     #TODO these dock widgets cause VERY strange behavior when trying to clear all layers / load more
+    notes_entry_group = QGroupBox()
+    notes_entry_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    notes_entry_layout = QHBoxLayout(notes_entry_group)
     note_text_entry = QLineEdit()
     note_cell_entry = QLineEdit()
+    notes_entry_layout.addWidget(note_text_entry) 
+    notes_entry_layout.addWidget(note_cell_entry)
+    if ANNOTATIONS_PRESENT:
+        notes_annotation_combo = QComboBox()
+        notes_annotation_combo.addItems(ANNOTATIONS_PRESENT)
+        notes_entry_layout.addWidget(notes_annotation_combo)
+        SESSION.widget_dictionary['notes annotation combo']=notes_annotation_combo
     note_button = QPushButton("Add note for cell")
     note_text_entry.setPlaceholderText('Enter new note')
-    note_text_entry.setFixedWidth(200)
+    # note_text_entry.setFixedWidth(200)
     note_cell_entry.setPlaceholderText("Cell Id")
-    note_cell_entry.setFixedWidth(100)
+    # note_cell_entry.setFixedWidth(200)
     # Pass pointer to widgets to function on button press
     note_button.pressed.connect(lambda: replace_note(note_cell_entry, note_text_entry))
 
+    notes_all_group = QGroupBox('Annotation')
+    notes_all_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+    notes_all_layout = QVBoxLayout(notes_all_group)
+    notes_all_layout.addWidget(notes_label)
+    notes_all_layout.addWidget(notes_entry_group)
+    notes_all_layout.addWidget(note_button)
+    SESSION.widget_dictionary['notes label']=notes_label; SESSION.widget_dictionary['notes text entry']=note_text_entry
+    SESSION.widget_dictionary['notes cell entry']= note_cell_entry
+
+
+    # Change page widgets
     page_combobox = QComboBox()
     page_cell_entry = QLineEdit(); 
-    page_cell_entry.setPlaceholderText("Cell Id (optional)"); page_cell_entry.setFixedWidth(200)
-
+    page_cell_entry.setPlaceholderText("Cell Id (optional)")#; page_cell_entry.setFixedWidth(200)
     intensity_sort_box = QComboBox()
     intensity_sort_box.addItem("Sort page by Cell Id")
     for i, chn in enumerate(userInfo.channels):
@@ -1728,63 +1844,117 @@ def main(preprocess_class = None):
         local_sort = GLOBAL_SORT
         intensity_sort_box.setCurrentText(f"Sort page by {local_sort}")
     
-
+    # Change page widgets entry
     next_page_button = QPushButton("Change Page")
-
-    notes_container = viewer.window.add_dock_widget([notes_label,note_text_entry, note_cell_entry, note_button], name = 'Annotation', area = 'right')
+    page_group = QGroupBox("Page selection")
+    page_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+    page_group_layout = QVBoxLayout(page_group)
+    page_entry_group = QGroupBox()
+    page_entry_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    page_entry_layout = QHBoxLayout(page_entry_group)
+    page_entry_layout.addWidget(page_combobox)
+    page_entry_layout.addWidget(page_cell_entry)
     # Don't include annotation combobox unless it is necessary
     if ANNOTATIONS_PRESENT:
-        page_cell_combo = QComboBox(); page_cell_combo.addItems(ANNOTATIONS_PRESENT); page_cell_combo.setFixedWidth(200)
-        next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry,page_cell_combo, intensity_sort_box))
-        page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, page_cell_combo, intensity_sort_box, next_page_button], name = 'Page selection', area = 'right')
-        ALL_CUSTOM_WIDGETS["page cell layer"] = page_cell_combo
-    else:
-        next_page_button.pressed.connect(lambda: show_next_cell_group(page_combobox, page_cell_entry, None, intensity_sort_box))
-        page_container = viewer.window.add_dock_widget([page_combobox,page_cell_entry, intensity_sort_box, next_page_button], name = 'Page selection', area = 'right')
+        page_cell_combo = QComboBox(); page_cell_combo.addItems(ANNOTATIONS_PRESENT)#; page_cell_combo.setFixedWidth(200)
+        SESSION.widget_dictionary["page cell layer"] = page_cell_combo
+        page_entry_layout.addWidget(page_cell_combo)
 
+    next_page_button.pressed.connect(lambda: show_next_cell_group())
+    
+    page_group_layout.addWidget(page_entry_group)
+    page_group_layout.addWidget(intensity_sort_box)
+    page_group_layout.addWidget(next_page_button)
+    SESSION.widget_dictionary['page combobox']= page_combobox
+    SESSION.widget_dictionary['page cell id'] = page_cell_entry
+    SESSION.widget_dictionary['page intensity sort'] = intensity_sort_box
 
+    # Mode toggle tools
+    mode_group = QGroupBox("Mode")
+    mode_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+    mode_layout = QVBoxLayout(mode_group)
+
+    mode_entry_group = QGroupBox()
+    mode_entry_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    mode_entry_layout = QHBoxLayout(mode_entry_group)
     mode_switch_combo = QComboBox()
     mode_switch_combo.addItems(["Gallery","Multichannel","Context"])
+    mode_switch_cell = QLineEdit() ; mode_switch_cell.setPlaceholderText("Cell ID (optional)")
+    mode_entry_layout.addWidget(mode_switch_combo)
+    mode_entry_layout.addWidget(mode_switch_cell)
+    if ANNOTATIONS_PRESENT:
+        mode_switch_annotations = QComboBox() ; mode_switch_annotations.addItems(ANNOTATIONS_PRESENT)
+        SESSION.widget_dictionary["switch mode annotation"] = mode_switch_annotations
+        mode_entry_layout.addWidget(mode_switch_annotations)
+    else:
+        pass
+    SESSION.widget_dictionary['switch mode combo']=mode_switch_combo
+    SESSION.widget_dictionary['switch mode cell']=mode_switch_cell
+    mode_layout.addWidget(mode_entry_group)
     switch_mode_button = QPushButton("Change Mode")
-    switch_mode_button.pressed.connect(lambda: toggle_session_mode_catch_exceptions(mode_switch_combo.currentText()))
-    mode_container = viewer.window.add_dock_widget([mode_switch_combo,switch_mode_button],name ="Mode selection",area="right")
+    switch_mode_button.pressed.connect(lambda: toggle_session_mode_catch_exceptions(mode_switch_combo.currentText(), from_mouse=False))
+    mode_layout.addWidget(switch_mode_button)
     
-    status_layer_show = QRadioButton("Show label overlay"); status_layer_show.setChecked(True)
-    status_layer_hide = QRadioButton("Hide label overlay"); status_layer_hide.setChecked(False)
-    vis_group = QButtonGroup(); vis_group.addButton(status_layer_show);vis_group.addButton(status_layer_hide)
-    status_layer_hide.toggled.connect(lambda: toggle_statuslayer_visibility(status_layer_show))
+
+    # Show / hide radio buttons
+    show_hide_group = QGroupBox("Show/hide overlays")
+    show_hide_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+    show_hide_layout = QVBoxLayout(show_hide_group)
+
+    status_layer_show = QRadioButton("Show labels"); status_layer_show.setChecked(True)
+    status_layer_hide = QRadioButton("Hide labels"); status_layer_hide.setChecked(False)
+    status_layer_group = QGroupBox() 
+    status_layer_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    status_layer_layout = QHBoxLayout(status_layer_group); status_layer_layout.addWidget(status_layer_show) ; status_layer_layout.addWidget(status_layer_hide)
+    status_layer_show.setFont(userInfo.fonts.small); status_layer_hide.setFont(userInfo.fonts.small)
+    # status_layer_hide.toggled.connect(lambda: toggle_statuslayer_visibility(status_layer_show))
     status_layer_show.toggled.connect(lambda: toggle_statuslayer_visibility(status_layer_show))
-    vis_container = viewer.window.add_dock_widget([status_layer_show,status_layer_hide],name ="Show/hide overlay",area="right")
+    SESSION.widget_dictionary['show status layer radio']=status_layer_show
+    SESSION.widget_dictionary['hide status layer radio']=status_layer_hide
+    show_hide_layout.addWidget(status_layer_group)
+
+    nuc_boxes_show = QRadioButton("Show nuclei boxes"); nuc_boxes_show.setChecked(False)
+    nuc_boxes_hide = QRadioButton("Hide nuclei boxes"); nuc_boxes_hide.setChecked(True)
+    
+    nuc_boxes_group = QGroupBox()
+    nuc_boxes_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    nuc_boxes_layout = QHBoxLayout(nuc_boxes_group); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide)
+    
+    nuc_boxes_show.setFont(userInfo.fonts.small); nuc_boxes_hide.setFont(userInfo.fonts.small)
+    # nuc_boxes_hide.toggled.connect(lambda: toggle_nuclei_boxes(viewer))
+    nuc_boxes_show.toggled.connect(lambda: toggle_nuclei_boxes(viewer))
+    SESSION.widget_dictionary['show boxes']=nuc_boxes_show
+    SESSION.widget_dictionary['hide boxes']=nuc_boxes_hide
+    show_hide_layout.addWidget(nuc_boxes_group)
+
    
     absorption_widget = QPushButton("Absorption")
     absorption_widget.pressed.connect(toggle_absorption)
-    viewer.window.add_dock_widget(absorption_widget,name ="Light/dark mode",area="right")
 
+    # Create main group in a vertical stack, and add to side box
+    side_dock_group = QGroupBox()
+    side_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+    side_dock_layout = QVBoxLayout(side_dock_group)
+    side_dock_layout.addWidget(notes_all_group)
+    side_dock_layout.addWidget(page_group)
+    side_dock_layout.addWidget(mode_group)
+    side_dock_layout.addWidget(show_hide_group)
+    side_dock_layout.addWidget(absorption_widget)
+    viewer.window.add_dock_widget(side_dock_group,name ="User tools",area="right")
 
+    # Create bottom bar widgets
+    # bottom_dock_group = QGroupBox()
+    # bottom_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    # bottom_dock_layout = QHBoxLayout(bottom_dock_group)
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
-    # viewer.window.add_dock_widget(toggle_session_mode,name = 'Test', area = 'right')
-    # viewer.window.add_dock_widget(show_next_cell_group,name = 'Test2', area = 'right')
-    # viewer.window.add_dock_widget(toggle_statusbar_visibility,name = 'Test3', area = 'right')
+
     # print(f'\n {dir()}') # prints out the namespace variables 
-    ALL_CUSTOM_WIDGETS['notes label']=notes_label; ALL_CUSTOM_WIDGETS['notes text entry']=note_text_entry
-    ALL_CUSTOM_WIDGETS['notes cell entry']= note_cell_entry;ALL_CUSTOM_WIDGETS['notes button']=note_button
-    ALL_CUSTOM_WIDGETS['next page button']=next_page_button
-    ALL_CUSTOM_WIDGETS['switch mode combo']=mode_switch_combo
-    ALL_CUSTOM_WIDGETS['switch mode button']=switch_mode_button; 
-    ALL_CUSTOM_WIDGETS['show status layer radio']=status_layer_show; ALL_CUSTOM_WIDGETS['hide status layer radio']=status_layer_hide
-    ALL_CUSTOM_WIDGETS['page combobox']=page_combobox
-    ALL_CUSTOM_WIDGETS['page cell id'] = page_cell_entry
-    notes_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-    page_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-    mode_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-    vis_container.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+    SESSION.side_dock_groupboxes = {"notes":notes_all_group, "page":page_group, "mode":mode_group, "Status": status_layer_group}
 
-    # for widg in ALL_CUSTOM_WIDGETS.values():
-    #     widg.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-
-        
+    # Now process object data and fetch images
     RAW_PYRAMID=pyramid
     try:
         tumor_cell_XYs = extract_phenotype_xldata(specific_cell=SPECIFIC_CELL, sort_by_intensity=local_sort)
