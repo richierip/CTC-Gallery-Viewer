@@ -1496,7 +1496,7 @@ class ViewerPresets(QDialog):
         # If user fetched metadata, save changes to color mappings
         # self.saveColors()
 
-        self.userInfo.channels.append("Composite")
+        # self.userInfo.channels.append("Composite")
         print(f'CHANNELS : {self.userInfo.channels}')
         print(f'CHANNELS ORDER : {self.userInfo.channelOrder}')
         print(f'CHANNELS colors : {self.userInfo.channelColors}')

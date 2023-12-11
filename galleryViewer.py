@@ -273,7 +273,7 @@ def check_creator2(list_of_names):
         cb.toggled.connect(tally_checked_widgets)
     return all_boxes
 
-all_boxes = check_creator2(userInfo.channels)
+# all_boxes = check_creator2(userInfo.channels)
 
 
 ## --- Side bar functions and GUI elements 
@@ -421,9 +421,9 @@ def toggle_session_mode(target_mode, from_mouse: bool):
         if target_mode == "Multichannel":
             sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary
             row, col = list(SESSION.grid_to_ID["Multichannel"].keys())[list(SESSION.grid_to_ID["Multichannel"].values()).index(f"{SESSION.cell_under_mouse['Layer']} {str(SESSION.cell_under_mouse['cid'])}")].split(",")
-            row, col = (int(row),int(col))
+            row= int(row) #find the row for multichannel cell. Col should be irrelevant
             cellCanvasY = ((row-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
-            cellCanvasX = ((col-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
+            cellCanvasX = (len(userInfo.channels)+1)*(userInfo.imageSize+2) /2 # Add 1 to channels to account for merged image
             SESSION.last_multichannel_camera_coordinates["center"] = (cellCanvasY*sc, cellCanvasX*sc)
             # print(f"Targeting {cellCanvasY,cellCanvasX}")
             VIEWER.camera.center = SESSION.last_multichannel_camera_coordinates["center"]
@@ -1219,8 +1219,19 @@ def attach_functions_to_viewer(viewer):
     @viewer.mouse_drag_callbacks.append
     def load_context_mode(viewer, event):
         print(event.modifiers)
-        if "Control" in event.modifiers:
-            
+        if ("Control" in event.modifiers) and ("Shift" in event.modifiers):
+            pass
+        elif "Shift" in event.modifiers:
+            if SESSION.mode == "Multichannel":
+                toggle_session_mode_catch_exceptions(SESSION.last_mode)
+            else:
+                layer = SESSION.cell_under_mouse["Layer"]
+                cid = str(SESSION.cell_under_mouse["cid"])
+                SESSION.widget_dictionary['switch mode annotation'].setCurrentText(layer)
+                SESSION.widget_dictionary['switch mode cell'].setText(cid)
+                toggle_session_mode_catch_exceptions("Multichannel")
+        elif "Control" in event.modifiers:
+            # Go to context or go back to last mode
             if SESSION.mode == "Context":
                 toggle_session_mode_catch_exceptions(SESSION.last_mode)
             else:
@@ -1718,6 +1729,7 @@ def GUI_execute(preprocess_class):
     
 
     userInfo.active_channels = copy.copy(userInfo.channels)
+    userInfo.active_channels.append("Composite")
     if userInfo.global_sort == "Sort object table by Cell Id":
         GLOBAL_SORT = None
     else :
@@ -1995,13 +2007,13 @@ def main(preprocess_class = None):
         viewer.scale_bar.unit = "um"
 
     # Filter checkboxes down to relevant ones only and update color
-    all_boxes = check_creator2(userInfo.channels)
+    # print("My active channels are\n")
+    # print(userInfo.active_channels)
+    # all_boxes = check_creator2(userInfo.active_channels)
 
-    for i in range(len(all_boxes)):
-        box = all_boxes[i]
-        if box.objectName() in userInfo.channels:
-            box.setStyleSheet(f"QCheckBox {{ color: {userInfo.channelColors[box.objectName()].replace('blue','#0462d4')} }}")
-            UPDATED_CHECKBOXES.append(box)
+    for box in check_creator2(userInfo.active_channels):
+        box.setStyleSheet(f"QCheckBox {{ color: {userInfo.channelColors[box.objectName()].replace('blue','#0462d4')} }}")
+        UPDATED_CHECKBOXES.append(box)
     viewer.window.add_dock_widget(UPDATED_CHECKBOXES,area='bottom')
 
     #TODO set theme
