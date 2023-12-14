@@ -12,7 +12,7 @@ import napari
 from napari.types import ImageData
 from magicgui import magicgui #, magic_factory
 from PyQt5.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, 
-                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox)
+                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 import numpy as np
@@ -809,15 +809,15 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
             continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
         if SESSION.absorption_mode:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'minimum',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear", visible =gal_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="nearest", visible =gal_vis)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'minimum',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear", visible=mult_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="nearest", visible=mult_vis)
             
         else:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'additive',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear", visible=gal_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="nearest", visible=gal_vis)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear", visible=mult_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="nearest", visible=mult_vis)
     # if composite_only:
 
     features = {'cid': cid_list}
@@ -1887,7 +1887,7 @@ def main(preprocess_class = None):
     mode_layout = QVBoxLayout(mode_group)
 
     mode_entry_group = QGroupBox()
-    mode_entry_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    # mode_entry_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
     mode_entry_layout = QHBoxLayout(mode_entry_group)
     mode_switch_combo = QComboBox()
     mode_switch_combo.addItems(["Gallery","Multichannel","Context"])
@@ -1913,46 +1913,47 @@ def main(preprocess_class = None):
     show_hide_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
     show_hide_layout = QVBoxLayout(show_hide_group)
 
-    status_layer_show = QRadioButton("Show labels"); status_layer_show.setChecked(True)
-    status_layer_hide = QRadioButton("Hide labels"); status_layer_hide.setChecked(False)
-    status_layer_group = QGroupBox() 
-    status_layer_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
-    status_layer_layout = QHBoxLayout(status_layer_group); status_layer_layout.addWidget(status_layer_show) ; status_layer_layout.addWidget(status_layer_hide)
+    status_layer_show = QRadioButton("Show labels")#; status_layer_show.setChecked(True)
+    status_layer_hide = QRadioButton("Hide labels")#; status_layer_hide.setChecked(False)
+    # status_layer_group = QGroupBox() 
+    # status_layer_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    status_layer_layout = QHBoxLayout(); status_layer_layout.addWidget(status_layer_show) ; status_layer_layout.addWidget(status_layer_hide)
     status_layer_show.setFont(userInfo.fonts.small); status_layer_hide.setFont(userInfo.fonts.small)
     # status_layer_hide.toggled.connect(lambda: toggle_statuslayer_visibility(status_layer_show))
     status_layer_show.toggled.connect(lambda: toggle_statuslayer_visibility(status_layer_show))
     SESSION.widget_dictionary['show status layer radio']=status_layer_show
     SESSION.widget_dictionary['hide status layer radio']=status_layer_hide
-    show_hide_layout.addWidget(status_layer_group)
+    show_hide_layout.addLayout(status_layer_layout)
 
-    nuc_boxes_show = QRadioButton("Show nuclei boxes"); nuc_boxes_show.setChecked(False)
-    nuc_boxes_hide = QRadioButton("Hide nuclei boxes"); nuc_boxes_hide.setChecked(True)
+    nuc_boxes_show = QRadioButton("Show nuclei boxes")#; nuc_boxes_show.setChecked(False)
+    nuc_boxes_hide = QRadioButton("Hide nuclei boxes")#; nuc_boxes_hide.setChecked(True)
     
-    nuc_boxes_group = QGroupBox()
-    nuc_boxes_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
-    nuc_boxes_layout = QHBoxLayout(nuc_boxes_group); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide)
+    # nuc_boxes_group = QGroupBox()
+    # nuc_boxes_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    nuc_boxes_layout = QHBoxLayout(); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide)
     
     nuc_boxes_show.setFont(userInfo.fonts.small); nuc_boxes_hide.setFont(userInfo.fonts.small)
     # nuc_boxes_hide.toggled.connect(lambda: toggle_nuclei_boxes(viewer))
     nuc_boxes_show.toggled.connect(lambda: toggle_nuclei_boxes(viewer))
     SESSION.widget_dictionary['show boxes']=nuc_boxes_show
     SESSION.widget_dictionary['hide boxes']=nuc_boxes_hide
-    show_hide_layout.addWidget(nuc_boxes_group)
+    show_hide_layout.addLayout(nuc_boxes_layout)
 
    
     absorption_widget = QPushButton("Absorption")
     absorption_widget.pressed.connect(toggle_absorption)
 
     # Create main group in a vertical stack, and add to side box
+    mode_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
     side_dock_group = QGroupBox()
     side_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
-    side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
     side_dock_layout = QVBoxLayout(side_dock_group)
     side_dock_layout.addWidget(notes_all_group)
     side_dock_layout.addWidget(page_group)
     side_dock_layout.addWidget(mode_group)
     side_dock_layout.addWidget(show_hide_group)
     side_dock_layout.addWidget(absorption_widget)
+    side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
     viewer.window.add_dock_widget(side_dock_group,name ="User tools",area="right")
 
     # Create bottom bar widgets
@@ -1964,7 +1965,7 @@ def main(preprocess_class = None):
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
 
     # print(f'\n {dir()}') # prints out the namespace variables 
-    SESSION.side_dock_groupboxes = {"notes":notes_all_group, "page":page_group, "mode":mode_group, "Status": status_layer_group}
+    SESSION.side_dock_groupboxes = {"notes":notes_all_group, "page":page_group, "mode":mode_group, "hide": show_hide_group}
 
     # Now process object data and fetch images
     RAW_PYRAMID=pyramid
