@@ -59,7 +59,7 @@ class sessionVariables:
         self.last_context_camera_coordinates = {"center":(0,0),"z":1} # store the last place the user was looking in context mode
         self.grid_to_ID = {"Gallery":{}, "Multichannel":{}}
         self.page_status_layers = {"Gallery": [], "Multichannel": []}
-        self.session_cells = pd.DataFrame()
+        self.session_cells = pd.DataFrame() # all cells in all pages
         self.cell_under_mouse = {} # Will update with below info for one cell
         self.cell_under_mouse_changed = False # Stores a flag to signal this event
         self.context_target = {} # Saves information for the cell of interest in Context Mode
@@ -68,8 +68,11 @@ class sessionVariables:
                                 'YMax' : float,'YMin':float} # Holds dict of dict for the cells that are loaded on the current page in the viewer
         self.cells_per_row = {"Gallery" : 8, "Multichannel" : 4} # replaced with real numbers
         self.status_text_object = None
+        self.context_nuclei_boxes_text_object = None
+        self.context_nuclei_boxes_map_to_ind = {} # Save position in list for each cell
+        self.context_closest_cell_text_object = None
         self.absorption_mode = False # True = light mode, False = Dark mode
-        self.nuclei_boxes_vis = False
+        self.nuclei_boxes_vis = {"Gallery/Multichannel":False, "Context": "Hide"} # {"Gallery/Multichannel":True|False, "Context": "Show"|"Hide"|"Mouse"}
         self.status_layer_vis = True
         self.status_box_vis = True
         self.kdtree = None # Will hold scipy.spatial.cKDTree data structure, for use in finding nearest neighbors

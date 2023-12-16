@@ -109,7 +109,9 @@ def reuse_gamma():
 
         # VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
     try:
-        VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = SESSION.nuclei_boxes_vis
+        show_boxes = SESSION.nuclei_boxes_vis[SESSION.mode]
+        show_boxes = True if show_boxes =="Show" else False
+        VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = show_boxes
     except KeyError:
         pass
     
@@ -135,7 +137,9 @@ def reuse_contrast_limits():
         VIEWER.layers[f"{SESSION.mode} Status Numbers"].visible = SESSION.status_layer_vis
         # VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
     try:
-        VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = SESSION.nuclei_boxes_vis
+        show_boxes = SESSION.nuclei_boxes_vis[SESSION.mode]
+        show_boxes = True if show_boxes =="Show" else False
+        VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = show_boxes
     except KeyError:
         pass
 
@@ -366,6 +370,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             VIEWER.layers.remove_selected()
         except KeyError:
             pass
+        SESSION.widget_dictionary['mouse boxes'].setVisible(True) # Enable this widget
 
         # Find cells in session table near target
         nearby_inds = SESSION.kdtree.query_ball_point([target_cell_info["center_x"],target_cell_info["center_y"]], 550) # [x,y], dist -> indices in table
@@ -412,7 +417,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
     
     elif target_mode == "Multichannel" or target_mode =="Gallery":
         
-
+        SESSION.widget_dictionary['mouse boxes'].setVisible(False) # Disable this widget
         if SESSION.mode != "Context": # Now, we must be changing to Gallery OR Multichannel. Want to save to DataFrame, not disk
             _save_validation(VIEWER, target_mode)
             print(f"Number of cells in current page is {len(SESSION.current_cells)} and type is {type(SESSION.current_cells)}")
@@ -530,14 +535,18 @@ def toggle_statuslayer_visibility(show_widget):
     return True
 
 def toggle_nuclei_boxes(viewer):
-    SESSION.nuclei_boxes_vis = not SESSION.nuclei_boxes_vis
+    if SESSION.mode in ["Gallery","Multichannel"]:
+        SESSION.nuclei_boxes_vis["Gallery/Multichannel"] = not SESSION.nuclei_boxes_vis["Gallery/Multichannel"]
+        SESSION.nuclei_boxes_vis["Context"] = True if SESSION.nuclei_boxes_vis["Gallery/Multichannel"] else False
+        try:
+            VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible = SESSION.nuclei_boxes_vis
+        except KeyError:
+            pass
 
-    try:
-        VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible = SESSION.nuclei_boxes_vis
-    except KeyError:
-        pass
+    if SESSION.mode == "Context":
+        cur = ["Show","Hide","Mouse"].index(SESSION.nuclei_boxes_vis["Context"])
+        SESSION.nuclei_boxes_vis["Context"] = ["Show","Hide","Mouse"][(cur+1)%3]
 
-    if SESSION.mode == "Context" and SESSION.nuclei_boxes_vis:
         # try to remove any previous box layers if there are any
         try:
             VIEWER.layers.selection.active = VIEWER.layers["Context Nuclei Boxes"]
@@ -550,34 +559,58 @@ def toggle_nuclei_boxes(viewer):
             VIEWER.layers.remove_selected()
         except KeyError:
             pass
+
+        if SESSION.nuclei_boxes_vis["Context"] != "Show":
+            return False # Leave! Nothing more to do since the user does not want to see these boxes
         vy, vx = viewer.cursor.position
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
         print(f"{vx, vy}")
         # Find cells in session table near target
         z,y,x = viewer.camera.center
-        nearby_inds = SESSION.kdtree.query_ball_point([x/sc,y/sc], 550) # [x,y], dist -> indices in table
-        nearby_cells = SESSION.session_cells.iloc[nearby_inds]
+        # nearby_inds = SESSION.kdtree.query_ball_point([x/sc,y/sc], 550) # [x,y], dist -> indices in table
+        dists, nearby_inds = SESSION.kdtree.query([[x/sc,y/sc]], k=100) # [x,y], dist -> indices in table
+
+        nearby_cells = SESSION.session_cells.iloc[nearby_inds[0]] # List of indices comes nested when using KDTree.query() but not with query_ball_point()
 
         # Add box around cells
         nuclei_box_coords = []
         cids = []
+        validation_colors_hex = []
+        count = 0
+        SESSION.context_nuclei_boxes_map_to_ind = {} # reset this, will be different
         for index, cell in nearby_cells.iterrows():
+            cid = cell["Object Id"]
+            layer = cell["Analysis Region"] if ANNOTATIONS_PRESENT else None
+            ckey = f'{layer} {cid}' if ANNOTATIONS_PRESENT else str(cid)
             x1 = int(cell["XMin"]); x2 = int(cell["XMax"])
             y1 = int(cell["YMin"]); y2 = int(cell["YMax"])
             nuclei_box_coords.append([[y1,x1] , [y2,x2]])
             cids.append(str(cell["Object Id"]))
+            vals = cell[SESSION.validation_columns]
+            try:
+                validation_call = SESSION.status_list[ckey]
+            except KeyError:
+                try:
+                    validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation | ", "")
+                except IndexError:
+                    # row has no validation call (all zeroes). Assign to Unseen
+                    validation_call = "Unseen"
+                SESSION.status_list[ckey] = validation_call #TODO this causes issues
+            validation_colors_hex.append(userInfo.statuses_hex[validation_call])
+            SESSION.context_nuclei_boxes_map_to_ind[ckey] = count
+            count+=1
 
-
-        if nuclei_box_coords:
+        if nuclei_box_coords: # We have cells to box
             features = {'cid': cids}
             nb_color_str = 'black' if SESSION.absorption_mode else 'white' 
             nb_color_hex = '#000000' if SESSION.absorption_mode else '#ffffff'
-            nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_str}
+            
+            nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':validation_colors_hex}
+            SESSION.context_nuclei_boxes_text_object = nb_text
             sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-            VIEWER.add_shapes(nuclei_box_coords, name="Context Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
-                                                face_color='#00000000', scale=sc, features=features, text = nb_text )
-            VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
-
+            VIEWER.add_shapes(nuclei_box_coords, name="Context Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=validation_colors_hex, 
+                                                face_color='#00000000', scale=sc, features=features,text=nb_text,opacity=0.9 )
+        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
 
 
 
@@ -809,15 +842,15 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
             continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
         if SESSION.absorption_mode:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'minimum',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="nearest", visible =gal_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear", visible =gal_vis)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'minimum',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="nearest", visible=mult_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear", visible=mult_vis)
             
         else:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'additive',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="nearest", visible=gal_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear", visible=gal_vis)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="nearest", visible=mult_vis)
+                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear", visible=mult_vis)
     # if composite_only:
 
     features = {'cid': cid_list}
@@ -947,8 +980,15 @@ def attach_functions_to_viewer(viewer):
                 return str(image_name), (local_x,local_y), vals
 
     def box_closest_context_mode_cell(cell):
-        if not SESSION.cell_under_mouse_changed or not SESSION.nuclei_boxes_vis: # Save computation and don't do this unless needed
+        if not SESSION.cell_under_mouse_changed:  # Save computation and don't do this unless needed
             return False 
+        elif SESSION.nuclei_boxes_vis["Context"] == "Hide":
+            try:
+                VIEWER.layers.selection.active = VIEWER.layers["Context Closest Cell Box"]
+                VIEWER.layers.remove_selected()
+            except KeyError:
+                pass
+            return False
         try:
             VIEWER.layers.selection.active = VIEWER.layers["Context Closest Cell Box"]
             VIEWER.layers.remove_selected()
@@ -963,11 +1003,11 @@ def attach_functions_to_viewer(viewer):
         cell_bbox = [[cell["YMin"],cell["XMin"]] , [cell["YMax"],cell["XMax"]] ]
 
         sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-        nb_color_hex = '#000000' if SESSION.absorption_mode else '#ffffff'
+        nb_color_hex = userInfo.statuses_hex[SESSION.status_list[cname]] #'#000000' if SESSION.absorption_mode else '#ffffff'
         nb_text = {'string':'{cid_feat}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_hex}
-        SESSION.status_text_object = nb_text
+        SESSION.context_closest_cell_text_object = nb_text
         VIEWER.add_shapes([cell_bbox], name="Context Closest Cell Box", shape_type="rectangle", edge_width=2, edge_color=nb_color_hex, 
-                                            face_color='#00000000', scale=sc, text = nb_text, features=features, visible=SESSION.nuclei_boxes_vis)
+                        opacity=0.9, face_color='#00000000', scale=sc, text = nb_text, features=features)
         VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"] 
 
     @viewer.mouse_move_callbacks.append
@@ -1092,10 +1132,22 @@ def attach_functions_to_viewer(viewer):
             SESSION.status_text_object["color"][ind_target] = next_color_txt
             viewer.layers["Gallery Status Numbers"].text = SESSION.status_text_object
             viewer.layers["Multichannel Status Numbers"].text = SESSION.status_text_object
-            
-        except (KeyError, ValueError):
+ 
+        except (KeyError, ValueError) as e:
             # Changing a cell status that isn't in the current page using Context Mode.
-            pass 
+            print(e)
+        if SESSION.mode =="Context" and SESSION.context_nuclei_boxes_text_object is not None and SESSION.context_nuclei_boxes_map_to_ind:
+            try:
+                print("In function")
+                ind_target = SESSION.context_nuclei_boxes_map_to_ind[str(cell_name)]
+                x = viewer.layers["Context Nuclei Boxes"].edge_color
+                x[ind_target] = next_color_txt
+                viewer.layers["Context Nuclei Boxes"].edge_color = x
+                SESSION.context_nuclei_boxes_text_object["color"] = x
+                viewer.layers["Context Nuclei Boxes"].text = SESSION.context_nuclei_boxes_text_object
+            except (KeyError, ValueError) as e:
+            # Changing a cell status that isn't in the current page using Context Mode.
+                print(e)
 
     def change_status_display_forAll(next_status):
         next_color_txt = userInfo.statuses_rgba[next_status]
@@ -1137,17 +1189,22 @@ def attach_functions_to_viewer(viewer):
             cell = SESSION.cell_under_mouse
             if cell is None:
                 return False # leave if the mouse is not near a cell (not sure that this could even happen)
-            cell_name = f"{cell['Layer']} {cell['cid']}"     
+            cell_name = f"{cell['Layer']} {cell['cid']}"   
         else:
             cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
             if val is None:
                 return None
+            
 
         cur_status = SESSION.status_list[str(cell_name)]
         cur_index = list(status_colors.keys()).index(cur_status)
         next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
-    
-        
+
+        if SESSION.mode == "Context":
+            # Change Context boxes and mouse only box colors
+            VIEWER.layers["Context Closest Cell Box"].edge_color = userInfo.statuses_hex[next_status]
+            SESSION.context_closest_cell_text_object["color"] = userInfo.statuses_hex[next_status]
+            viewer.layers["Context Closest Cell Box"].text = SESSION.context_closest_cell_text_object
         change_status_display(cell_name, next_status)
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
@@ -1177,7 +1234,6 @@ def attach_functions_to_viewer(viewer):
     def create_score_funcs(scoring_decision, keybind):
         @viewer.bind_key(keybind)
         def set_score(viewer):
-            if SESSION.mode == "Context": return None
             if SESSION.mode == "Context": 
                 cell = SESSION.cell_under_mouse
                 if cell is None:
@@ -1188,6 +1244,11 @@ def attach_functions_to_viewer(viewer):
                 if val is None:
                     return None
             
+            if SESSION.mode == "Context":
+                # Change Context boxes and mouse only box colors
+                VIEWER.layers["Context Closest Cell Box"].edge_color = userInfo.statuses_hex[scoring_decision]
+                SESSION.context_closest_cell_text_object["color"] = userInfo.statuses_hex[scoring_decision]
+                viewer.layers["Context Closest Cell Box"].text = SESSION.context_closest_cell_text_object
             change_status_display(cell_name, scoring_decision)
 
             # change color of viewer status
@@ -1281,11 +1342,16 @@ def attach_functions_to_viewer(viewer):
     
     @viewer.bind_key('Shift-h')
     def toggle_boxes_wrapper(viewer):
-        if SESSION.nuclei_boxes_vis:
-            SESSION.widget_dictionary['hide boxes'].setChecked(True)
-        else:
-            SESSION.widget_dictionary['show boxes'].setChecked(True)
-
+        if SESSION.mode != "Context":
+            if SESSION.nuclei_boxes_vis["Gallery/Multichannel"]:
+                SESSION.widget_dictionary['hide boxes'].setChecked(True)
+            else:
+                SESSION.widget_dictionary['show boxes'].setChecked(True)
+        else: # Context Mode
+            cur = ["Show","Hide","Mouse"].index(SESSION.nuclei_boxes_vis["Context"])
+            new = ["Show","Hide","Mouse"][(cur+1)%3]
+            SESSION.widget_dictionary[f"{new.lower()} boxes"].setChecked(True)
+    
     @viewer.bind_key('Control-k')
     def restore_canvas(viewer):
         set_viewer_to_neutral_zoom(viewer)
@@ -1811,9 +1877,8 @@ def main(preprocess_class = None):
 
     #TODO arrange these more neatly
     #TODO these dock widgets cause VERY strange behavior when trying to clear all layers / load more
-    notes_entry_group = QGroupBox()
-    notes_entry_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
-    notes_entry_layout = QHBoxLayout(notes_entry_group)
+
+    notes_entry_layout = QHBoxLayout()
     note_text_entry = QLineEdit()
     note_cell_entry = QLineEdit()
     notes_entry_layout.addWidget(note_text_entry) 
@@ -1835,7 +1900,7 @@ def main(preprocess_class = None):
     notes_all_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
     notes_all_layout = QVBoxLayout(notes_all_group)
     notes_all_layout.addWidget(notes_label)
-    notes_all_layout.addWidget(notes_entry_group)
+    notes_all_layout.addLayout(notes_entry_layout)
     notes_all_layout.addWidget(note_button)
     SESSION.widget_dictionary['notes label']=notes_label; SESSION.widget_dictionary['notes text entry']=note_text_entry
     SESSION.widget_dictionary['notes cell entry']= note_cell_entry
@@ -1861,9 +1926,8 @@ def main(preprocess_class = None):
     page_group = QGroupBox("Page selection")
     page_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
     page_group_layout = QVBoxLayout(page_group)
-    page_entry_group = QGroupBox()
-    page_entry_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
-    page_entry_layout = QHBoxLayout(page_entry_group)
+
+    page_entry_layout = QHBoxLayout()
     page_entry_layout.addWidget(page_combobox)
     page_entry_layout.addWidget(page_cell_entry)
     # Don't include annotation combobox unless it is necessary
@@ -1874,7 +1938,7 @@ def main(preprocess_class = None):
 
     next_page_button.pressed.connect(lambda: show_next_cell_group())
     
-    page_group_layout.addWidget(page_entry_group)
+    page_group_layout.addLayout(page_entry_layout)
     page_group_layout.addWidget(intensity_sort_box)
     page_group_layout.addWidget(next_page_button)
     SESSION.widget_dictionary['page combobox']= page_combobox
@@ -1886,9 +1950,7 @@ def main(preprocess_class = None):
     mode_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
     mode_layout = QVBoxLayout(mode_group)
 
-    mode_entry_group = QGroupBox()
-    # mode_entry_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
-    mode_entry_layout = QHBoxLayout(mode_entry_group)
+    mode_entry_layout = QHBoxLayout()
     mode_switch_combo = QComboBox()
     mode_switch_combo.addItems(["Gallery","Multichannel","Context"])
     mode_switch_cell = QLineEdit() ; mode_switch_cell.setPlaceholderText("Cell ID (optional)")
@@ -1902,7 +1964,7 @@ def main(preprocess_class = None):
         pass
     SESSION.widget_dictionary['switch mode combo']=mode_switch_combo
     SESSION.widget_dictionary['switch mode cell']=mode_switch_cell
-    mode_layout.addWidget(mode_entry_group)
+    mode_layout.addLayout(mode_entry_layout)
     switch_mode_button = QPushButton("Change Mode")
     switch_mode_button.pressed.connect(lambda: toggle_session_mode_catch_exceptions(mode_switch_combo.currentText(), from_mouse=False))
     mode_layout.addWidget(switch_mode_button)
@@ -1911,40 +1973,42 @@ def main(preprocess_class = None):
     # Show / hide radio buttons
     show_hide_group = QGroupBox("Show/hide overlays")
     show_hide_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
-    show_hide_layout = QVBoxLayout(show_hide_group)
-
-    status_layer_show = QRadioButton("Show labels")#; status_layer_show.setChecked(True)
-    status_layer_hide = QRadioButton("Hide labels")#; status_layer_hide.setChecked(False)
-    # status_layer_group = QGroupBox() 
-    # status_layer_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    show_hide_layout = QVBoxLayout()
+    show_hide_group.setLayout(show_hide_layout)
+    status_layer_show = QRadioButton("Show labels"); status_layer_show.setChecked(True)
+    status_layer_hide = QRadioButton("Hide labels"); status_layer_hide.setChecked(False) 
+    
     status_layer_layout = QHBoxLayout(); status_layer_layout.addWidget(status_layer_show) ; status_layer_layout.addWidget(status_layer_hide)
+    status_layer_group = QButtonGroup() ; status_layer_group.addButton(status_layer_show); status_layer_group.addButton(status_layer_hide)
     status_layer_show.setFont(userInfo.fonts.small); status_layer_hide.setFont(userInfo.fonts.small)
-    # status_layer_hide.toggled.connect(lambda: toggle_statuslayer_visibility(status_layer_show))
+    
     status_layer_show.toggled.connect(lambda: toggle_statuslayer_visibility(status_layer_show))
     SESSION.widget_dictionary['show status layer radio']=status_layer_show
     SESSION.widget_dictionary['hide status layer radio']=status_layer_hide
     show_hide_layout.addLayout(status_layer_layout)
 
-    nuc_boxes_show = QRadioButton("Show nuclei boxes")#; nuc_boxes_show.setChecked(False)
-    nuc_boxes_hide = QRadioButton("Hide nuclei boxes")#; nuc_boxes_hide.setChecked(True)
+    nuc_boxes_show = QRadioButton("Show nuclei boxes"); nuc_boxes_show.setChecked(False)
+    nuc_boxes_hide = QRadioButton("Hide nuclei boxes"); nuc_boxes_hide.setChecked(True)
+    nuc_boxes_context = QRadioButton("Show box under mouse"); nuc_boxes_context.setChecked(False); nuc_boxes_context.setVisible(False)
+
     
-    # nuc_boxes_group = QGroupBox()
-    # nuc_boxes_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
-    nuc_boxes_layout = QHBoxLayout(); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide)
     
-    nuc_boxes_show.setFont(userInfo.fonts.small); nuc_boxes_hide.setFont(userInfo.fonts.small)
-    # nuc_boxes_hide.toggled.connect(lambda: toggle_nuclei_boxes(viewer))
-    nuc_boxes_show.toggled.connect(lambda: toggle_nuclei_boxes(viewer))
+    nuc_boxes_layout = QHBoxLayout(); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide); nuc_boxes_layout.addWidget(nuc_boxes_context)
+    nuc_boxes_group = QButtonGroup(); nuc_boxes_group.addButton(nuc_boxes_show) ; nuc_boxes_group.addButton(nuc_boxes_hide) ; nuc_boxes_group.addButton(nuc_boxes_context)
+    nuc_boxes_show.setFont(userInfo.fonts.small); nuc_boxes_hide.setFont(userInfo.fonts.small); nuc_boxes_context.setFont(userInfo.fonts.small)
+   
+    # nuc_boxes_show.tog
+    nuc_boxes_group.buttonToggled.connect(lambda: toggle_nuclei_boxes(viewer))
     SESSION.widget_dictionary['show boxes']=nuc_boxes_show
     SESSION.widget_dictionary['hide boxes']=nuc_boxes_hide
+    SESSION.widget_dictionary['mouse boxes']=nuc_boxes_context
     show_hide_layout.addLayout(nuc_boxes_layout)
 
-   
     absorption_widget = QPushButton("Absorption")
     absorption_widget.pressed.connect(toggle_absorption)
 
     # Create main group in a vertical stack, and add to side box
-    mode_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+    # mode_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
     side_dock_group = QGroupBox()
     side_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
     side_dock_layout = QVBoxLayout(side_dock_group)
@@ -1966,6 +2030,7 @@ def main(preprocess_class = None):
 
     # print(f'\n {dir()}') # prints out the namespace variables 
     SESSION.side_dock_groupboxes = {"notes":notes_all_group, "page":page_group, "mode":mode_group, "hide": show_hide_group}
+    SESSION.radiogroups = [status_layer_group, nuc_boxes_group]
 
     # Now process object data and fetch images
     RAW_PYRAMID=pyramid
