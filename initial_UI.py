@@ -697,7 +697,7 @@ class ViewerPresets(QDialog):
         else: status_color = (0,0,0)
         # convert to hex
         status_color = '#%02x%02x%02x' % status_color
-        print(status_color)
+        print(f"Status color: {status_color}")
 
         # get annotation layer from appropriate widget
         if self.phenotypeCombo.isVisible():
@@ -777,7 +777,8 @@ class ViewerPresets(QDialog):
 
     def fetchObjectDataPath(self):
         path = self.userInfo.last_system_folder_visited
-        print(path)
+
+        print(f"path {path}")
         fileName, _ = QFileDialog.getOpenFileName(self,"Select a HALO Object Data file", path,"HALO Object Data (*.csv)")
         self.userInfo.last_system_folder_visited = os.path.normpath(pathlib.Path(fileName).parent)
         self.userInfo.objectDataPath = os.path.normpath(fileName)
@@ -876,7 +877,8 @@ class ViewerPresets(QDialog):
         # Assess annotation regions in csv
         try:
             regions = list(pd.read_csv(self.userInfo.objectDataPath, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique()) 
-            print(regions)
+            
+            print(f"{self.userInfo.objectDataPath}   {regions}")
             self.annotationCombo.setVisible(True); self.annotationEdit.setVisible(False)
             self.annotationCombo.clear() ;  self.annotationEdit.clear() # Remove anything that's already there
             self.annotationCombo.addItems(regions)

@@ -3,6 +3,7 @@
 build/
 dist/
 ctc-gallery-venv/
+3.11ctc-gallery-venv/
 runtime logs/
 __pycache__/
 .vscode/

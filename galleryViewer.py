@@ -8,6 +8,7 @@ Peter Richieri
 import tifffile
 import napari
 from napari.types import ImageData
+from napari.settings import get_settings
 from magicgui import magicgui #, magic_factory
 from PyQt5.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, 
                         QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout)
@@ -15,7 +16,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 import numpy as np
 import pandas as pd
-import openpyxl # necessary, do not remove
+# import openpyxl # necessary, do not remove
 from matplotlib import cm # necessary, do not remove
 from matplotlib import colors as mplcolors # Necessary, do not remove
 import copy
@@ -23,11 +24,10 @@ import time
 import store_and_load
 import custom_color_functions # Necessary, do not remove
 from math import ceil
-from PIL import Image, ImageFont, ImageDraw
 from re import sub
 import os
 import dask.array as da
-import zarr
+# import zarr
 import scipy.spatial as spatial
 from random import randint
 
@@ -536,7 +536,7 @@ def toggle_nuclei_boxes(viewer):
         SESSION.nuclei_boxes_vis["Gallery/Multichannel"] = not SESSION.nuclei_boxes_vis["Gallery/Multichannel"]
         SESSION.nuclei_boxes_vis["Context"] = "Show" if SESSION.nuclei_boxes_vis["Gallery/Multichannel"] else "Hide"
         try:
-            VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible = SESSION.nuclei_boxes_vis
+            VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible = SESSION.nuclei_boxes_vis["Gallery/Multichannel"]
         except KeyError:
             pass
 
@@ -791,7 +791,7 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
                 positions.append(pos)
 
         if RAW_PYRAMID is None:
-            print("Using zarr/dask")
+            # print("Using zarr/dask")
             cell_punchout = SESSION.dask_array[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
         else:
             print("Using full size (raw) image. DANGER")
@@ -1003,6 +1003,8 @@ def attach_functions_to_viewer(viewer):
                         opacity=0.9, face_color='#00000000', scale=sc, text = nb_text, features=features)
         VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"] 
 
+    ''' You need to disable napari's native mouse callback that displays the status first.
+            This function is in napari.components.viewer_model.py ViewerModel._update_status_bar_from_cursor''' 
     @viewer.mouse_move_callbacks.append
     def display_intensity_wrapper(viewer, event):
         display_intensity(viewer,event)
@@ -1510,7 +1512,7 @@ def set_viewer_to_neutral_zoom(viewer, reset_session = False):
 
 def chn_key_wrapper(viewer):
     def create_fun(position,channel):
-        @viewer.bind_key(str(position+1))
+        @viewer.bind_key(str(position+1), overwrite=True)
         def toggle_channel_visibility(viewer,pos=position,chn=channel):
             
             widget_obj = UPDATED_CHECKBOXES[pos]
@@ -1817,7 +1819,7 @@ def main(preprocess_class = None):
     try:
         with tifffile.imread(userInfo.qptiff_path, aszarr=True) as zs:
             SESSION.dask_array =  da.from_zarr(zs, 0) # Saves a path to the image data that can be used later
-            
+
         
         pyramid = None
         preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
@@ -1853,12 +1855,20 @@ def main(preprocess_class = None):
         end_time = time.time()
         print(f'... completed in {end_time-start_time} seconds')
 
+    # Get rid of problematic bindings before starting napari viewer
+    settings=get_settings()
+    for binding in ["napari:hold_for_pan_zoom","napari:activate_image_pan_zoom_mode", "napari:activate_image_transform_mode"]:
+        try:
+            print(settings.shortcuts.shortcuts.pop(binding))
+        except KeyError:
+            print("Keyerror")
+            pass
     
     viewer = napari.Viewer(title=f'GalleryViewer v{VERSION_NUMBER} {SESSION.image_display_name}')
     VIEWER = viewer
     # Get rid of the crap on the left sidebar for a cleaner screen
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
-    viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
+    viewer.wfindow._qt_viewer.dockLayerControls.toggleViewAction().trigger()
 
 
     notes_label = QLabel('Placeholder note'); notes_label.setAlignment(Qt.AlignCenter)
@@ -2048,6 +2058,8 @@ def main(preprocess_class = None):
 
     set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 1.0 gamma, 0 black in, 255 white in
     attach_functions_to_viewer(viewer)
+
+
     # try:
     add_layers(viewer,pyramid,tumor_cell_XYs, int(userInfo.imageSize/2))
     # except IndexError as e:
