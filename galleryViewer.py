@@ -6,8 +6,6 @@ Peter Richieri
 
 # import IPython
 import tifffile
-import rasterio
-from rasterio.windows import Window
 import napari
 from napari.types import ImageData
 from magicgui import magicgui #, magic_factory
@@ -69,7 +67,6 @@ ADJUSTMENT_SETTINGS={"DAPI gamma": 0.5}; ORIGINAL_ADJUSTMENT_SETTINGS = {}
 SAVED_INTENSITIES={}; 
 RAW_PYRAMID=None
 SESSION.widget_dictionary = {}
-RASTERS = None
 NO_LABEL_BOX = False
 STATUS_COLORS = {}
 STATUSES_TO_HEX = store_and_load.STATUSES_HEX
@@ -537,7 +534,7 @@ def toggle_statuslayer_visibility(show_widget):
 def toggle_nuclei_boxes(viewer):
     if SESSION.mode in ["Gallery","Multichannel"]:
         SESSION.nuclei_boxes_vis["Gallery/Multichannel"] = not SESSION.nuclei_boxes_vis["Gallery/Multichannel"]
-        SESSION.nuclei_boxes_vis["Context"] = True if SESSION.nuclei_boxes_vis["Gallery/Multichannel"] else False
+        SESSION.nuclei_boxes_vis["Context"] = "Show" if SESSION.nuclei_boxes_vis["Gallery/Multichannel"] else "Hide"
         try:
             VIEWER.layers[f'{SESSION.mode} Nuclei Boxes'].visible = SESSION.nuclei_boxes_vis
         except KeyError:
@@ -726,7 +723,7 @@ def black_background(color_space, mult, CPR):
 ''' Add images layers for Gallery and Multichannel modes. Only make visible the layers for the active mode'''
 def add_layers(viewer,pyramid, cells, offset, new_page=True):
     print(f'\n---------\n \n Entering the add_layers function')
-    print(f"pyramid shape is {pyramid.shape}")
+    if pyramid is not None: print(f"pyramid shape is {pyramid.shape}")
   
     SESSION.cells_per_row["Multichannel"] = len(userInfo.channels) + 1
     SESSION.cells_per_row["Gallery"] = userInfo.cells_per_row
@@ -773,12 +770,7 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         cell_status = retrieve_status(cname,cell['validation_call'], new_page)
         cid_list.append(cell_id)
         edge_col_list.append(userInfo.statuses_hex[cell_status])
-        # add the rest of the layers to the viewer
-        if RASTERS is not None:
-            # Raster channels for qptiffs are saved as subdatasets of the opened raster object
-            num_channels = len(RASTERS) 
-        else:
-            num_channels = pyramid.shape[2] # Data is [X,Y,C]
+
 
         x1 = int(cell["XMin"] + offset - cell_x) ; x2 = int(cell["XMax"] + offset - cell_x)
         y1 = int(cell["YMin"] + offset - cell_y) ; y2 = int(cell["YMax"] + offset - cell_y)
@@ -796,15 +788,17 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
 
         for fluor, pos in userInfo.channelOrder.items(): # loop through channels
             if fluor in userInfo.channels and fluor != 'Composite':
-                # name cell layer
-                cell_name = f'Cell {cell_id} {fluor}'
-
-                # print(f'Testing if raster used: {RASTERS}') # YES can see subdatasets.
-                if RASTERS is not None:
-                    with rasterio.open(RASTERS[pos]) as channel:
-                        cell_punchout = channel.read(1,window=Window(cell_x-offset,cell_y-offset, offset*2,offset*2)).astype(np.uint8)
+                
+                if RAW_PYRAMID is None:
+                    # with tifffile.imread(userInfo.qptiff_path, aszarr=True) as zs:
+                    # print("Using zarr/dask")
+                    zs = SESSION.zarr_store 
+                    # print(f"\nAdding full size {fluor} image")
+                    cell_punchout = da.from_zarr(zs, 0)[pos][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
                 else:
-                    # rasterio reading didn't work, so entire image should be in memory as np array
+                    print("Using full size (raw) image. DANGER")
+                    # dask / zarr lazy reading didn't work, so entire image should be in memory as np array
+                    # This method is deprecated at this point. Probably won't work.
                     cell_punchout = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,pos].astype(np.uint8)
                 # print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{userInfo.channelColors[fluor]}')
 
@@ -1060,7 +1054,13 @@ def attach_functions_to_viewer(viewer):
                 box_closest_context_mode_cell(cell_dict)
             else: # Not near a cell
                 set_notes_label(None, display_text_override="No cell nearby to show!")
-
+                try:
+                    VIEWER.layers.selection.active = VIEWER.layers["Context Closest Cell Box"]
+                    VIEWER.layers.remove_selected()
+                except KeyError:
+                    pass
+                # reset active layer to an image
+                viewer.layers.selection.active = viewer.layers[f"Gallery {userInfo.channels[0]}"] 
 
                 
 
@@ -1809,32 +1809,28 @@ def GUI_execute(preprocess_class):
 def main(preprocess_class = None):
     #TODO do this in a function because this is ugly
 
-    global RAW_PYRAMID, RASTERS, VIEWER
+    global RAW_PYRAMID, VIEWER
     if preprocess_class is not None: preprocess_class.status_label.setVisible(True)
-    preprocess_class._append_status_br("Loading image as raster...")
+    preprocess_class._append_status_br("Checking data pipe to image...")
     start_time = time.time()
 
-    print(f'\nLoading pyramid from {qptiff}...\n')
+    print(f'\nChecking if image can be lazily loaded with dask / zarr {qptiff}...\n')
     try:
-        print("Try using rasterio first.")
-        with rasterio.open(qptiff) as src:
-            pyramid = src
-            raw_subdata = copy.copy(src.subdatasets)
-        # Remove overview pic and label pic from subdataset. Some other crap at the end too?  
-        #   They happen to be in the middle of the set, and aren't really well labelled.
-        to_remove = []
-        for i,sds in enumerate(raw_subdata):
-            # These are the IDS of the crap data.
-            if sds.replace('GTIFF_DIR:','')[1].isdigit() or sds.replace('GTIFF_DIR:','').startswith('9'):  
-                to_remove.append(sds)  
-        for sds in to_remove:
-            raw_subdata.remove(sds)
-        RASTERS = raw_subdata
+        with tifffile.imread(userInfo.qptiff_path, aszarr=True) as zs:
+            SESSION.zarr_store = zs
+            sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
+            for fluor in userInfo.channels:
+                if fluor == 'Composite':
+                    continue
+                pos = userInfo.channelOrder[fluor]
+                print(f"\nAdding full size {fluor} image")
+                pyramid = [da.from_zarr(zs, n)[pos] for n in range(6)] #TODO how to know how many pyramid layers?  
+            pyramid = None
 
         preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
         preprocess_class._append_status_br('Sorting object data...')
     except:
-        preprocess_class._append_status('<font color="#f5551a">  Failed.</font> Attempting to load memory-mapped object...')
+        preprocess_class._append_status('<font color="#f5551a">  Failed.</font> Attempting to load image as memory-mapped object...')
         try:
             pyramid = tifffile.memmap(qptiff)
             preprocess_class._append_status('<font color="#7dbc39">  Done. </font> Parsing object data...')
@@ -2059,13 +2055,13 @@ def main(preprocess_class = None):
 
     set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 1.0 gamma, 0 black in, 255 white in
     attach_functions_to_viewer(viewer)
-    try:
-        add_layers(viewer,pyramid,tumor_cell_XYs, int(userInfo.imageSize/2))
-    except IndexError:
-        preprocess_class._append_status('<font color="#f5551a">  Failed.<br>A requested image channel does not exist in the data!</font>')
-        # preprocess_class.findDataButton.setEnabled(True)
-        viewer.close()
-        return False
+    # try:
+    add_layers(viewer,pyramid,tumor_cell_XYs, int(userInfo.imageSize/2))
+    # except IndexError as e:
+    #     preprocess_class._append_status('<font color="#f5551a">  Failed.<br>A requested image channel does not exist in the data!</font>')
+    #     # preprocess_class.findDataButton.setEnabled(True)
+    #     viewer.close()
+    #     return False
     #TODO
     #Enable scale bar
     if SESSION.image_scale:
@@ -2085,11 +2081,7 @@ def main(preprocess_class = None):
     #TODO set theme
     VIEWER.theme = "dark"
 
-    # Finish up, and set keybindings
-    preprocess_class._append_status('<font color="#7dbc39">  Done.</font><br> Goodbye')
-    chn_key_wrapper(viewer)
-    set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
-    if preprocess_class is not None: preprocess_class.close() # close other window
+
     with tifffile.imread(userInfo.qptiff_path, aszarr=True) as zs:
         SESSION.zarr_store = zs
         sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
@@ -2101,8 +2093,13 @@ def main(preprocess_class = None):
             pyramid = [da.from_zarr(zs, n)[pos] for n in range(6) ] #TODO how to know how many pyramid layers?
             viewer.add_image(pyramid, name = f'Context {fluor}', 
                         blending = 'additive', colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]),
-                        interpolation = "linear", scale=sc, visible = False)
+                        interpolation = "linear", scale=sc, multiscale=True, visible = False)
         
+        # Finish up, and set keybindings
+        preprocess_class._append_status('<font color="#7dbc39">  Done.</font><br> Goodbye')
+        chn_key_wrapper(viewer)
+        set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
+        if preprocess_class is not None: preprocess_class.close() # close other window
         # Set adjustment settings to their default now that all images are loaded
         reuse_contrast_limits()
         reuse_gamma()
@@ -2110,10 +2107,7 @@ def main(preprocess_class = None):
         napari.run() # Start the event loop
         # zs.close()
     print('\n#Zarr object should be closed')
-    # close image file
-    if RASTERS is not None:
-        print('Not sure if we have to close this file... the "with" statement should handle it.')
-        RAW_PYRAMID.close()
+
 # Main should work now using the defaults specified at the top of this script in the global variable space
 if __name__ == '__main__':
     main()
