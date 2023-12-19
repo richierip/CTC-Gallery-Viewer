@@ -738,11 +738,9 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
     # print(f"Shapes are {SESSION.page_status_layers['Multichannel'].shape}  || {SESSION.page_status_layers['Gallery'].shape}")
     page_image_multichannel = {} ; page_image_gallery = {}
     for chn in userInfo.channels:
-        if chn == 'Composite':
-            pass
-        else:
-            page_image_gallery[chn] = black_background('Luminescence', 1, userInfo.cells_per_row)
-            page_image_multichannel[chn] = black_background('Luminescence', cpr_m, cpr_m)
+        if chn == 'Composite': continue
+        page_image_gallery[chn] = black_background('Luminescence', 1, userInfo.cells_per_row)
+        page_image_multichannel[chn] = black_background('Luminescence', cpr_m, cpr_m)
 
     # page_image = black_background('RGB',size_multiplier)
 
@@ -786,41 +784,42 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
         status_box_flags_m.append([[cXm, 0], [cXm+int(userInfo.imageSize/8), int(userInfo.imageSize/8)]]) 
 
 
+        # Create array of channel indices in image data. Will use to fetch from the dask array
+        positions = []
         for fluor, pos in userInfo.channelOrder.items(): # loop through channels
             if fluor in userInfo.channels and fluor != 'Composite':
-                
-                if RAW_PYRAMID is None:
-                    # with tifffile.imread(userInfo.qptiff_path, aszarr=True) as zs:
-                    # print("Using zarr/dask")
-                    zs = SESSION.zarr_store 
-                    # print(f"\nAdding full size {fluor} image")
-                    cell_punchout = da.from_zarr(zs, 0)[pos][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
-                else:
-                    print("Using full size (raw) image. DANGER")
-                    # dask / zarr lazy reading didn't work, so entire image should be in memory as np array
-                    # This method is deprecated at this point. Probably won't work.
-                    cell_punchout = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,pos].astype(np.uint8)
-                # print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{userInfo.channelColors[fluor]}')
+                positions.append(pos)
 
-                
+        if RAW_PYRAMID is None:
+            print("Using zarr/dask")
+            cell_punchout = SESSION.dask_array[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
+        else:
+            print("Using full size (raw) image. DANGER")
+            # dask / zarr lazy reading didn't work, so entire image should be in memory as np array
+            # This method is deprecated at this point. Probably won't work.
+            cell_punchout = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,pos].astype(np.uint8)
+        # print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{userInfo.channelColors[fluor]}')
+        
+        fluor_index = 0
+        for fluor, pos in userInfo.channelOrder.items(): # loop through channels
+            if fluor in userInfo.channels and fluor != 'Composite':
                 # multichannel mode: individual image
                 page_image_multichannel[fluor][(row_m-1)*(userInfo.imageSize+2)+1:row_m*(userInfo.imageSize+2)-1,
-                            (col_m-1)*(userInfo.imageSize+2)+1:col_m*(userInfo.imageSize+2)-1] = cell_punchout
+                            (col_m-1)*(userInfo.imageSize+2)+1:col_m*(userInfo.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
                 # multichannel mode: composite image
                 page_image_multichannel[fluor][(row_m-1)*(userInfo.imageSize+2)+1:row_m*(userInfo.imageSize+2)-1,
-                            (cpr_m-1)*(userInfo.imageSize+2)+1:cpr_m*(userInfo.imageSize+2)-1] = cell_punchout
+                            (cpr_m-1)*(userInfo.imageSize+2)+1:cpr_m*(userInfo.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
                 SESSION.grid_to_ID["Multichannel"][f'{row_m},{col_m}'] = cname
                 SESSION.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cname
                 # if col_m ==1:
                 #     SESSION.page_status_layers["Multichannel"][(row_m-1)*(userInfo.imageSize+2):row_m*(userInfo.imageSize+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Multichannel")
                 col_m+=1 # so that next luminescence image is tiled 
                 
-
                 # Gallery images 
                 SESSION.grid_to_ID["Gallery"][f'{row_g},{col_g}'] = cname
-                page_image_gallery[fluor][(row_g-1)*(userInfo.imageSize+2)+1:row_g*(userInfo.imageSize+2)-1, (col_g-1)*(userInfo.imageSize+2)+1:col_g*(userInfo.imageSize+2)-1] = cell_punchout
+                page_image_gallery[fluor][(row_g-1)*(userInfo.imageSize+2)+1:row_g*(userInfo.imageSize+2)-1, (col_g-1)*(userInfo.imageSize+2)+1:col_g*(userInfo.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
                 # SESSION.page_status_layers["Gallery"][(row_g-1)*(userInfo.imageSize+2):row_g*(userInfo.imageSize+2), (col_g-1)*(userInfo.imageSize+2):col_g*(userInfo.imageSize+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Gallery")
-    
+                fluor_index+=1
 
     gal_vis = True if SESSION.mode == "Gallery" else False
     mult_vis = not gal_vis
@@ -1817,16 +1816,10 @@ def main(preprocess_class = None):
     print(f'\nChecking if image can be lazily loaded with dask / zarr {qptiff}...\n')
     try:
         with tifffile.imread(userInfo.qptiff_path, aszarr=True) as zs:
-            SESSION.zarr_store = zs
-            sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-            for fluor in userInfo.channels:
-                if fluor == 'Composite':
-                    continue
-                pos = userInfo.channelOrder[fluor]
-                print(f"\nAdding full size {fluor} image")
-                pyramid = [da.from_zarr(zs, n)[pos] for n in range(6)] #TODO how to know how many pyramid layers?  
-            pyramid = None
-
+            SESSION.dask_array =  da.from_zarr(zs, 0) # Saves a path to the image data that can be used later
+            
+        
+        pyramid = None
         preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
         preprocess_class._append_status_br('Sorting object data...')
     except:

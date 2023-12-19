@@ -52,6 +52,7 @@ class sessionVariables:
         self.image_display_name = ""
         self.image_scale = None # None, or float representing pixels per micron
         self.zarr_store = None
+        self.dask_array = {} # {"DAPI" : dask.array}
         self.mode = "Gallery" # ['Gallery', 'Multichannel', 'Context']
         self.last_mode = "Gallery" # The previous mode of the
         self.last_gallery_camera_coordinates = {"center":(0,0),"z":1} # store the last place the user was looking in the gallery
