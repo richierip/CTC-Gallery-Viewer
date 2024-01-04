@@ -5,17 +5,32 @@ Spec file to use to bundle napari / PyQt5 project with pyinstaller
 Example command line usage:
     >pyinstaller --noconfirm --clean --log-level=DEBUG bundler.spec
 
+**Important - check your environment and match it to the path listed at BUNDLE_ROOT 
 This spec file will omit the following critical folder from your /venv/Lib/site-packages folder:
 (if they are only partially included, delete those and copy over the folders from the venv package)
-    /magicgui
-    /napari
-    /napari_console
-    /napari_plugin_engine
-    /napari_svg
-    /honestly anything related to napari
-    /rasterio
-    /freetype
-    /runtime logs
+    
+    3.11.7:
+        /magicgui
+        /napari
+        /napari_console
+        /napari_plugin_engine
+        /napari_svg
+        /honestly anything related to napari
+        /freetype
+        /distributed
+        /vispy
+        /PyQt5
+    3.10:
+        /magicgui
+        /napari
+        /napari_console
+        /napari_plugin_engine
+        /napari_svg
+        /honestly anything related to napari
+        /freetype
+    
+    Make sure the PDF guide made it to the bundle.
+
 
 Modified from this: https://github.com/tlambert03/napari/blob/e9eee2edd29dc29db0fc011c31635ee2d713abf0/bundle/napari.spec
 '''
@@ -25,13 +40,13 @@ from os.path import abspath, join, dirname, pardir
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT, BUNDLE
 from PyInstaller.utils.hooks import collect_data_files
 import napari
-VERSION_NUMBER = "1.2.1"
+VERSION_NUMBER = "1.3"
 
 sys.modules['FixTk'] = None
 
 NAPARI_ROOT = dirname(napari.__file__)
 # print(f'... What is this ... {NAPARI_ROOT}')
-BUNDLE_ROOT = r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\ctc-gallery-venv\Lib\site-packages\napari-pyinstaller\bundle"
+BUNDLE_ROOT = r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\3.11ctc-gallery-venv\Lib\site-packages\napari-pyinstaller\bundle"
 # print(f'... and this ... {BUNDLE_ROOT}')
 
 
@@ -133,18 +148,14 @@ a = Analysis(
     [r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\initial_UI.py"],
     # https://github.com/pypa/setuptools/issues/1963  # noqa
     hiddenimports=['pkg_resources.py2_warn', 'importlib', 'napari.conftest',
-                 'imagecodecs._shared', 'imagecodecs._imcd', 'magicgui', 'rasterio'],
+                 'imagecodecs._shared', 'imagecodecs._imcd', 'magicgui'],
     pathex=[BUNDLE_ROOT],
     datas=DATA_FILES + [(r'C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\*.PNG', 'data' ),
-            (r"C:\Users\prich\Desktop\Projects\MGH\gallery_app\mghiconwhite.ico", 'data')],
+            (r"C:\Users\prich\Desktop\Projects\MGH\gallery_app\mghiconwhite.ico", 'data'),
+            (r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\*.pdf", 'data'),
+            (r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\*.css", 'data')],
     hookspath=[HOOKSPATH],
-    excludes=[
-        'FixTk',
-        'tcl',
-        'tk',
-        '_tkinter',
-        'tkinter',
-        'Tkinter',
+    excludes=['FixTk','tcl','tk','_tkinter','tkinter','Tkinter',
     ],
     cipher=BLOCK_CIPHER,
 )

@@ -11,7 +11,7 @@ from napari.types import ImageData
 from napari.settings import get_settings
 from magicgui import magicgui #, magic_factory
 from PyQt5.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, 
-                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout)
+                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 import numpy as np
@@ -305,6 +305,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
     
     # Change widget display
     SESSION.widget_dictionary['switch mode combo'].setCurrentText(target_mode)
+    if SESSION.nuclei_boxes_vis["Context"]=="Mouse": SESSION.widget_dictionary['hide boxes'].setChecked(True)
     SESSION.widget_dictionary['page cell id'].clear() #This can only cause issues if not cleared.
     # Do nothing in these cases
     if target_mode==SESSION.mode: return None
@@ -473,19 +474,16 @@ def show_next_cell_group():
             ann_layer = ""
         return page, sort_option, cid, ann_layer
 
+    page_number,sort_option, cell_choice, cell_annotation = _get_widgets()
     if SESSION.mode == "Context":
         toggle_session_mode_catch_exceptions("Gallery", from_mouse=False)
         # return None # Don't allow loading of new cells when in context mode.
-    # Take note of new starting point
-    global PAGE_SIZE
-    page_number,sort_option, cell_choice, cell_annotation = _get_widgets()
 
     # Assemble dict from cell choice if needed
     if cell_choice == '': 
         cell_choice = None
     else:
         cell_choice = {"ID": cell_choice, "Annotation Layer": cell_annotation}
-    
 
     # Save data to file from current set
     #TODO Fix amount field
@@ -531,7 +529,15 @@ def toggle_statuslayer_visibility(show_widget):
     VIEWER.window._qt_viewer.setFocus()
     return True
 
-def toggle_nuclei_boxes(viewer):
+def toggle_nuclei_boxes(btn, checked):
+
+    # Always reset the user's input selection
+    VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
+
+    if not checked:
+        # This function gets called twice, since when one radio button in the group is toggle on, the other is toggled off. 
+        #   We only want to run this function once so the other call can be discarded
+        return False 
     if SESSION.mode in ["Gallery","Multichannel"]:
         SESSION.nuclei_boxes_vis["Gallery/Multichannel"] = not SESSION.nuclei_boxes_vis["Gallery/Multichannel"]
         SESSION.nuclei_boxes_vis["Context"] = "Show" if SESSION.nuclei_boxes_vis["Gallery/Multichannel"] else "Hide"
@@ -541,8 +547,16 @@ def toggle_nuclei_boxes(viewer):
             pass
 
     if SESSION.mode == "Context":
-        cur = ["Show","Hide","Mouse"].index(SESSION.nuclei_boxes_vis["Context"])
-        SESSION.nuclei_boxes_vis["Context"] = ["Show","Hide","Mouse"][(cur+1)%3]
+        match btn.text():
+            case str(x) if 'mouse' in x.lower():
+                selected_mode = "Mouse"
+            case str(x) if 'hide' in x.lower():
+                selected_mode = "Hide"
+            case _:
+                selected_mode = "Show"
+        print(f"BEFORE toggle, mode is {SESSION.nuclei_boxes_vis['Context']}")
+        SESSION.nuclei_boxes_vis["Context"] = selected_mode
+        print(f"After toggle, mode is {SESSION.nuclei_boxes_vis['Context']}")
 
         # try to remove any previous box layers if there are any
         try:
@@ -556,14 +570,16 @@ def toggle_nuclei_boxes(viewer):
             VIEWER.layers.remove_selected()
         except KeyError:
             pass
+        # Always reset the user's input selection
+        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
 
         if SESSION.nuclei_boxes_vis["Context"] != "Show":
             return False # Leave! Nothing more to do since the user does not want to see these boxes
-        vy, vx = viewer.cursor.position
+        vy, vx = VIEWER.cursor.position
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
         print(f"{vx, vy}")
         # Find cells in session table near target
-        z,y,x = viewer.camera.center
+        z,y,x = VIEWER.camera.center
         # nearby_inds = SESSION.kdtree.query_ball_point([x/sc,y/sc], 550) # [x,y], dist -> indices in table
         dists, nearby_inds = SESSION.kdtree.query([[x/sc,y/sc]], k=100) # [x,y], dist -> indices in table
 
@@ -593,6 +609,7 @@ def toggle_nuclei_boxes(viewer):
                     # row has no validation call (all zeroes). Assign to Unseen
                     validation_call = "Unseen"
                 SESSION.status_list[ckey] = validation_call #TODO this causes issues
+                SESSION.saved_notes[ckey] = "-"
             validation_colors_hex.append(userInfo.statuses_hex[validation_call])
             SESSION.context_nuclei_boxes_map_to_ind[ckey] = count
             count+=1
@@ -607,7 +624,8 @@ def toggle_nuclei_boxes(viewer):
             sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
             VIEWER.add_shapes(nuclei_box_coords, name="Context Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=validation_colors_hex, 
                                                 face_color='#00000000', scale=sc, features=features,text=nb_text,opacity=0.9 )
-        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
+        # Always reset the user's input selection
+        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
 
 
 
@@ -893,8 +911,20 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
 ###################################################################
 ######---------------- Viewer Key Bindings, -----------------######
 ###################################################################
-def attach_functions_to_viewer(viewer):
 
+def catch_exceptions_to_log_file(error_type="runtime-exception"):
+    def custom_error(func):
+        def wrapper(*args, **kwargs):
+            try:
+                func(*args, **kwargs)
+            except Exception as e:
+                userInfo.log_exception(e, error_type=error_type)
+                VIEWER.status = f"Encountered a non-critical error when attempting to '{func.__name__}'. Please forward the error log to the developer"
+        return wrapper
+    return custom_error
+
+# @catch_exceptions_to_log_file
+def attach_functions_to_viewer(viewer):
     ##----------------- Live functions that control mouseover behavior on images 
     status_colors = STATUS_COLORS
     '''Take a pixel coordinate (y,x) and return an (x,y) position for the image that contains the pixel in the image grid'''
@@ -913,6 +943,7 @@ def attach_functions_to_viewer(viewer):
 
     '''Locate mouse on the canvas. Returns the name of the cell under the mouse, current mouse 
         coordinates, and pixel values for each channel in a dict'''
+    @catch_exceptions_to_log_file("runtime_find-mouse")
     def find_mouse(data_coordinates, scope = 'world'):
         
         # print(f"{data_coordinates}")
@@ -972,10 +1003,11 @@ def attach_functions_to_viewer(viewer):
             else:
                 return str(image_name), (local_x,local_y), vals
 
+    @catch_exceptions_to_log_file("runtime_box-cell-near-mouse")
     def box_closest_context_mode_cell(cell):
         if not SESSION.cell_under_mouse_changed:  # Save computation and don't do this unless needed
             return False 
-        elif SESSION.nuclei_boxes_vis["Context"] == "Hide":
+        elif SESSION.nuclei_boxes_vis["Context"] != "Mouse": # Don't run the regular routine unless the "Show under mouse only" radio is toggled on
             try:
                 VIEWER.layers.selection.active = VIEWER.layers["Context Closest Cell Box"]
                 VIEWER.layers.remove_selected()
@@ -1009,6 +1041,7 @@ def attach_functions_to_viewer(viewer):
     def display_intensity_wrapper(viewer, event):
         display_intensity(viewer,event)
 
+    @catch_exceptions_to_log_file("runtime_process-cell-under-mouse")
     def display_intensity(viewer, event): 
         if SESSION.mode == "Context":
             kw_res = find_mouse(event.position)
@@ -1137,6 +1170,8 @@ def attach_functions_to_viewer(viewer):
         except (KeyError, ValueError) as e:
             # Changing a cell status that isn't in the current page using Context Mode.
             print(e)
+        
+        print(f"!!! {SESSION.mode} {SESSION.context_nuclei_boxes_text_object} {SESSION.context_nuclei_boxes_map_to_ind}")
         if SESSION.mode =="Context" and SESSION.context_nuclei_boxes_text_object is not None and SESSION.context_nuclei_boxes_map_to_ind:
             try:
                 print("In function")
@@ -1182,9 +1217,10 @@ def attach_functions_to_viewer(viewer):
             # Changing a cell status that isn't in the current page using Context Mode.
             pass 
 
-    @viewer.bind_key('j')
+    # @viewer.bind_key('j')
     @viewer.bind_key('Space', overwrite = True)
     @viewer.bind_key('Ctrl-Space', overwrite = True)
+    @catch_exceptions_to_log_file("runtime_assign-next-status")
     def toggle_status(viewer):
         if SESSION.mode == "Context": 
             cell = SESSION.cell_under_mouse
@@ -1201,7 +1237,7 @@ def attach_functions_to_viewer(viewer):
         cur_index = list(status_colors.keys()).index(cur_status)
         next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
 
-        if SESSION.mode == "Context":
+        if SESSION.mode == "Context" and SESSION.nuclei_boxes_vis["Context"] == "Mouse":
             # Change Context boxes and mouse only box colors
             VIEWER.layers["Context Closest Cell Box"].edge_color = userInfo.statuses_hex[next_status]
             SESSION.context_closest_cell_text_object["color"] = userInfo.statuses_hex[next_status]
@@ -1213,6 +1249,7 @@ def attach_functions_to_viewer(viewer):
         VIEWER.status = ">".join(vstatus_list)
 
     @viewer.mouse_drag_callbacks.append
+    @catch_exceptions_to_log_file("runtime_left-click-cell")
     def user_clicked(viewer, event):
         #TODO decide on the behavior for clicking on a cell
         
@@ -1234,6 +1271,7 @@ def attach_functions_to_viewer(viewer):
         will allow the user to choose their own scoring decisions, colors, and keybinds'''
     def create_score_funcs(scoring_decision, keybind):
         @viewer.bind_key(keybind)
+        @catch_exceptions_to_log_file("runtime_change-status")
         def set_score(viewer):
             if SESSION.mode == "Context": 
                 cell = SESSION.cell_under_mouse
@@ -1245,7 +1283,7 @@ def attach_functions_to_viewer(viewer):
                 if val is None:
                     return None
             
-            if SESSION.mode == "Context":
+            if SESSION.mode == "Context" and SESSION.nuclei_boxes_vis["Context"] == "Mouse":
                 # Change Context boxes and mouse only box colors
                 VIEWER.layers["Context Closest Cell Box"].edge_color = userInfo.statuses_hex[scoring_decision]
                 SESSION.context_closest_cell_text_object["color"] = userInfo.statuses_hex[scoring_decision]
@@ -1256,8 +1294,10 @@ def attach_functions_to_viewer(viewer):
             vstatus_list = copy.copy(VIEWER.status).split('>')
             vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
             VIEWER.status = ">".join(vstatus_list)
+
         @viewer.bind_key(f'Control-{keybind}')
         @viewer.bind_key(f'Shift-{keybind}')
+        @catch_exceptions_to_log_file("runtime_change-status-all")
         def set_scoring_all(viewer):
             if SESSION.mode == "Context": return None
             
@@ -1279,6 +1319,7 @@ def attach_functions_to_viewer(viewer):
 
     ''' This function is called on a Control+left click. USed currently to changee to context mode and back'''
     @viewer.mouse_drag_callbacks.append
+    @catch_exceptions_to_log_file("runtime_change-session-mode-on-click")
     def load_context_mode(viewer, event):
         print(event.modifiers)
         if ("Control" in event.modifiers) and ("Shift" in event.modifiers):
@@ -1303,7 +1344,7 @@ def attach_functions_to_viewer(viewer):
                 SESSION.widget_dictionary['switch mode cell'].setText(cid)
                 toggle_session_mode_catch_exceptions("Context")
 
-
+    #TODO catch exceptions here? Probably need to inform the user.
     @viewer.bind_key('s')
     def save_validation(viewer):
         print(f'Using stored dataframe')
@@ -1318,7 +1359,9 @@ def attach_functions_to_viewer(viewer):
         return None
 
     @viewer.bind_key('h')
+    @catch_exceptions_to_log_file("runtime_toggle-status")
     def toggle_statuslayer_visibility(viewer):
+        raise Exception(f"This should work!")
         if SESSION.mode == "Context":
             return False
         show_vis_radio = SESSION.widget_dictionary['show status layer radio']
@@ -1342,6 +1385,7 @@ def attach_functions_to_viewer(viewer):
     #         hide_box_radio.setChecked(False)
     
     @viewer.bind_key('Shift-h')
+    @catch_exceptions_to_log_file("runtime_toggle-cell-boxes")
     def toggle_boxes_wrapper(viewer):
         if SESSION.mode != "Context":
             if SESSION.nuclei_boxes_vis["Gallery/Multichannel"]:
@@ -1366,6 +1410,7 @@ def attach_functions_to_viewer(viewer):
             self.position = (y,x)
 
     @viewer.bind_key('Up')
+    @catch_exceptions_to_log_file("runtime_arrow-pan")
     def scroll_up(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
@@ -1378,6 +1423,7 @@ def attach_functions_to_viewer(viewer):
         # SESSION.mouse_coords = (curX, curY-step_size)
 
     @viewer.bind_key('Down')
+    @catch_exceptions_to_log_file("runtime_arrow-pan")
     def scroll_down(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
@@ -1390,6 +1436,7 @@ def attach_functions_to_viewer(viewer):
         # SESSION.mouse_coords = (curX, curY+step_size)
     
     @viewer.bind_key('Left')
+    @catch_exceptions_to_log_file("runtime_arrow-pan")
     def scroll_left(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
@@ -1406,6 +1453,7 @@ def attach_functions_to_viewer(viewer):
         # viewer.cursor.position = viewer.window.qt_viewer._map_canvas2world([x,y])
 
     @viewer.bind_key('Right')   
+    @catch_exceptions_to_log_file("runtime_arrow-pan")
     def scroll_right(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
@@ -1421,6 +1469,7 @@ def attach_functions_to_viewer(viewer):
     @viewer.bind_key('Shift-Up') 
     @viewer.bind_key('Control-Right')  
     @viewer.bind_key('Control-Up')   
+    @catch_exceptions_to_log_file("runtime_arrow-zoom")
     def zoom_in(viewer):
         step_size = 1.15
         # _,y,x = viewer.camera.center
@@ -1441,6 +1490,7 @@ def attach_functions_to_viewer(viewer):
     @viewer.bind_key('Shift-Down') 
     @viewer.bind_key('Control-Left')  
     @viewer.bind_key('Control-Down')  
+    @catch_exceptions_to_log_file("runtime_arrow-zoom")
     def zoom_out(viewer):
         step_size = 1.15
         # _,y,x = viewer.camera.center
@@ -1458,10 +1508,12 @@ def attach_functions_to_viewer(viewer):
     
     @viewer.bind_key('a', overwrite=True)
     @viewer.bind_key('Ctrl-a', overwrite=True)
+    @catch_exceptions_to_log_file("runtime_toggle-absorption")
     def trigger_absorption(viewer):
         toggle_absorption()
     
     @viewer.bind_key('r')
+    @catch_exceptions_to_log_file("runtime_reset-viewsettings")
     def reset_viewsettings(viewer):
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS = copy.copy(ORIGINAL_ADJUSTMENT_SETTINGS)
@@ -1469,6 +1521,7 @@ def attach_functions_to_viewer(viewer):
         reuse_contrast_limits()
     
     @viewer.bind_key('i')
+    @catch_exceptions_to_log_file("runtime_switch-interpolation")
     def toggle_interpolation(viewer):
         current = VIEWER.layers[f"Gallery {userInfo.channels[0]}"].interpolation
         if current == 'nearest':
@@ -1482,6 +1535,7 @@ def attach_functions_to_viewer(viewer):
             VIEWER.layers["Context "+fluor].interpolation = new
 
     @viewer.bind_key('Alt-m')
+    @catch_exceptions_to_log_file("runtime_open-manual")
     def open_guide(viewer):
         os.startfile(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
 
@@ -1758,6 +1812,10 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
 
 def replace_note(cell_widget, note_widget):
     cellID = cell_widget.text(); note = note_widget.text()
+    if ANNOTATIONS_PRESENT:
+        annotation_layer = SESSION.widget_dictionary['notes annotation combo'].currentText()
+        cellID = f"{annotation_layer} {cellID}"
+
     # try: 
     #     cellID = int(cellID)
     # except ValueError:
@@ -1868,7 +1926,7 @@ def main(preprocess_class = None):
     VIEWER = viewer
     # Get rid of the crap on the left sidebar for a cleaner screen
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
-    viewer.wfindow._qt_viewer.dockLayerControls.toggleViewAction().trigger()
+    viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
 
 
     notes_label = QLabel('Placeholder note'); notes_label.setAlignment(Qt.AlignCenter)
@@ -1997,7 +2055,7 @@ def main(preprocess_class = None):
     nuc_boxes_show.setFont(userInfo.fonts.small); nuc_boxes_hide.setFont(userInfo.fonts.small); nuc_boxes_context.setFont(userInfo.fonts.small)
    
     # nuc_boxes_show.tog
-    nuc_boxes_group.buttonToggled.connect(lambda: toggle_nuclei_boxes(viewer))
+    nuc_boxes_group.buttonToggled[QAbstractButton, bool].connect(toggle_nuclei_boxes)
     SESSION.widget_dictionary['show boxes']=nuc_boxes_show
     SESSION.widget_dictionary['hide boxes']=nuc_boxes_hide
     SESSION.widget_dictionary['mouse boxes']=nuc_boxes_context
@@ -2045,6 +2103,7 @@ def main(preprocess_class = None):
             preprocess_class._append_status(f'<br><font color="#f5551a">The annotations(s) {", ".join(str(x) for x in ANNOTATIONS)} might not exist in the data, or other column names may have changed!</font>')
         viewer.close()
         return None # allows the input GUI to continue running
+    
     except StopIteration as e:
         print("StopIteration raised in extract_phenotype_xldata")
         # Triggered by the next(cell_set.values()) call. If there are no cells to show, this happens
@@ -2100,19 +2159,19 @@ def main(preprocess_class = None):
                         blending = 'additive', colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]),
                         interpolation = "linear", scale=sc, multiscale=True, visible = False)
         
-        # Finish up, and set keybindings
-        preprocess_class._append_status('<font color="#7dbc39">  Done.</font><br> Goodbye')
-        chn_key_wrapper(viewer)
-        set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
-        if preprocess_class is not None: preprocess_class.close() # close other window
-        # Set adjustment settings to their default now that all images are loaded
-        reuse_contrast_limits()
-        reuse_gamma()
-        viewer.layers.selection.active = viewer.layers[f"Gallery {userInfo.channels[0]}"]  
-        napari.run() # Start the event loop
-        # zs.close()
+    # Finish up, and set keybindings
+    preprocess_class._append_status('<font color="#7dbc39">  Done.</font><br> Goodbye')
+    chn_key_wrapper(viewer)
+    set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
+    if preprocess_class is not None: preprocess_class.close() # close other window
+    # Set adjustment settings to their default now that all images are loaded
+    reuse_contrast_limits()
+    reuse_gamma()
+    viewer.layers.selection.active = viewer.layers[f"Gallery {userInfo.channels[0]}"]  
+    napari.run() # Start the event loop
+    # zs.close()
     print('\n#Zarr object should be closed')
 
-# Main should work now using the defaults specified at the top of this script in the global variable space
+# Main Probably doesn't work as is right now. Will need to instantiate a new user class to run everything
 if __name__ == '__main__':
     main()
