@@ -511,6 +511,8 @@ def show_next_cell_group():
         # VIEWER.layers.clear()
         add_layers(VIEWER,RAW_PYRAMID, xydata, int(userInfo.imageSize/2))
 
+    # Update scoring tally for this page
+    set_initial_scoring_tally(userInfo.objectDataFrame, SESSION.session_cells)
     # Perform adjustments before exiting function
     #TODO
     reuse_contrast_limits()# Only checked fluors will be visible
@@ -641,7 +643,80 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
         # Always reset the user's input selection
         VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
 
+def set_initial_scoring_tally(df, session_df, page_only = True):
 
+    if not page_only:
+        cols = [x for x in session_df.columns if "Validation" in x]
+        SESSION.scoring_tally =  {"Session":{"Unseen":0}, "Data":{"Unseen":0}, "Page":{"Unseen":0}}
+        print(SESSION.scoring_tally)
+
+        # Counts for the whole cell set
+        melted = df[cols].melt()
+        scoring_tally_series = melted.loc[melted["value"] == 1].value_counts()
+        for ind in scoring_tally_series.index:
+            score = ind[0].replace("Validation | ",'')
+            SESSION.scoring_tally["Data"][score] = scoring_tally_series[ind]
+        
+        # Counts for just the cells in this session
+        melted = session_df[cols].melt()
+        scoring_tally_series = melted.loc[melted["value"] == 1].value_counts()
+        for ind in scoring_tally_series.index:
+            score = ind[0].replace("Validation | ",'')
+            SESSION.scoring_tally["Session"][score] = scoring_tally_series[ind]
+    
+    # Counts for the page
+    for score in [x["validation_call"] for i,x in SESSION.current_cells.items()]:
+        try:
+            SESSION.scoring_tally["Page"][score] = SESSION.scoring_tally["Page"][score] + 1
+        except KeyError:
+            SESSION.scoring_tally["Page"][score] = 1
+
+
+def update_scoring_tally(old_score, new_score):
+    SESSION.scoring_tally["Session"][new_score] = SESSION.scoring_tally["Session"][new_score] +1
+    SESSION.scoring_tally["Session"][old_score] = SESSION.scoring_tally["Session"][old_score] -1
+
+    SESSION.scoring_tally["Data"][new_score] = SESSION.scoring_tally["Data"][new_score] +1
+    SESSION.scoring_tally["Data"][old_score] = SESSION.scoring_tally["Data"][old_score] -1
+
+    SESSION.scoring_tally["Page"][new_score] = SESSION.scoring_tally["Page"][new_score] +1
+    SESSION.scoring_tally["Page"][old_score] = SESSION.scoring_tally["Page"][old_score] -1
+
+def update_scoring_tally_all(new_score):
+
+    for score, key in userInfo.statuses.items():
+        
+        if score == new_score:
+            difference = userInfo.page_size - SESSION.scoring_tally["Page"][score]
+            SESSION.scoring_tally["Session"][score] = SESSION.scoring_tally["Session"][score] + difference
+            SESSION.scoring_tally["Data"][score] = SESSION.scoring_tally["Data"][score] + difference
+            SESSION.scoring_tally["Page"][score] = userInfo.page_size
+        else:    
+            SESSION.scoring_tally["Session"][score] = SESSION.scoring_tally["Session"][score] - SESSION.scoring_tally["Page"][score]
+            SESSION.scoring_tally["Data"][score] = SESSION.scoring_tally["Data"][score] - SESSION.scoring_tally["Page"][score]
+            SESSION.scoring_tally["Page"][score] = 0
+
+
+def set_scoring_label(scoring_label):
+    display_string = "Page / Session / Full object data count<br>"
+    count = 0
+    for score, tally in SESSION.scoring_tally["Data"].items():
+        try:
+            page_tally = SESSION.scoring_tally["Page"][score]
+        except KeyError: # Could trigger when the page has no cells of this scoring type
+            page_tally = 0
+            SESSION.scoring_tally["Page"][score] = 0
+        
+        session_tally = SESSION.scoring_tally["Session"][score]
+        if count % 2 == 0: 
+            display_string+="<br>"
+            display_string += f'<font color="{userInfo.statuses_hex[score]}">{score}: {page_tally} / {session_tally} / {tally}</font>'
+        else:
+            display_string += f'&nbsp;&nbsp; | &nbsp;&nbsp;<font color="{userInfo.statuses_hex[score]}">{score}: {page_tally} / {session_tally} / {tally}</font>'
+        # Add a new line for every other score
+        count+=1
+    scoring_label.setText(display_string)
+    return True
 
 def set_notes_label(ID, display_text_override = None):
     # Instead of showing a cell's info, display this text
@@ -664,7 +739,6 @@ def set_notes_label(ID, display_text_override = None):
         prefix = f'{SESSION.saved_notes["page"]}<br><font color="{STATUSES_TO_HEX[status]}">{cell_name}</font>'
     else:
         prefix = f'{SESSION.saved_notes["page"]}<br>{cell_name}'
-
 
     # Add intensities
     intensity_series = SAVED_INTENSITIES[ID]
@@ -1190,7 +1264,7 @@ def attach_functions_to_viewer(viewer):
             # Changing a cell status that isn't in the current page using Context Mode.
             print(e)
         
-        print(f"!!! {SESSION.mode} {SESSION.context_nuclei_boxes_text_object} {SESSION.context_nuclei_boxes_map_to_ind}")
+        # print(f"!!! {SESSION.mode} {SESSION.context_nuclei_boxes_text_object} {SESSION.context_nuclei_boxes_map_to_ind}")
         if SESSION.mode =="Context" and SESSION.context_nuclei_boxes_text_object is not None and SESSION.context_nuclei_boxes_map_to_ind:
             try:
                 print("In function")
@@ -1262,6 +1336,10 @@ def attach_functions_to_viewer(viewer):
             SESSION.context_closest_cell_text_object["color"] = userInfo.statuses_hex[next_status]
             viewer.layers["Context Closest Cell Box"].text = SESSION.context_closest_cell_text_object
         change_status_display(cell_name, next_status)
+
+        # Update scoring tally
+        update_scoring_tally(cur_status, next_status)
+        set_scoring_label(SESSION.widget_dictionary["scoring label"])
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
         vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
@@ -1307,6 +1385,11 @@ def attach_functions_to_viewer(viewer):
                 VIEWER.layers["Context Closest Cell Box"].edge_color = userInfo.statuses_hex[scoring_decision]
                 SESSION.context_closest_cell_text_object["color"] = userInfo.statuses_hex[scoring_decision]
                 viewer.layers["Context Closest Cell Box"].text = SESSION.context_closest_cell_text_object
+            
+            # Update scoring tally BEFORE changing status 
+            update_scoring_tally(SESSION.status_list[str(cell_name)], scoring_decision)
+            set_scoring_label(SESSION.widget_dictionary["scoring label"])
+
             change_status_display(cell_name, scoring_decision)
 
             # change color of viewer status
@@ -1320,6 +1403,10 @@ def attach_functions_to_viewer(viewer):
         def set_scoring_all(viewer):
             if SESSION.mode == "Context": return None
             
+            # Update scoring tally BEFORE changing status 
+            update_scoring_tally_all(scoring_decision)
+            set_scoring_label(SESSION.widget_dictionary["scoring label"])
+
             change_status_display_forAll(scoring_decision)
 
             cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
@@ -1732,6 +1819,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     if userInfo.filters:
         phen_only_df = phen_only_df.query(_create_filter_query(userInfo.filters)).reset_index()
 
+
     # Figure out which range of cells to get based on page number and size
     last_page = (len(phen_only_df.index) // page_size)+1
     combobox_widget =  SESSION.widget_dictionary['page combobox']
@@ -1983,6 +2071,16 @@ def main(preprocess_class = None):
     SESSION.widget_dictionary['notes label']=notes_label; SESSION.widget_dictionary['notes text entry']=note_text_entry
     SESSION.widget_dictionary['notes cell entry']= note_cell_entry
 
+    # Label to show user how many cells have been assigned to each scoring decision bucket
+    scoring_label = QLabel('Scoring goes here')
+    scoring_label.setAlignment(Qt.AlignCenter)
+    scoring_label.setFont(userInfo.fonts.small)
+
+    scoring_group = QGroupBox("Scoring Information")
+    scoring_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+    scoring_layout = QVBoxLayout(scoring_group)
+    scoring_layout.addWidget(scoring_label)
+    SESSION.widget_dictionary['scoring label'] = scoring_label
 
     # Change page widgets
     page_combobox = QComboBox()
@@ -2091,6 +2189,7 @@ def main(preprocess_class = None):
     side_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
     side_dock_layout = QVBoxLayout(side_dock_group)
     side_dock_layout.addWidget(notes_all_group)
+    side_dock_layout.addWidget(scoring_group)
     side_dock_layout.addWidget(page_group)
     side_dock_layout.addWidget(mode_group)
     side_dock_layout.addWidget(show_hide_group)
@@ -2139,6 +2238,10 @@ def main(preprocess_class = None):
     set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 1.0 gamma, 0 black in, 255 white in
     attach_functions_to_viewer(viewer)
 
+
+    # record initial counts for each scoring label
+    set_initial_scoring_tally(userInfo.objectDataFrame, SESSION.session_cells, page_only=False)
+    set_scoring_label(SESSION.widget_dictionary["scoring label"])
 
     # try:
     add_layers(viewer,pyramid,tumor_cell_XYs, int(userInfo.imageSize/2))

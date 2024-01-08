@@ -87,6 +87,7 @@ class sessionVariables:
         self.find_mouse_func = Callable
         self.side_dock_groupboxes = {}
         self.widget_dictionary = {}
+        self.scoring_tally = {"Page":{},"Session":{}, "Data":{}} # {"Session" : {"Unseen" : 1000, "Confirmed": 25 , ... }}, "Data":{"Unseen":2000, ...} }
 
 @dataclass
 class ViewerFonts:
