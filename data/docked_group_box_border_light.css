@@ -7,4 +7,4 @@ QGroupBox{background-color: transparent;
     
 QGroupBox:title {
     subcontrol-position: top middle; 
-    padding: 2px 0px 0px 3px;}
+    padding: 4px 0px 0px 3px;}

@@ -106,8 +106,12 @@ def reuse_gamma():
 
         # VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
     try:
-        show_boxes = SESSION.nuclei_boxes_vis[SESSION.mode]
-        show_boxes = True if show_boxes =="Show" else False
+        print(SESSION.nuclei_boxes_vis)
+        print(SESSION.mode)
+        if SESSION.mode == "Context":
+            show_boxes = True if SESSION.nuclei_boxes_vis["Context"] =="Show" else False
+        else:
+            show_boxes = SESSION.nuclei_boxes_vis["Gallery/Multichannel"]
         VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = show_boxes
     except KeyError:
         pass
@@ -296,7 +300,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
     def _save_validation(VIEWER, Mode):
         res = userInfo._save_validation(to_disk=False)
         if res:
-            VIEWER.status = f'{Mode} Mode enabled. Decisions loaded successfully.'
+            VIEWER.status = f'{Mode} Mode enabled. Scoring decisions loaded successfully.'
             return True
         else:
             #TODO Maybe it's an excel sheet?
@@ -332,7 +336,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
                 SESSION.cell_under_mouse = target_cell_info
                 print(target_cell_info)
             except KeyError:
-                VIEWER.status = f"Can't find cell [{cid}] in the current page."
+                VIEWER.status = f"Can't find cell [{cid}] in the current page. Staying in {SESSION.mode} mode"
                 return False
         else:
             target_cell_info = SESSION.cell_under_mouse
@@ -370,28 +374,6 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             pass
         SESSION.widget_dictionary['mouse boxes'].setVisible(True) # Enable this widget
 
-        # Find cells in session table near target
-        nearby_inds = SESSION.kdtree.query_ball_point([target_cell_info["center_x"],target_cell_info["center_y"]], 550) # [x,y], dist -> indices in table
-        nearby_cells = SESSION.session_cells.iloc[nearby_inds]
-
-        # Add box around cells
-        nuclei_box_coords = []
-        cids = []
-        for index, cell in nearby_cells.iterrows():
-            x1 = int(cell["XMin"]); x2 = int(cell["XMax"])
-            y1 = int(cell["YMin"]); y2 = int(cell["YMax"])
-            nuclei_box_coords.append([[y1,x1] , [y2,x2]])
-            cids.append(str(cell["Object Id"]))
-
-        features = {'cid': cids}
-        nb_color_str = 'black' if SESSION.absorption_mode else 'white' 
-        nb_color_hex = '#000000' if SESSION.absorption_mode else '#ffffff'
-        nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_str}
-        sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-        VIEWER.add_shapes(nuclei_box_coords, name="Context Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
-                                            face_color='#00000000', scale=sc, features=features, text = nb_text )
-        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
-        
         if from_mouse:
             _, (mX,mY), _ = SESSION.find_mouse_func(VIEWER.cursor.position, scope="local")
             # print(f"mx {mX} and mY {mY}")
@@ -405,9 +387,18 @@ def toggle_session_mode(target_mode, from_mouse: bool):
         
         # finally, set mode
         SESSION.mode = target_mode
+
+        # Will trigger this function with the appropriate input to box and color the nearest
+        #   100 cells around the target cell 
+        if SESSION.nuclei_boxes_vis["Gallery/Multichannel"]:
+            radio = SESSION.widget_dictionary['show boxes']
+        else:
+            radio = SESSION.widget_dictionary['hide boxes']
+        toggle_nuclei_boxes(radio, True, 
+            [target_cell_info["center_x"],target_cell_info["center_y"]])
+
         # Turn on / off the correct layers
         reuse_gamma()
-
 
         VIEWER.window._qt_viewer.setFocus() # return focus
         # Done. Leave function, no need to save cells
@@ -422,8 +413,25 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             
 
         if target_mode == "Multichannel":
+            if not from_mouse:
+                try:
+                    cid = SESSION.widget_dictionary['switch mode cell'].text()
+                    if ANNOTATIONS_PRESENT:
+                        layer = SESSION.widget_dictionary['switch mode annotation'].currentText()
+                        target_cell_name = f"{layer} {cid}"
+                    else:
+                        target_cell_name = str(cid)
+                    target_cell_info = SESSION.current_cells[cname]
+                    SESSION.cell_under_mouse = target_cell_info
+                    print(target_cell_info)
+                except KeyError:
+                    VIEWER.status = f"Can't find cell [{cid}] in the current page. Staying in {SESSION.mode} mode"
+                    return False
+            else:
+                target_cell_name = f"{SESSION.cell_under_mouse['Layer']} {str(SESSION.cell_under_mouse['cid'])}"
+
             sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary
-            row, col = list(SESSION.grid_to_ID["Multichannel"].keys())[list(SESSION.grid_to_ID["Multichannel"].values()).index(f"{SESSION.cell_under_mouse['Layer']} {str(SESSION.cell_under_mouse['cid'])}")].split(",")
+            row, col = list(SESSION.grid_to_ID["Multichannel"].keys())[list(SESSION.grid_to_ID["Multichannel"].values()).index(target_cell_name)].split(",")
             row= int(row) #find the row for multichannel cell. Col should be irrelevant
             cellCanvasY = ((row-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
             cellCanvasX = (len(userInfo.channels)+1)*(userInfo.imageSize+2) /2 # Add 1 to channels to account for merged image
@@ -529,15 +537,16 @@ def toggle_statuslayer_visibility(show_widget):
     VIEWER.window._qt_viewer.setFocus()
     return True
 
-def toggle_nuclei_boxes(btn, checked):
+def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
 
     # Always reset the user's input selection
     VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
-
+    print("\nEntered function")
     if not checked:
         # This function gets called twice, since when one radio button in the group is toggle on, the other is toggled off. 
         #   We only want to run this function once so the other call can be discarded
-        return False 
+        return False
+    print("\nPassed Check") 
     if SESSION.mode in ["Gallery","Multichannel"]:
         SESSION.nuclei_boxes_vis["Gallery/Multichannel"] = not SESSION.nuclei_boxes_vis["Gallery/Multichannel"]
         SESSION.nuclei_boxes_vis["Context"] = "Show" if SESSION.nuclei_boxes_vis["Gallery/Multichannel"] else "Hide"
@@ -556,6 +565,7 @@ def toggle_nuclei_boxes(btn, checked):
                 selected_mode = "Show"
         print(f"BEFORE toggle, mode is {SESSION.nuclei_boxes_vis['Context']}")
         SESSION.nuclei_boxes_vis["Context"] = selected_mode
+        SESSION.nuclei_boxes_vis["Gallery/Multichannel"] = True if selected_mode == "Show" else False
         print(f"After toggle, mode is {SESSION.nuclei_boxes_vis['Context']}")
 
         # try to remove any previous box layers if there are any
@@ -581,9 +591,13 @@ def toggle_nuclei_boxes(btn, checked):
         # Find cells in session table near target
         z,y,x = VIEWER.camera.center
         # nearby_inds = SESSION.kdtree.query_ball_point([x/sc,y/sc], 550) # [x,y], dist -> indices in table
-        dists, nearby_inds = SESSION.kdtree.query([[x/sc,y/sc]], k=100) # [x,y], dist -> indices in table
+        if distanceSearchCenter:
+            dists, nearby_inds = SESSION.kdtree.query(distanceSearchCenter, k=100) # [x,y], dist -> indices in table
+            print("\nHere!")
+        else:
+            dists, nearby_inds = SESSION.kdtree.query([x/sc,y/sc], k=100) # [x,y], dist -> indices in table
 
-        nearby_cells = SESSION.session_cells.iloc[nearby_inds[0]] # List of indices comes nested when using KDTree.query() but not with query_ball_point()
+        nearby_cells = SESSION.session_cells.iloc[nearby_inds] 
 
         # Add box around cells
         nuclei_box_coords = []
@@ -707,7 +721,7 @@ def set_notes_label(ID, display_text_override = None):
     if note == '-' or note == '' or note is None: 
         note = prefix + intensity_str
     else:
-        note = prefix + intensity_str + f'<br><font size="5pt" color="white">{note}</font>'
+        note = prefix + intensity_str + f'<br><font size="5pt">{note}</font>'
     SESSION.widget_dictionary['notes label'].setText(note)
     VIEWER.window._qt_viewer.setFocus()
     return True
@@ -943,7 +957,7 @@ def attach_functions_to_viewer(viewer):
 
     '''Locate mouse on the canvas. Returns the name of the cell under the mouse, current mouse 
         coordinates, and pixel values for each channel in a dict'''
-    @catch_exceptions_to_log_file("runtime_find-mouse")
+    # @catch_exceptions_to_log_file("runtime_find-mouse")
     def find_mouse(data_coordinates, scope = 'world'):
         
         # print(f"{data_coordinates}")
@@ -1112,7 +1126,12 @@ def attach_functions_to_viewer(viewer):
             else:
                 VIEWER.status = f'Context Mode pixel intensities at {coords}: {output_str}'
         elif SESSION.mode == "Gallery" or SESSION.mode == "Multichannel":
-            cell_name,coords,vals = find_mouse(event.position, scope = 'grid') 
+            try:
+                cell_name,coords,vals = find_mouse(event.position, scope = 'grid') 
+            except TypeError:
+                # find_mouse seems to be returning NoneType sometimes (no idea why) which can't be unpacked
+                return False
+            
             if vals is None:
                 # Don't do anything else
                 VIEWER.status = 'Out of bounds'
@@ -1361,7 +1380,7 @@ def attach_functions_to_viewer(viewer):
     @viewer.bind_key('h')
     @catch_exceptions_to_log_file("runtime_toggle-status")
     def toggle_statuslayer_visibility(viewer):
-        raise Exception(f"This should work!")
+        # raise Exception(f"This should work!")
         if SESSION.mode == "Context":
             return False
         show_vis_radio = SESSION.widget_dictionary['show status layer radio']
@@ -1384,6 +1403,8 @@ def attach_functions_to_viewer(viewer):
     #         show_box_radio.setChecked(True)
     #         hide_box_radio.setChecked(False)
     
+    ''' Toggles to the next GUI radio button given the current session, and also changes the session variable to
+        track the current state '''
     @viewer.bind_key('Shift-h')
     @catch_exceptions_to_log_file("runtime_toggle-cell-boxes")
     def toggle_boxes_wrapper(viewer):
