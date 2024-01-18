@@ -11,7 +11,7 @@ from napari.types import ImageData
 from napari.settings import get_settings
 from magicgui import magicgui #, magic_factory
 from PyQt5.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, 
-                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton, QScrollArea)
+                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton, QScrollArea, QDockWidget)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 import numpy as np
@@ -120,7 +120,7 @@ def reuse_gamma():
 
 
 def reuse_contrast_limits():
-        # Make everything silent
+        # Make everything active
     for layer in VIEWER.layers:
         layer.visible = False
     for fluor in userInfo.channels:
@@ -159,7 +159,10 @@ def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData:
             continue
         _update_dictionary(fluor,Gamma)
         for m in ["Gallery", "Multichannel", "Context"]:
+            # VIEWER.layers[f"{m} "+fluor].visible = True
             adjust_composite_gamma(VIEWER.layers[f"{m} "+fluor],Gamma)
+            # if ("Composite" not in userInfo.active_channels or fluor not in userInfo.active_channels) or SESSION.mode !=m: 
+            #     VIEWER.layers[f"{m} "+fluor].visible = False
     VIEWER.window._qt_viewer.setFocus()
 
 adjust_gamma_widget.visible=False
@@ -307,7 +310,13 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             #TODO Maybe it's an excel sheet?
             VIEWER.status = f'{Mode} Mode enabled. But, there was a problem saving your decisions. Close your data file?'
             return False
-    
+
+    if SESSION.mode != "Context" and from_mouse:
+        _, coords, _ = SESSION.find_mouse_func(VIEWER.cursor.position)
+        if coords is None: # User has clicked outside the grid area with the chage mode hotkey pressed. Alert and do nothing.
+            VIEWER.status = f"Invalid cell selection: cannot change mode to {target_mode}"
+            return False
+
     # Change widget display
     SESSION.widget_dictionary['switch mode combo'].setCurrentText(target_mode)
     if SESSION.nuclei_boxes_vis["Context"]=="Mouse": SESSION.widget_dictionary['hide boxes'].setChecked(True)
@@ -722,9 +731,9 @@ def set_scoring_label(scoring_label):
         session_tally = SESSION.scoring_tally["Session"][score]
         if count % 2 == 0: 
             display_string+="<br>"
-            display_string += f'<font color="{userInfo.statuses_hex[score]}">{score}: {page_tally} / {session_tally} / {tally}</font>'
+            display_string += f'<font color="{userInfo.statuses_hex[score]}">{score}: {page_tally}/{session_tally}/{tally}</font>'
         else:
-            display_string += f' | <font color="{userInfo.statuses_hex[score]}">{score}: {page_tally} / {session_tally} / {tally}</font>'
+            display_string += f' | <font color="{userInfo.statuses_hex[score]}">{score}: {page_tally}/{session_tally}/{tally}</font>'
         # Add a new line for every other score
         count+=1
     scoring_label.setText(display_string)
@@ -1075,8 +1084,8 @@ def attach_functions_to_viewer(viewer):
                     # get_value returns a tuple from the dask array like (0,25). First number indicates the pyramid layer, second is the value.
                     # Seems to default to returning the current layer shown to the user which is acceptable.
                     # v = str(int(viewer.layers["Context "+fluor].data[0][coords]))
-                except IndexError:
-                    v = None # Seems like this exception can trigger sometimes if you are very far off the canvas maybe. Also if the channel is not visible
+                except (IndexError, TypeError):
+                    v = None # If you are very far off the canvas, get_value returns None. Also if the channel is not visible
                 vals[fluor] =  v if v is not None else "-"
             
             # Now find the name of the closest cell 
@@ -1235,8 +1244,6 @@ def attach_functions_to_viewer(viewer):
                 # reset active layer to an image
                 viewer.layers.selection.active = viewer.layers[f"Gallery {userInfo.channels[0]}"] 
 
-                
-
             # print(f"Vals is type {type(vals)} and content is {vals}")
             # exit()
             # Deal with pixel intensities
@@ -1246,12 +1253,16 @@ def attach_functions_to_viewer(viewer):
                 if val != "-": val = int(val)
                 output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">    {val}   </font>'
             
-            ckey = "Context Mode" if cell is None else ckey # default display name is the mouse is not under a cell
+            if ANNOTATIONS_PRESENT:
+                cname = f'Cell {cid} from {layer}' if cell is not None else "Context Mode" # default display name is the mouse is not under a cell
+            else:
+                cname = f'Cell {cid}' if cell is not None else "Context Mode" # default display name is the mouse is not under a cell
+            
             sc = STATUSES_TO_HEX[SESSION.status_list[str(ckey)]] if cell is not None else '' # 
             if not sc == "#ffffff":
-                VIEWER.status = f'<font color="{sc}">{ckey}</font> pixel intensities at {coords}: {output_str}'
+                VIEWER.status = f'<font color="{sc}">{cname}</font> pixel intensities at {coords}: {output_str}'
             else:
-                VIEWER.status = f'{ckey} pixel intensities at {coords}: {output_str}'
+                VIEWER.status = f'{cname} pixel intensities at {coords}: {output_str}'
 
         elif SESSION.mode == "Gallery" or SESSION.mode == "Multichannel":
             try:
@@ -1285,6 +1296,11 @@ def attach_functions_to_viewer(viewer):
             else:
                 VIEWER.status = f'{image_name} intensities at {coords}: {output_str}'
 
+            #TODO decide on tooltip behavior. Could change appearance by making 
+            # To make this work in napari version 0.4.18, made a change in napari.components.viewer_model.py
+                # In ViewerModel._update_status_bar_from_cursor , commented out lines 483 to 489
+            # viewer.tooltip.visible = True
+            # viewer.tooltip.text = output_str
 
     SESSION.display_intensity_func = display_intensity
     SESSION.find_mouse_func = find_mouse
@@ -1579,8 +1595,14 @@ def attach_functions_to_viewer(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
         step_size = ((userInfo.imageSize+2)*sc)
+        if SESSION.mode == "Context":
+            fluor = userInfo.channels[0]
+            if fluor == "Composite":
+                fluor = userInfo.channels[1] # Make sure to get an actual channel. Doesn't matter which one
+            mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
+            step_size *= (mult**2)
 
-        viewer.camera.center = (y-step_size,x)
+        viewer.camera.center = (y-int(step_size),x)
 
         curY, curX = SESSION.mouse_coords
         display_intensity(viewer, dummyCursor(curY-step_size, curX))
@@ -1591,9 +1613,14 @@ def attach_functions_to_viewer(viewer):
     def scroll_down(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        step_size = ((userInfo.imageSize+2)*sc)
-
-        viewer.camera.center = (y+step_size,x)
+        step_size = ((userInfo.imageSize+2)*sc) 
+        if SESSION.mode == "Context":
+            fluor = userInfo.channels[0]
+            if fluor == "Composite":
+                fluor = userInfo.channels[1] # Make sure to get an actual channel. Doesn't matter which one
+            mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
+            step_size *= (mult**2)
+        viewer.camera.center = (y+int(step_size),x)
 
         curY, curX = SESSION.mouse_coords
         display_intensity(viewer, dummyCursor(curY+step_size, curX))
@@ -1605,8 +1632,14 @@ def attach_functions_to_viewer(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
         step_size = ((userInfo.imageSize+2)*sc)
+        if SESSION.mode == "Context":
+            fluor = userInfo.channels[0]
+            if fluor == "Composite":
+                fluor = userInfo.channels[1] # Make sure to get an actual channel. Doesn't matter which one
+            mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
+            step_size *= (mult**2)
 
-        viewer.camera.center = (y,x-step_size)
+        viewer.camera.center = (y,x-int(step_size))
         curY, curX = SESSION.mouse_coords
         display_intensity(viewer, dummyCursor(curY,curX-step_size))
         # SESSION.mouse_coords = (curX-step_size, curY)
@@ -1622,7 +1655,14 @@ def attach_functions_to_viewer(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
         step_size = ((userInfo.imageSize+2)*sc)
-        viewer.camera.center = (y,x+step_size)
+        if SESSION.mode == "Context":
+            fluor = userInfo.channels[0]
+            if fluor == "Composite":
+                fluor = userInfo.channels[1] # Make sure to get an actual channel. Doesn't matter which one
+            mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
+            step_size *= (mult**2)
+
+        viewer.camera.center = (y,x+int(step_size))
         curY, curX = SESSION.mouse_coords
         # SESSION.mouse_coords = (curX+step_size, curY)\
         display_intensity(viewer, dummyCursor(curY, curX+step_size))
@@ -1634,8 +1674,8 @@ def attach_functions_to_viewer(viewer):
     @viewer.bind_key('Control-Right')  
     @viewer.bind_key('Control-Up')   
     @catch_exceptions_to_log_file("runtime_arrow-zoom")
-    def zoom_in(viewer):
-        step_size = 1.15
+    def zoom_in(viewer: napari.Viewer):
+        step_size = 1.15 if SESSION.mode !="Context" else 1.4
         # _,y,x = viewer.camera.center
         # curY, curX = SESSION.mouse_coords
         # print(f"Before moving, camera coords are {viewer.camera.center}")
@@ -1656,7 +1696,7 @@ def attach_functions_to_viewer(viewer):
     @viewer.bind_key('Control-Down')  
     @catch_exceptions_to_log_file("runtime_arrow-zoom")
     def zoom_out(viewer):
-        step_size = 1.15
+        step_size = 1.15 if SESSION.mode !="Context" else 1.4
         # _,y,x = viewer.camera.center
         # curY, curX = SESSION.mouse_coords
         # print(f"Before moving, camera coords are {viewer.camera.center}")
@@ -2275,14 +2315,7 @@ def main(preprocess_class = None):
     side_dock_layout.addWidget(show_hide_group)
     side_dock_layout.addWidget(absorption_widget)
     # side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-    # Make sure user can scroll through tools if there are too many
-    scroll_area = QScrollArea()
-    scroll_area.setWidgetResizable(True)
-    # scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-    scroll_area.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-    scroll_area.setWidget(side_dock_group)
-    side_dock_group.setAlignment(Qt.AlignHCenter)
+
 
 
 
@@ -2293,8 +2326,9 @@ def main(preprocess_class = None):
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
-    viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right")
+    # viewer.window.add_dock_widget(QLabel("TEST!"), name ="User tools 2",area="right", tabify = True)
 
+    # right_dock.adjustSize()
 
     # print(f'\n {dir()}') # prints out the namespace variables 
     SESSION.side_dock_groupboxes = {"notes":notes_all_group, "page":page_group, "mode":mode_group, "hide": show_hide_group, 
@@ -2303,7 +2337,7 @@ def main(preprocess_class = None):
     
     preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
     preprocess_class._append_status_br('Sorting object data...')
-
+    
     # Now process object data and fetch images
     RAW_PYRAMID=pyramid
     try:
@@ -2330,7 +2364,7 @@ def main(preprocess_class = None):
 
     preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
     preprocess_class._append_status(' Adding gallery images to viewer...')
-    set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 1.0 gamma, 0 black in, 255 white in
+    set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 0.5 gamma, 0 black in, 255 white in
     attach_functions_to_viewer(viewer)
 
 
@@ -2378,7 +2412,9 @@ def main(preprocess_class = None):
             pyramid = [da.from_zarr(zs, n)[pos] for n in range(6) ] #TODO how to know how many pyramid layers?
             viewer.add_image(pyramid, name = f'Context {fluor}', 
                         blending = 'additive', colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]),
-                        interpolation = "linear", scale=sc, multiscale=True, visible = False)
+                        interpolation = "linear", scale=sc, multiscale=True, visible = True) 
+            # Adding these images with visible = True allows viewsettings changes to be applied to them when the user loads into gallery mode at first.
+            # Otherwise, it seems that they only display the changes after they have been visible for some small period of time in the viewer. 
         
     # Finish up, and set keybindings
     preprocess_class._append_status('<font color="#7dbc39">  Done.</font><br> Goodbye')
@@ -2389,6 +2425,23 @@ def main(preprocess_class = None):
     reuse_contrast_limits()
     reuse_gamma()
     viewer.layers.selection.active = viewer.layers[f"Gallery {userInfo.channels[0]}"]  
+
+
+    # Make sure user can scroll through tools if there are too many
+    scroll_area = QScrollArea()
+    scroll_area.setWidgetResizable(True)
+    # scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+    scroll_area.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+    scroll_area.setWidget(side_dock_group)
+    side_dock_group.setAlignment(Qt.AlignHCenter)
+    scroll_area.resize(side_dock_group.sizeHint())
+    right_dock = viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right", tabify = True)
+    # right_dock.resize(side_dock_group.sizeHint())
+    print(side_dock_group.sizeHint())
+    print(scroll_area.sizeHint())
+    print(right_dock.sizeHint())
+    # QDockWidget.setProperty()
     napari.run() # Start the event loop
 
 # Main Probably doesn't work as is right now. Will need to instantiate a new user class to run everything
