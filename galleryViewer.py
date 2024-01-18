@@ -11,7 +11,7 @@ from napari.types import ImageData
 from napari.settings import get_settings
 from magicgui import magicgui #, magic_factory
 from PyQt5.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, 
-                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton)
+                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton, QScrollArea)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 import numpy as np
@@ -92,6 +92,7 @@ def reuse_gamma():
     for fluor in userInfo.channels:
         if fluor == 'Composite':
             continue
+        # Turn on appropriate layers. Turn on all if "Composite" button is checked
         if "Composite" in userInfo.active_channels or fluor in userInfo.active_channels: 
             VIEWER.layers[f"{SESSION.mode} {fluor}"].visible = True
         # Now change settings for both, whether or not they are displayed right now.
@@ -349,7 +350,8 @@ def toggle_session_mode(target_mode, from_mouse: bool):
 
         # Find offset coordinates
         if SESSION.mode=="Gallery": 
-            row, col = list(SESSION.grid_to_ID["Gallery"].keys())[list(SESSION.grid_to_ID["Gallery"].values()).index(f"{target_cell_info['Layer']} {cell_num}")].split(",")
+            cname = f"{target_cell_info['Layer']} {cell_num}" if ANNOTATIONS_PRESENT else str(cell_num)
+            row, col = list(SESSION.grid_to_ID["Gallery"].keys())[list(SESSION.grid_to_ID["Gallery"].values()).index(cname)].split(",")
             row, col = (int(row),int(col))
             cellCanvasY = ((row-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
             cellCanvasX = ((col-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
@@ -373,6 +375,8 @@ def toggle_session_mode(target_mode, from_mouse: bool):
         except KeyError:
             pass
         SESSION.widget_dictionary['mouse boxes'].setVisible(True) # Enable this widget
+        SESSION.widget_dictionary['show status layer radio'].setVisible(False) # Disable this widget
+        SESSION.widget_dictionary['hide status layer radio'].setVisible(False) # Disable this widget
 
         if from_mouse:
             _, (mX,mY), _ = SESSION.find_mouse_func(VIEWER.cursor.position, scope="local")
@@ -407,6 +411,9 @@ def toggle_session_mode(target_mode, from_mouse: bool):
     elif target_mode == "Multichannel" or target_mode =="Gallery":
         
         SESSION.widget_dictionary['mouse boxes'].setVisible(False) # Disable this widget
+        SESSION.widget_dictionary['show status layer radio'].setVisible(True) # Enable this widget
+        SESSION.widget_dictionary['hide status layer radio'].setVisible(True) # Enable this widget
+
         if SESSION.mode != "Context": # Now, we must be changing to Gallery OR Multichannel. Want to save to DataFrame, not disk
             _save_validation(VIEWER, target_mode)
             print(f"Number of cells in current page is {len(SESSION.current_cells)} and type is {type(SESSION.current_cells)}")
@@ -421,14 +428,18 @@ def toggle_session_mode(target_mode, from_mouse: bool):
                         target_cell_name = f"{layer} {cid}"
                     else:
                         target_cell_name = str(cid)
-                    target_cell_info = SESSION.current_cells[cname]
+                    target_cell_info = SESSION.current_cells[target_cell_name]
                     SESSION.cell_under_mouse = target_cell_info
                     print(target_cell_info)
                 except KeyError:
                     VIEWER.status = f"Can't find cell [{cid}] in the current page. Staying in {SESSION.mode} mode"
                     return False
             else:
-                target_cell_name = f"{SESSION.cell_under_mouse['Layer']} {str(SESSION.cell_under_mouse['cid'])}"
+                match ANNOTATIONS_PRESENT:
+                    case True:
+                        target_cell_name = f"{SESSION.cell_under_mouse['Layer']} {str(SESSION.cell_under_mouse['cid'])}"
+                    case False:
+                        target_cell_name = str(SESSION.cell_under_mouse['cid'])
 
             sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary
             row, col = list(SESSION.grid_to_ID["Multichannel"].keys())[list(SESSION.grid_to_ID["Multichannel"].values()).index(target_cell_name)].split(",")
@@ -647,8 +658,11 @@ def set_initial_scoring_tally(df, session_df, page_only = True):
 
     if not page_only:
         cols = [x for x in session_df.columns if "Validation" in x]
-        SESSION.scoring_tally =  {"Session":{"Unseen":0}, "Data":{"Unseen":0}, "Page":{"Unseen":0}}
+        zeroes_dict = dict(zip(list(userInfo.statuses.keys()) , [0 for i in range(len(userInfo.statuses))]))
+        SESSION.scoring_tally =  {"Session":copy.copy(zeroes_dict), "Data":copy.copy(zeroes_dict), "Page":copy.copy(zeroes_dict)}
         print(SESSION.scoring_tally)
+
+
 
         # Counts for the whole cell set
         melted = df[cols].melt()
@@ -671,19 +685,18 @@ def set_initial_scoring_tally(df, session_df, page_only = True):
         except KeyError:
             SESSION.scoring_tally["Page"][score] = 1
 
-
-def update_scoring_tally(old_score, new_score):
+def update_scoring_tally(old_score, new_score, in_page = True):
     SESSION.scoring_tally["Session"][new_score] = SESSION.scoring_tally["Session"][new_score] +1
     SESSION.scoring_tally["Session"][old_score] = SESSION.scoring_tally["Session"][old_score] -1
 
     SESSION.scoring_tally["Data"][new_score] = SESSION.scoring_tally["Data"][new_score] +1
     SESSION.scoring_tally["Data"][old_score] = SESSION.scoring_tally["Data"][old_score] -1
 
-    SESSION.scoring_tally["Page"][new_score] = SESSION.scoring_tally["Page"][new_score] +1
-    SESSION.scoring_tally["Page"][old_score] = SESSION.scoring_tally["Page"][old_score] -1
+    if in_page:
+        SESSION.scoring_tally["Page"][new_score] = SESSION.scoring_tally["Page"][new_score] +1
+        SESSION.scoring_tally["Page"][old_score] = SESSION.scoring_tally["Page"][old_score] -1
 
 def update_scoring_tally_all(new_score):
-
     for score, key in userInfo.statuses.items():
         
         if score == new_score:
@@ -696,9 +709,8 @@ def update_scoring_tally_all(new_score):
             SESSION.scoring_tally["Data"][score] = SESSION.scoring_tally["Data"][score] - SESSION.scoring_tally["Page"][score]
             SESSION.scoring_tally["Page"][score] = 0
 
-
 def set_scoring_label(scoring_label):
-    display_string = "Page / Session / Full object data count<br>"
+    display_string = "Page / Session / Full object data count"
     count = 0
     for score, tally in SESSION.scoring_tally["Data"].items():
         try:
@@ -712,17 +724,18 @@ def set_scoring_label(scoring_label):
             display_string+="<br>"
             display_string += f'<font color="{userInfo.statuses_hex[score]}">{score}: {page_tally} / {session_tally} / {tally}</font>'
         else:
-            display_string += f'&nbsp;&nbsp; | &nbsp;&nbsp;<font color="{userInfo.statuses_hex[score]}">{score}: {page_tally} / {session_tally} / {tally}</font>'
+            display_string += f' | <font color="{userInfo.statuses_hex[score]}">{score}: {page_tally} / {session_tally} / {tally}</font>'
         # Add a new line for every other score
         count+=1
     scoring_label.setText(display_string)
     return True
 
-def set_notes_label(ID, display_text_override = None):
+def set_cell_description_label(ID, display_text_override = None):
     # Instead of showing a cell's info, display this text
     if display_text_override is not None:
-        note = f'{SESSION.saved_notes["page"]}<br><br>' + display_text_override
-        SESSION.widget_dictionary['notes label'].setText(note)
+        description = f'{SESSION.saved_notes["page"]}<br>' + display_text_override
+        SESSION.widget_dictionary['cell description label'].setText(description)
+        SESSION.widget_dictionary['notes label'].setVisible(False)
         VIEWER.window._qt_viewer.setFocus()
         return True
     cell_num = ID.split()[-1]; cell_anno = ID.replace(' '+cell_num,'')
@@ -736,9 +749,9 @@ def set_notes_label(ID, display_text_override = None):
         return False
     status = SESSION.status_list[str(ID)]
     if STATUSES_TO_HEX[status] != "#ffffff":
-        prefix = f'{SESSION.saved_notes["page"]}<br><font color="{STATUSES_TO_HEX[status]}">{cell_name}</font>'
+        prefix = f'Page {SESSION.current_cells[ID]["Page"]}<br><font color="{STATUSES_TO_HEX[status]}">{cell_name}</font>'
     else:
-        prefix = f'{SESSION.saved_notes["page"]}<br>{cell_name}'
+        prefix = f'Page {SESSION.current_cells[ID]["Page"]}<br>{cell_name}' 
 
     # Add intensities
     intensity_series = SAVED_INTENSITIES[ID]
@@ -792,10 +805,14 @@ def set_notes_label(ID, display_text_override = None):
 
         # intensity_str += f'<br><font color="{userInfo.channelColors[fluor.replace(" ","").upper()].replace("blue","#0462d4")}">{fluor} cyto: {round(float(intensity_series[cyto]),1)} nuc: {round(float(intensity_series[nuc]),1)} cell: {round(float(intensity_series[cell]),1)}</font>'
     # Add note if it exists
+    
+    SESSION.widget_dictionary['cell description label'].setText(prefix + intensity_str)
     if note == '-' or note == '' or note is None: 
-        note = prefix + intensity_str
+        note = ''
+        SESSION.widget_dictionary['notes label'].setVisible(False)
     else:
-        note = prefix + intensity_str + f'<br><font size="5pt">{note}</font>'
+        note = f'<font size="5pt">{note}</font>'
+        SESSION.widget_dictionary['notes label'].setVisible(True)
     SESSION.widget_dictionary['notes label'].setText(note)
     VIEWER.window._qt_viewer.setFocus()
     return True
@@ -1053,18 +1070,26 @@ def attach_functions_to_viewer(viewer):
 
                 # Requesting single pixel value from Dask array layer 0
                 try:
-                    v = str(int(viewer.layers["Context "+fluor].data[0][coords]))
+
+                    v = str(int(viewer.layers["Context "+fluor].get_value(data_coordinates)[1])) 
+                    # get_value returns a tuple from the dask array like (0,25). First number indicates the pyramid layer, second is the value.
+                    # Seems to default to returning the current layer shown to the user which is acceptable.
+                    # v = str(int(viewer.layers["Context "+fluor].data[0][coords]))
                 except IndexError:
-                    v = None # Seems like this exception can trigger sometimes if you are very far off the canvas maybe
+                    v = None # Seems like this exception can trigger sometimes if you are very far off the canvas maybe. Also if the channel is not visible
                 vals[fluor] =  v if v is not None else "-"
             
             # Now find the name of the closest cell 
+            # curY, curX = SESSION.mouse_coords
+            # print(SESSION.session_cells.loc[SESSION.session_cells['center_x'] < ])
             dist, closest_ind = SESSION.kdtree.query([data_coordinates[1],data_coordinates[0]])
             if dist < .6*userInfo.imageSize:
                 closest_cell = SESSION.session_cells.iloc[closest_ind]
             else:
                 closest_cell = None
             return {"cell":closest_cell,"coords": (coords[1],coords[0]),"vals": vals} # flips axes of coordinates
+    
+
         else: # Gallery mode or Multichannel mode    
             row,col = pixel_coord_to_grid(coords)
             try:
@@ -1097,37 +1122,62 @@ def attach_functions_to_viewer(viewer):
             return False 
         elif SESSION.nuclei_boxes_vis["Context"] != "Mouse": # Don't run the regular routine unless the "Show under mouse only" radio is toggled on
             try:
-                VIEWER.layers.selection.active = VIEWER.layers["Context Closest Cell Box"]
-                VIEWER.layers.remove_selected()
+                VIEWER.layers["Context Closest Cell Box"].visible = False
             except KeyError:
                 pass
             return False
         try:
-            VIEWER.layers.selection.active = VIEWER.layers["Context Closest Cell Box"]
-            VIEWER.layers.remove_selected()
+            VIEWER.layers["Context Closest Cell Box"].visible = True
+            layer_present = True
         except KeyError:
-            pass
+            layer_present = False
         
-        #Reset flag. Important!!!
-        SESSION.cell_under_mouse_changed = False
+
         layer = cell["Layer"]; cid = cell["cid"]
-        cname = cid if layer is None else f"{layer} {cid}"
+        cname = str(cid) if layer is None else f"{layer} {cid}"
         features = {'cid_feat': [cid]}
         cell_bbox = [[cell["YMin"],cell["XMin"]] , [cell["YMax"],cell["XMax"]] ]
 
         sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
+        # print(SESSION.status_list)
         nb_color_hex = userInfo.statuses_hex[SESSION.status_list[cname]] #'#000000' if SESSION.absorption_mode else '#ffffff'
         nb_text = {'string':'{cid_feat}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_hex}
         SESSION.context_closest_cell_text_object = nb_text
-        VIEWER.add_shapes([cell_bbox], name="Context Closest Cell Box", shape_type="rectangle", edge_width=2, edge_color=nb_color_hex, 
-                        opacity=0.9, face_color='#00000000', scale=sc, text = nb_text, features=features)
+        if layer_present:
+            VIEWER.layers["Context Closest Cell Box"].data = [cell_bbox]   
+            VIEWER.layers["Context Closest Cell Box"].edge_color = nb_color_hex  
+            VIEWER.layers["Context Closest Cell Box"].features = features   
+            VIEWER.layers["Context Closest Cell Box"].text = nb_text   
+        else:
+            VIEWER.add_shapes([cell_bbox], name="Context Closest Cell Box", shape_type="rectangle", edge_width=2, edge_color=nb_color_hex, 
+                            opacity=0.9, face_color='#00000000', scale=sc, text = nb_text, features=features)
         VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"] 
 
     ''' You need to disable napari's native mouse callback that displays the status first.
             This function is in napari.components.viewer_model.py ViewerModel._update_status_bar_from_cursor''' 
     @viewer.mouse_move_callbacks.append
-    def display_intensity_wrapper(viewer, event):
+    def mouse_movement_wrapper(viewer, event):
+        # The 'event' here is from vispy.app.canvas.MouseEvent
         display_intensity(viewer,event)
+        label_cells_mouseover(viewer,event)
+        #Reset flag each cycle, so this signal can only last for one. Important to stop lagginess!!!
+        SESSION.cell_under_mouse_changed = False
+        pass
+
+    ''' When in context mode, if radio toggle is enabled, user can move the mouse over a cell to relabel it
+      as a certain scoring decision. Will need to implement this in the GUI as a dropdown menu'''
+    @catch_exceptions_to_log_file("runtime_mouse-movement-over-context-cell")
+    def label_cells_mouseover(viewer,event):
+        if SESSION.mode != "Context":
+            return False # Leave if not in context mode
+        if SESSION.cell_under_mouse_changed and SESSION.last_score_used is not None:
+            # print("\n%%%")
+            # print(f"Modifier is {SESSION.last_score_used}")
+            exec("globals()[f'{SESSION.last_score_used}_func'](VIEWER)")
+            # from PyQt5.QtGui import QMouseEvent
+            # x = QMouseEvent()
+            #TODO
+
 
     @catch_exceptions_to_log_file("runtime_process-cell-under-mouse")
     def display_intensity(viewer, event): 
@@ -1163,7 +1213,7 @@ def attach_functions_to_viewer(viewer):
 
                     cell_dict = {'Layer':layer,"cid": cid,"center_x": center_x,'center_y': center_y,
                                             'validation_call': validation_call, 'XMax' : cell['XMax'],'XMin':cell['XMin'],
-                                            'YMax' : cell['YMax'],'YMin':cell['YMin']}
+                                            'YMax' : cell['YMax'],'YMin':cell['YMin'], 'Page':cell["Page"]}
                     
                     SESSION.current_cells[ckey] = cell_dict
                     SESSION.status_list[ckey] = validation_call
@@ -1171,11 +1221,12 @@ def attach_functions_to_viewer(viewer):
                     SESSION.cell_under_mouse_changed = True # If we haven't seen this cell before, it has definitely changed.
                 # Now that we have the cell dict, proceed to display
                 SESSION.cell_under_mouse =  cell_dict # save info
-                set_notes_label(ckey)
+                set_cell_description_label(ckey)
                 # Draw box around closest cell
                 box_closest_context_mode_cell(cell_dict)
+
             else: # Not near a cell
-                set_notes_label(None, display_text_override="No cell nearby to show!")
+                set_cell_description_label(None, display_text_override="No cell nearby to show!")
                 try:
                     VIEWER.layers.selection.active = VIEWER.layers["Context Closest Cell Box"]
                     VIEWER.layers.remove_selected()
@@ -1194,11 +1245,14 @@ def attach_functions_to_viewer(viewer):
             for fluor, val in vals.items():
                 if val != "-": val = int(val)
                 output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">    {val}   </font>'
-            sc = STATUSES_TO_HEX[SESSION.status_list[str(ckey)]] if cell is not None else ''
+            
+            ckey = "Context Mode" if cell is None else ckey # default display name is the mouse is not under a cell
+            sc = STATUSES_TO_HEX[SESSION.status_list[str(ckey)]] if cell is not None else '' # 
             if not sc == "#ffffff":
-                VIEWER.status = f'<font color="{sc}">Context Mode</font> pixel intensities at {coords}: {output_str}'
+                VIEWER.status = f'<font color="{sc}">{ckey}</font> pixel intensities at {coords}: {output_str}'
             else:
-                VIEWER.status = f'Context Mode pixel intensities at {coords}: {output_str}'
+                VIEWER.status = f'{ckey} pixel intensities at {coords}: {output_str}'
+
         elif SESSION.mode == "Gallery" or SESSION.mode == "Multichannel":
             try:
                 cell_name,coords,vals = find_mouse(event.position, scope = 'grid') 
@@ -1218,7 +1272,7 @@ def attach_functions_to_viewer(viewer):
             else:
                 image_name = f'Cell {cell_num}'
 
-            set_notes_label(str(cell_name))
+            set_cell_description_label(str(cell_name))
             output_str = ''
 
             for fluor, val in vals.items():
@@ -1244,7 +1298,7 @@ def attach_functions_to_viewer(viewer):
         next_color_txt = list(x/255 if next_color_txt.index(x)!=3 else 1 for x in next_color_txt)
 
         SESSION.status_list[str(cell_name)] = next_status
-        set_notes_label(str(cell_name)) 
+        set_cell_description_label(str(cell_name)) 
         # Change gallery mode status layer
         try:
             ind_target = list(SESSION.grid_to_ID["Gallery"].values()).index(str(cell_name))
@@ -1309,17 +1363,15 @@ def attach_functions_to_viewer(viewer):
         except (KeyError, ValueError):
             # Changing a cell status that isn't in the current page using Context Mode.
             pass 
-
-    # @viewer.bind_key('j')
+    
     @viewer.bind_key('Space', overwrite = True)
-    @viewer.bind_key('Ctrl-Space', overwrite = True)
     @catch_exceptions_to_log_file("runtime_assign-next-status")
     def toggle_status(viewer):
         if SESSION.mode == "Context": 
             cell = SESSION.cell_under_mouse
             if cell is None:
                 return False # leave if the mouse is not near a cell (not sure that this could even happen)
-            cell_name = f"{cell['Layer']} {cell['cid']}"   
+            cell_name = f"{cell['Layer']} {cell['cid']}" if ANNOTATIONS_PRESENT else str(cell['cid'])  
         else:
             cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
             if val is None:
@@ -1338,7 +1390,7 @@ def attach_functions_to_viewer(viewer):
         change_status_display(cell_name, next_status)
 
         # Update scoring tally
-        update_scoring_tally(cur_status, next_status)
+        update_scoring_tally(cur_status, next_status, cell_name in SESSION.page_cells.keys())
         set_scoring_label(SESSION.widget_dictionary["scoring label"])
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
@@ -1374,7 +1426,7 @@ def attach_functions_to_viewer(viewer):
                 cell = SESSION.cell_under_mouse
                 if cell is None:
                     return False # leave if the mouse is not near a cell (not sure that this could even happen)
-                cell_name = f"{cell['Layer']} {cell['cid']}"     
+                cell_name = f"{cell['Layer']} {cell['cid']}" if ANNOTATIONS_PRESENT else str(cell['cid'])    
             else:
                 cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
                 if val is None:
@@ -1387,10 +1439,11 @@ def attach_functions_to_viewer(viewer):
                 viewer.layers["Context Closest Cell Box"].text = SESSION.context_closest_cell_text_object
             
             # Update scoring tally BEFORE changing status 
-            update_scoring_tally(SESSION.status_list[str(cell_name)], scoring_decision)
+            update_scoring_tally(SESSION.status_list[str(cell_name)], scoring_decision, cell_name in SESSION.page_cells.keys())
             set_scoring_label(SESSION.widget_dictionary["scoring label"])
 
             change_status_display(cell_name, scoring_decision)
+            SESSION.last_score_used = scoring_decision
 
             # change color of viewer status
             vstatus_list = copy.copy(VIEWER.status).split('>')
@@ -1412,7 +1465,7 @@ def attach_functions_to_viewer(viewer):
             cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
             if val is None:
                 return None
-            set_notes_label(str(cell_name))
+            set_cell_description_label(str(cell_name))
             vstatus_list = copy.copy(VIEWER.status).split('>')
             vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
             VIEWER.status = ">".join(vstatus_list)
@@ -1436,7 +1489,8 @@ def attach_functions_to_viewer(viewer):
             else:
                 layer = SESSION.cell_under_mouse["Layer"]
                 cid = str(SESSION.cell_under_mouse["cid"])
-                SESSION.widget_dictionary['switch mode annotation'].setCurrentText(layer)
+                if ANNOTATIONS_PRESENT:
+                    SESSION.widget_dictionary['switch mode annotation'].setCurrentText(layer)
                 SESSION.widget_dictionary['switch mode cell'].setText(cid)
                 toggle_session_mode_catch_exceptions("Multichannel")
         elif "Control" in event.modifiers:
@@ -1446,7 +1500,8 @@ def attach_functions_to_viewer(viewer):
             else:
                 layer =SESSION.cell_under_mouse["Layer"]
                 cid = str(SESSION.cell_under_mouse["cid"])
-                SESSION.widget_dictionary['switch mode annotation'].setCurrentText(layer)
+                if ANNOTATIONS_PRESENT:
+                    SESSION.widget_dictionary['switch mode annotation'].setCurrentText(layer)
                 SESSION.widget_dictionary['switch mode cell'].setText(cid)
                 toggle_session_mode_catch_exceptions("Context")
 
@@ -1469,6 +1524,7 @@ def attach_functions_to_viewer(viewer):
     def toggle_statuslayer_visibility(viewer):
         # raise Exception(f"This should work!")
         if SESSION.mode == "Context":
+            toggle_boxes(viewer) # Allow 'h' to trigger cell box toggle when in context mode
             return False
         show_vis_radio = SESSION.widget_dictionary['show status layer radio']
         hide_vis_radio = SESSION.widget_dictionary['hide status layer radio']
@@ -1494,7 +1550,7 @@ def attach_functions_to_viewer(viewer):
         track the current state '''
     @viewer.bind_key('Shift-h')
     @catch_exceptions_to_log_file("runtime_toggle-cell-boxes")
-    def toggle_boxes_wrapper(viewer):
+    def toggle_boxes(viewer):
         if SESSION.mode != "Context":
             if SESSION.nuclei_boxes_vis["Gallery/Multichannel"]:
                 SESSION.widget_dictionary['hide boxes'].setChecked(True)
@@ -1820,6 +1876,9 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
         phen_only_df = phen_only_df.query(_create_filter_query(userInfo.filters)).reset_index()
 
 
+    # Assign page numbers to each cell in the table now. These cells can appear in the viewer during this session
+    phen_only_df["Page"] = (phen_only_df.index // page_size)+1
+
     # Figure out which range of cells to get based on page number and size
     last_page = (len(phen_only_df.index) // page_size)+1
     combobox_widget =  SESSION.widget_dictionary['page combobox']
@@ -1842,8 +1901,10 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
                 singlecell_df = phen_only_df[(phen_only_df['Object Id']==int(specific_cid)) & (phen_only_df['Analysis Region']==str(specific_layer))]
             else:
                 singlecell_df = phen_only_df[phen_only_df['Object Id']==int(specific_cid)]
-            sc_index = singlecell_df.index[0]
-            page_number = (sc_index//page_size) + 1
+            page_number = singlecell_df.iloc[0]["Page"] # Converts single row dataframe to series and fetches the page value
+
+            print("I will now print the 'page number' which should be a number, not a series")
+            print(page_number)
             #TODO set the combobox widget to the current page number
         except (KeyError,IndexError, ValueError):
             print(f'The cell ID {specific_layer} {specific_cid} is not in my list of cells. Loading default page instead')
@@ -1865,9 +1926,9 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
 
     # Get the appropriate set
     if page_number != last_page:
-        cell_set = phen_only_df[(page_number-1)*page_size: page_number*page_size]
+        cell_set = SESSION.session_cells[(page_number-1)*page_size: page_number*page_size]
     else:
-        cell_set = phen_only_df[(page_number-1)*page_size:]
+        cell_set = SESSION.session_cells[(page_number-1)*page_size:]
 
     
     print(f"#$%#$% local sort is {sort_by_intensity}")
@@ -1902,8 +1963,8 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
         layer = row["Analysis Region"] if ANNOTATIONS_PRESENT else None
         ckey = f'{layer} {cid}' if ANNOTATIONS_PRESENT else str(cid)
         fetch_notes(row, all_possible_intensities)
-        center_x = int((row['XMax']+row['XMin'])/2)
-        center_y = int((row['YMax']+row['YMin'])/2)
+        center_x = row['center_x']
+        center_y = row['center_y']
         vals = row[validation_cols]
         try:
             validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation | ", "")
@@ -1913,9 +1974,10 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
 
         tumor_cell_XYs[ckey] = {'Layer':layer,"cid": cid,"center_x": center_x,'center_y': center_y,
                                 'validation_call': validation_call, 'XMax' : row['XMax'],'XMin':row['XMin'],
-                                'YMax' : row['YMax'],'YMin':row['YMin']}
+                                'YMax' : row['YMax'],'YMin':row['YMin'], 'Page':row["Page"]}
 
     SESSION.current_cells = copy.copy(tumor_cell_XYs)
+    SESSION.page_cells = copy.copy(tumor_cell_XYs)
     SESSION.cell_under_mouse = next(iter(tumor_cell_XYs.values())) # Set first cell in list as "current" to avoid exceptions
     return tumor_cell_XYs
 
@@ -2014,13 +2076,14 @@ def main(preprocess_class = None):
                 else:
                     pass #firstLayer = pyramid[:,:,0]
                 preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
-                preprocess_class._append_status_br('Sorting object data...')
+                preprocess_class._append_status_br('Initializing Napari session...')
             except:
                 preprocess_class._append_status('<font color="#f5551a">  Failed.</font><br> Aborting startup, please contact Peter.')
                 raise Exception("There was a problem reading the image data. Expecting a regular or memory-mapped tif/qptiff. Got something else.")
     finally:
         end_time = time.time()
         print(f'... completed in {end_time-start_time} seconds')
+
 
     # Get rid of problematic bindings before starting napari viewer
     settings=get_settings()
@@ -2037,6 +2100,21 @@ def main(preprocess_class = None):
     viewer.window._qt_viewer.dockLayerList.toggleViewAction().trigger()
     viewer.window._qt_viewer.dockLayerControls.toggleViewAction().trigger()
 
+
+    # this will remove minimized status 
+    # and restore window with keeping maximized/normal state
+    preprocess_class.setWindowState(preprocess_class.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)
+    # this will activate the window
+    preprocess_class.activateWindow()
+
+
+    cell_description_label = QLabel(); cell_description_label.setAlignment(Qt.AlignCenter)
+    cell_description_label.setFont(userInfo.fonts.small)
+    cell_description_group = QGroupBox("Cell Attributes")
+    cell_description_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+    cell_description_layout = QVBoxLayout(cell_description_group)
+    cell_description_layout.addWidget(cell_description_label)
+    SESSION.widget_dictionary["cell description label"] = cell_description_label
 
     notes_label = QLabel('Placeholder note'); notes_label.setAlignment(Qt.AlignCenter)
     notes_label.setFont(userInfo.fonts.small)
@@ -2072,9 +2150,9 @@ def main(preprocess_class = None):
     SESSION.widget_dictionary['notes cell entry']= note_cell_entry
 
     # Label to show user how many cells have been assigned to each scoring decision bucket
-    scoring_label = QLabel('Scoring goes here')
+    scoring_label = QLabel()
     scoring_label.setAlignment(Qt.AlignCenter)
-    scoring_label.setFont(userInfo.fonts.small)
+    scoring_label.setFont(QFont("Verdana", 5, weight=QFont.Normal))
 
     scoring_group = QGroupBox("Scoring Information")
     scoring_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
@@ -2185,17 +2263,28 @@ def main(preprocess_class = None):
 
     # Create main group in a vertical stack, and add to side box
     # mode_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+
     side_dock_group = QGroupBox()
     side_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
     side_dock_layout = QVBoxLayout(side_dock_group)
-    side_dock_layout.addWidget(notes_all_group)
+    side_dock_layout.addWidget(cell_description_group)
     side_dock_layout.addWidget(scoring_group)
+    side_dock_layout.addWidget(notes_all_group)
     side_dock_layout.addWidget(page_group)
     side_dock_layout.addWidget(mode_group)
     side_dock_layout.addWidget(show_hide_group)
     side_dock_layout.addWidget(absorption_widget)
+    # side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+    # Make sure user can scroll through tools if there are too many
+    scroll_area = QScrollArea()
+    scroll_area.setWidgetResizable(True)
+    # scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-    viewer.window.add_dock_widget(side_dock_group,name ="User tools",area="right")
+    scroll_area.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+    scroll_area.setWidget(side_dock_group)
+    side_dock_group.setAlignment(Qt.AlignHCenter)
+
+
 
     # Create bottom bar widgets
     # bottom_dock_group = QGroupBox()
@@ -2204,10 +2293,16 @@ def main(preprocess_class = None):
     viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
     viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
     viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
+    viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right")
+
 
     # print(f'\n {dir()}') # prints out the namespace variables 
-    SESSION.side_dock_groupboxes = {"notes":notes_all_group, "page":page_group, "mode":mode_group, "hide": show_hide_group}
-    SESSION.radiogroups = [status_layer_group, nuc_boxes_group]
+    SESSION.side_dock_groupboxes = {"notes":notes_all_group, "page":page_group, "mode":mode_group, "hide": show_hide_group, 
+                                    "scoring":scoring_group, "cell description":cell_description_group}
+    SESSION.radiogroups = {"Status layer group": status_layer_group, "Cell boxes group": nuc_boxes_group}
+    
+    preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
+    preprocess_class._append_status_br('Sorting object data...')
 
     # Now process object data and fetch images
     RAW_PYRAMID=pyramid
@@ -2232,9 +2327,9 @@ def main(preprocess_class = None):
         viewer.close()
         return None # allows the input GUI to continue running
     
-    preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
-    preprocess_class._append_status_br('Initializing Napari session...')
 
+    preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
+    preprocess_class._append_status(' Adding gallery images to viewer...')
     set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 1.0 gamma, 0 black in, 255 white in
     attach_functions_to_viewer(viewer)
 
@@ -2260,6 +2355,8 @@ def main(preprocess_class = None):
     # print("My active channels are\n")
     # print(userInfo.active_channels)
     # all_boxes = check_creator2(userInfo.active_channels)
+        
+    
 
     for box in check_creator2(userInfo.active_channels):
         box.setStyleSheet(f"QCheckBox {{ color: {userInfo.channelColors[box.objectName()].replace('blue','#0462d4')} }}")
@@ -2293,8 +2390,6 @@ def main(preprocess_class = None):
     reuse_gamma()
     viewer.layers.selection.active = viewer.layers[f"Gallery {userInfo.channels[0]}"]  
     napari.run() # Start the event loop
-    # zs.close()
-    print('\n#Zarr object should be closed')
 
 # Main Probably doesn't work as is right now. Will need to instantiate a new user class to run everything
 if __name__ == '__main__':

@@ -88,6 +88,9 @@ class sessionVariables:
         self.side_dock_groupboxes = {}
         self.widget_dictionary = {}
         self.scoring_tally = {"Page":{},"Session":{}, "Data":{}} # {"Session" : {"Unseen" : 1000, "Confirmed": 25 , ... }}, "Data":{"Unseen":2000, ...} }
+        self.page_cells = {} # same structure as current_cells, but will not add cells as the user moves around in context mode
+        self.radiogroups = {}
+        self.last_score_used = None
 
 @dataclass
 class ViewerFonts:

@@ -733,7 +733,7 @@ class ViewerPresets(QDialog):
         self.userInfo.filters_label = self.filterDisplay.text()
         self.userInfo.filters.append(f"{fil} {fil_compare_query} {fil_number}")   
 
-    def reset_mappings(self):
+    def reset_mappings(self, examine_object_data = True):
         #phenotype
         self.userInfo.phenotype_mappings = {}
         self.userInfo.phenotype_mappings_label = '<u>Phenotypes</u><br>All'
@@ -752,6 +752,8 @@ class ViewerPresets(QDialog):
             self.phenotypeCombo.clear() 
             self.annotationCombo.clear() 
             self.filterMarkerCombo.clear()
+            self.specificCellAnnotationCombo.clear()
+        if examine_object_data:
             self.prefillObjectData(fetch=False)
 
     def _log_problem(self, e, logpath= None, error_type = None):
@@ -791,12 +793,17 @@ class ViewerPresets(QDialog):
         try:
             if fetch: 
                 self.fetchObjectDataPath()
+
+            # Have to reset the widgets here since these widgets could be filled out already
+            self.reset_mappings(examine_object_data=False)
+
+            # Now get information and pass to widgets
             res = self._prefillObjectData()
             annos = self.annotationCombo.count()
             phenos = self.phenotypeCombo.count()
             self.status_label.setVisible(True)
 
-
+            
             if res == 'no annotations':
                 status = _generate_no_anno_string(phenos)
                 self.status_label.setText(status)
@@ -942,7 +949,7 @@ class ViewerPresets(QDialog):
     def _retrieve_image_scale(self):
         ''' Get pixel per um value for the image'''
         try:
-        #     return None
+            # return None
             path = self.userInfo.qptiff_path
             with tifffile.TiffFile(path) as tif:
                 description = tif.pages[0].tags['ImageDescription'].value
@@ -1104,7 +1111,7 @@ class ViewerPresets(QDialog):
              
             # exec(f'{colorComboName}.highlighted.connect(change_color)')
             exec(f'{colorComboName}.setObjectName("{button.objectName()}")')
-            if button.objectName().replace("_"," ") in self.userInfo.channels and button.objectName().replace("_"," ") != 'AF':
+            if button.objectName().replace("_"," ") in self.userInfo.channels:
                 button.setChecked(True)
             else:
                 button.setChecked(False)
