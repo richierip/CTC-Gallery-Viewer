@@ -91,6 +91,9 @@ class sessionVariables:
         self.page_cells = {} # same structure as current_cells, but will not add cells as the user moves around in context mode
         self.radiogroups = {}
         self.last_score_used = None
+        self.context_marker_mode = "Disabled"
+        self.context_marker_score = None
+        self.scoring_function_called_by_mouse_move = False
 
 @dataclass
 class ViewerFonts:

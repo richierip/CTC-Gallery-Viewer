@@ -21,7 +21,6 @@ from matplotlib import cm # necessary, do not remove
 from matplotlib import colors as mplcolors # Necessary, do not remove
 import copy
 import time
-import store_and_load
 import custom_color_functions # Necessary, do not remove
 from math import ceil
 from re import sub
@@ -31,6 +30,9 @@ import dask.array as da
 import scipy.spatial as spatial
 from random import randint
 
+# These files were created as part of the GalleryViewer Project
+import store_and_load
+from custom_qt_classes import StatusCombo
 # from initial_UI import VERSION_NUMBER
 
 
@@ -117,7 +119,6 @@ def reuse_gamma():
     except KeyError:
         pass
     
-
 
 def reuse_contrast_limits():
         # Make everything active
@@ -383,9 +384,12 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             VIEWER.layers.remove_selected()
         except KeyError:
             pass
-        SESSION.widget_dictionary['mouse boxes'].setVisible(True) # Enable this widget
-        SESSION.widget_dictionary['show status layer radio'].setVisible(False) # Disable this widget
-        SESSION.widget_dictionary['hide status layer radio'].setVisible(False) # Disable this widget
+        SESSION.widget_dictionary['mouse boxes'].setVisible(True) # Enable these widget
+        SESSION.widget_dictionary["marker combo"].setVisible(True)
+        SESSION.widget_dictionary["marker button"].setVisible(True)
+        SESSION.widget_dictionary['show status layer radio'].setVisible(False) # Disable these widget
+        SESSION.widget_dictionary['hide status layer radio'].setVisible(False) 
+
 
         if from_mouse:
             _, (mX,mY), _ = SESSION.find_mouse_func(VIEWER.cursor.position, scope="local")
@@ -419,9 +423,11 @@ def toggle_session_mode(target_mode, from_mouse: bool):
     
     elif target_mode == "Multichannel" or target_mode =="Gallery":
         
-        SESSION.widget_dictionary['mouse boxes'].setVisible(False) # Disable this widget
-        SESSION.widget_dictionary['show status layer radio'].setVisible(True) # Enable this widget
-        SESSION.widget_dictionary['hide status layer radio'].setVisible(True) # Enable this widget
+        SESSION.widget_dictionary['mouse boxes'].setVisible(False) # Disable these widget
+        SESSION.widget_dictionary["marker combo"].setVisible(False)
+        SESSION.widget_dictionary["marker button"].setVisible(False)
+        SESSION.widget_dictionary['show status layer radio'].setVisible(True) # Enable these widget
+        SESSION.widget_dictionary['hide status layer radio'].setVisible(True) 
 
         if SESSION.mode != "Context": # Now, we must be changing to Gallery OR Multichannel. Want to save to DataFrame, not disk
             _save_validation(VIEWER, target_mode)
@@ -662,6 +668,23 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
                                                 face_color='#00000000', scale=sc, features=features,text=nb_text,opacity=0.9 )
         # Always reset the user's input selection
         VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
+
+def toggle_marker_button(marker_button: QPushButton):
+    current_marker_mode = SESSION.context_marker_mode
+    if current_marker_mode == "Disabled":
+        next_marker_mode = "Enabled"
+    elif current_marker_mode == "Enabled":
+        next_marker_mode = "Disabled"
+    else:
+        raise ValueError(f"Unexpected value {current_marker_mode} encountered for 'context_marker_mode'. Need 'Enabled' or 'Disabled'")
+    
+    SESSION.context_marker_mode = next_marker_mode
+    display_text = {"Disabled":"Enable marker tool", "Enabled":"Disable marker tool"}[next_marker_mode]
+    marker_button.setText(display_text)
+    SESSION.widget_dictionary["marker combo"].setDisabled({"Enabled":False, "Disabled":True}[next_marker_mode])
+
+
+
 
 def set_initial_scoring_tally(df, session_df, page_only = True):
 
@@ -1177,12 +1200,15 @@ def attach_functions_to_viewer(viewer):
       as a certain scoring decision. Will need to implement this in the GUI as a dropdown menu'''
     @catch_exceptions_to_log_file("runtime_mouse-movement-over-context-cell")
     def label_cells_mouseover(viewer,event):
-        if SESSION.mode != "Context":
+        if SESSION.mode != "Context" or SESSION.context_marker_mode == "Disabled":
             return False # Leave if not in context mode
-        if SESSION.cell_under_mouse_changed and SESSION.last_score_used is not None:
+        
+        scoring_target = SESSION.widget_dictionary["marker combo"].currentText()
+        if SESSION.cell_under_mouse_changed and scoring_target is not None:
             # print("\n%%%")
             # print(f"Modifier is {SESSION.last_score_used}")
-            exec("globals()[f'{SESSION.last_score_used}_func'](VIEWER)")
+            exec("globals()[f'{scoring_target}_func'](VIEWER)")
+            
             # from PyQt5.QtGui import QMouseEvent
             # x = QMouseEvent()
             #TODO
@@ -1470,7 +1496,14 @@ def attach_functions_to_viewer(viewer):
         @viewer.bind_key(f'Shift-{keybind}')
         @catch_exceptions_to_log_file("runtime_change-status-all")
         def set_scoring_all(viewer):
-            if SESSION.mode == "Context": return None
+            if SESSION.mode == "Context": 
+                # set up for marker tool   
+                toggle_marker_button(SESSION.widget_dictionary["marker button"])
+                SESSION.widget_dictionary["marker combo"].setCurrentText(scoring_decision)
+                SESSION.widget_dictionary["marker combo"].setStyleSheet(f"background-color: rgba{userInfo.statuses_rgba[scoring_decision]}; selection-background-color: rgba(0,0,0,30);")
+                if SESSION.context_marker_mode == "Enabled":
+                    set_score(viewer)
+                return True
             
             # Update scoring tally BEFORE changing status 
             update_scoring_tally_all(scoring_decision)
@@ -2265,7 +2298,7 @@ def main(preprocess_class = None):
     
 
     # Show / hide radio buttons
-    show_hide_group = QGroupBox("Show/hide overlays")
+    show_hide_group = QGroupBox("Scoring Tools")
     show_hide_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
     show_hide_layout = QVBoxLayout()
     show_hide_group.setLayout(show_hide_layout)
@@ -2290,13 +2323,36 @@ def main(preprocess_class = None):
     nuc_boxes_layout = QHBoxLayout(); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide); nuc_boxes_layout.addWidget(nuc_boxes_context)
     nuc_boxes_group = QButtonGroup(); nuc_boxes_group.addButton(nuc_boxes_show) ; nuc_boxes_group.addButton(nuc_boxes_hide) ; nuc_boxes_group.addButton(nuc_boxes_context)
     nuc_boxes_show.setFont(userInfo.fonts.small); nuc_boxes_hide.setFont(userInfo.fonts.small); nuc_boxes_context.setFont(userInfo.fonts.small)
-   
+    
+    # Context mode marker tool group
+    marker_layout = QHBoxLayout()
+    # Create a combobox
+    marker_combo = StatusCombo(show_hide_group ,userInfo, color_mode = 'dark')
+    marker_combo.setVisible(False) # Will be shown when context mode is enabled
+    marker_combo.setDisabled(True)
+    SESSION.widget_dictionary["marker combo"] = marker_combo
+    # Create a button
+    marker_button = QPushButton("Enable marker tool")
+    marker_button.setVisible(False)
+    marker_button.released.connect(lambda: toggle_marker_button(marker_button))
+    SESSION.widget_dictionary["marker button"] = marker_button
+    # Add to layouts
+    marker_layout.addWidget(marker_combo)
+    marker_layout.addWidget(marker_button)
+    show_hide_layout.addLayout(marker_layout)
+
+
+
+
+
     # nuc_boxes_show.tog
     nuc_boxes_group.buttonToggled[QAbstractButton, bool].connect(toggle_nuclei_boxes)
     SESSION.widget_dictionary['show boxes']=nuc_boxes_show
     SESSION.widget_dictionary['hide boxes']=nuc_boxes_hide
     SESSION.widget_dictionary['mouse boxes']=nuc_boxes_context
     show_hide_layout.addLayout(nuc_boxes_layout)
+
+
 
     absorption_widget = QPushButton("Absorption")
     absorption_widget.pressed.connect(toggle_absorption)
@@ -2419,7 +2475,6 @@ def main(preprocess_class = None):
     # Finish up, and set keybindings
     preprocess_class._append_status('<font color="#7dbc39">  Done.</font><br> Goodbye')
     chn_key_wrapper(viewer)
-    set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
     if preprocess_class is not None: preprocess_class.close() # close other window
     # Set adjustment settings to their default now that all images are loaded
     reuse_contrast_limits()
@@ -2441,7 +2496,8 @@ def main(preprocess_class = None):
     print(side_dock_group.sizeHint())
     print(scroll_area.sizeHint())
     print(right_dock.sizeHint())
-    # QDockWidget.setProperty()
+    
+    set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
     napari.run() # Start the event loop
 
 # Main Probably doesn't work as is right now. Will need to instantiate a new user class to run everything
