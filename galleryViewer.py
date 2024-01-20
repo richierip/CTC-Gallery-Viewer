@@ -140,8 +140,10 @@ def reuse_contrast_limits():
         VIEWER.layers[f"{SESSION.mode} Status Numbers"].visible = SESSION.status_layer_vis
         # VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
     try:
-        show_boxes = SESSION.nuclei_boxes_vis[SESSION.mode]
-        show_boxes = True if show_boxes =="Show" else False
+        if SESSION.mode == "Context":
+            show_boxes = True if SESSION.nuclei_boxes_vis["Context"] =="Show" else False
+        else:
+            show_boxes = SESSION.nuclei_boxes_vis["Gallery/Multichannel"]
         VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = show_boxes
     except KeyError:
         pass
@@ -207,7 +209,9 @@ def toggle_absorption():
         SESSION.absorption_mode = False
         for layer in VIEWER.layers:
             
-            if 'Status' in layer.name:
+            if 'Status' in layer.name or layer.name == "Context Nuclei Boxes":
+                # Don't want to change the color of the context mode boxes
+                #   those colors are used to indicate status
                 continue
             elif "Nuclei Boxes" in layer.name or layer.name == "Context Closest Cell Box":
                 layer.edge_color = '#ffffff'
@@ -222,9 +226,11 @@ def toggle_absorption():
         SESSION.absorption_mode = True
         for layer in VIEWER.layers:
             
-            if 'Status' in layer.name:
-                continue
-            elif "Nuclei Boxes"  in layer.name or layer.name == "Context Closest Cell Box":
+            if 'Status' in layer.name or layer.name == "Context Nuclei Boxes":
+                # Don't want to change the color of the context mode boxes
+                #   those colors are used to indicate status
+                continue 
+            elif "Nuclei Boxes" in layer.name or layer.name == "Context Closest Cell Box":
                 layer.edge_color="#000000"
                 continue
             # elif "Absorption" in layer.name:
@@ -541,7 +547,7 @@ def show_next_cell_group():
     set_initial_scoring_tally(userInfo.objectDataFrame, SESSION.session_cells)
     # Perform adjustments before exiting function
     #TODO
-    reuse_contrast_limits()# Only checked fluors will be visible
+    reuse_contrast_limits() # Only checked fluors will be visible
     reuse_gamma() 
     set_viewer_to_neutral_zoom(VIEWER, reset_session=True) # Fix zoomed out issue
     VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
@@ -569,12 +575,10 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
 
     # Always reset the user's input selection
     VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
-    print("\nEntered function")
     if not checked:
         # This function gets called twice, since when one radio button in the group is toggle on, the other is toggled off. 
         #   We only want to run this function once so the other call can be discarded
         return False
-    print("\nPassed Check") 
     if SESSION.mode in ["Gallery","Multichannel"]:
         SESSION.nuclei_boxes_vis["Gallery/Multichannel"] = not SESSION.nuclei_boxes_vis["Gallery/Multichannel"]
         SESSION.nuclei_boxes_vis["Context"] = "Show" if SESSION.nuclei_boxes_vis["Gallery/Multichannel"] else "Hide"
@@ -591,10 +595,8 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
                 selected_mode = "Hide"
             case _:
                 selected_mode = "Show"
-        print(f"BEFORE toggle, mode is {SESSION.nuclei_boxes_vis['Context']}")
         SESSION.nuclei_boxes_vis["Context"] = selected_mode
         SESSION.nuclei_boxes_vis["Gallery/Multichannel"] = True if selected_mode == "Show" else False
-        print(f"After toggle, mode is {SESSION.nuclei_boxes_vis['Context']}")
 
         # try to remove any previous box layers if there are any
         try:
@@ -615,13 +617,12 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
             return False # Leave! Nothing more to do since the user does not want to see these boxes
         vy, vx = VIEWER.cursor.position
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        print(f"{vx, vy}")
+        
         # Find cells in session table near target
         z,y,x = VIEWER.camera.center
         # nearby_inds = SESSION.kdtree.query_ball_point([x/sc,y/sc], 550) # [x,y], dist -> indices in table
         if distanceSearchCenter:
             dists, nearby_inds = SESSION.kdtree.query(distanceSearchCenter, k=100) # [x,y], dist -> indices in table
-            print("\nHere!")
         else:
             dists, nearby_inds = SESSION.kdtree.query([x/sc,y/sc], k=100) # [x,y], dist -> indices in table
 
@@ -876,7 +877,7 @@ def black_background(color_space, mult, CPR):
 
 
 ''' Add images layers for Gallery and Multichannel modes. Only make visible the layers for the active mode'''
-def add_layers(viewer,pyramid, cells, offset, new_page=True):
+def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True):
     print(f'\n---------\n \n Entering the add_layers function')
     if pyramid is not None: print(f"pyramid shape is {pyramid.shape}")
   
@@ -976,29 +977,34 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
                 # SESSION.page_status_layers["Gallery"][(row_g-1)*(userInfo.imageSize+2):row_g*(userInfo.imageSize+2), (col_g-1)*(userInfo.imageSize+2):col_g*(userInfo.imageSize+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Gallery")
                 fluor_index+=1
 
-    gal_vis = True if SESSION.mode == "Gallery" else False
-    mult_vis = not gal_vis
+
     print(f"\nMy scale is {SESSION.image_scale}")
     sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-    # viewer.add_image(white_background(1, userInfo.cells_per_row).astype(np.uint8), name = "Gallery Absorption", 
-    #                                               blending = 'translucent', visible = SESSION.absorption_mode and gal_vis, scale =sc )
-    # viewer.add_image(white_background(cpr_m, cpr_m).astype(np.uint8), name = "Multichannel Absorption", 
-    #                                               blending = 'translucent', visible = SESSION.absorption_mode and mult_vis, scale =sc )
+
     for fluor in list(page_image_gallery.keys()):
-        print(f"Adding layers now. fluor is {fluor}")
+        # Passing gamma is currently bugged. Suggested change is to remove the validation in the _on_gamma_change 
+        #   (now located at napari/_vispy/layers/image.py
+        # See https://github.com/napari/napari/issues/1866
+        fluor_gamma = ADJUSTMENT_SETTINGS[fluor+" gamma"]
+        fluor_contrast = [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]]
+        print(f"Adding layers now. fluor is {fluor}, view settings are gamma {fluor_gamma}, contrast {fluor_contrast}")
         if fluor == 'Composite':
             continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
         if SESSION.absorption_mode:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'minimum',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear", visible =gal_vis)
+                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
+                gamma=fluor_gamma, contrast_limits=fluor_contrast)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'minimum',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear", visible=mult_vis)
+                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
+                gamma=fluor_gamma, contrast_limits=fluor_contrast)
             
         else:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'additive',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear", visible=gal_vis)
+                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
+                gamma=fluor_gamma, contrast_limits=fluor_contrast)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
-                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear", visible=mult_vis)
+                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
+                gamma=fluor_gamma, contrast_limits=fluor_contrast)
     # if composite_only:
 
     features = {'cid': cid_list}
@@ -1011,27 +1017,28 @@ def add_layers(viewer,pyramid, cells, offset, new_page=True):
     nb_text = {'string':'{cid}', 'anchor':'lower_left', 'size' : 8,'translation':[-(userInfo.imageSize),int(tl*1.3)], 'color':nb_color_str}
     SESSION.status_text_object = nb_text
     viewer.add_shapes(nuclei_box_coords_g, name="Gallery Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
-                                        face_color='#00000000', scale=sc, visible=False)
+                                        face_color='#00000000', scale=sc)
     viewer.add_shapes(nuclei_box_coords_m, name="Multichannel Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
-                                        face_color='#00000000', scale=sc, visible = False)
+                                        face_color='#00000000', scale=sc)
     
     # print(status_box_coords_g)
     # print(edge_col_list)
 
-    viewer.add_shapes(status_box_coords_g, name="Gallery Status Edges", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
-                                        face_color='#00000000', scale=sc, visible=False, opacity=1)
-    viewer.add_shapes(status_box_coords_m, name="Multichannel Status Edges", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
-                                        face_color='#00000000', scale=sc, visible=False, opacity=1)
+    # Defunct borders around each cell image. Don't think it's necessary, and definitely adds more visual clutter
+    # viewer.add_shapes(status_box_coords_g, name="Gallery Status Edges", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
+    #                                     face_color='#00000000', scale=sc, visible=False, opacity=1)
+    # viewer.add_shapes(status_box_coords_m, name="Multichannel Status Edges", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
+    #                                     face_color='#00000000', scale=sc, visible=False, opacity=1)
     viewer.add_shapes(status_box_flags_g, name="Gallery Status Squares", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
-                                        face_color=edge_col_list, scale=sc, visible=gal_vis, opacity=1)
+                                        face_color=edge_col_list, scale=sc, opacity=1)
     viewer.add_shapes(status_box_flags_m, name="Multichannel Status Squares", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
-                                        face_color=edge_col_list, scale=sc, visible=mult_vis, opacity=1)
+                                        face_color=edge_col_list, scale=sc, opacity=1)
     viewer.add_shapes(status_box_coords_g, name="Gallery Status Numbers", shape_type="rectangle", edge_width=0, face_color='#00000000',
                                             features=features, text = nb_text,
-                                            scale=sc, visible=gal_vis, opacity=1)
+                                            scale=sc,  opacity=1)
     viewer.add_shapes(status_box_coords_m, name="Multichannel Status Numbers", shape_type="rectangle", edge_width=0, 
                                             features=features, text = nb_text, face_color = "#00000000",
-                                            scale=sc, visible=mult_vis, opacity=1)
+                                            scale=sc, opacity=1)
     # viewer.add_image(SESSION.page_status_layers["Gallery"].astype(np.uint8), name='Gallery Status Layer', interpolation='linear', scale = sc, visible=gal_vis)
     # viewer.add_image(SESSION.page_status_layers["Multichannel"].astype(np.uint8), name='Multichannel Status Layer', interpolation='linear', scale = sc, visible=mult_vis)
     # viewer.layers.selection.active = viewer.layers["Status Layer"]
@@ -1365,8 +1372,8 @@ def attach_functions_to_viewer(viewer):
             try:
                 print("In function")
                 ind_target = SESSION.context_nuclei_boxes_map_to_ind[str(cell_name)]
-                x = viewer.layers["Context Nuclei Boxes"].edge_color
-                x[ind_target] = next_color_txt
+                x = viewer.layers["Context Nuclei Boxes"].edge_color # List of colors
+                x[ind_target] = next_color_txt # Change only the color of this cell
                 viewer.layers["Context Nuclei Boxes"].edge_color = x
                 SESSION.context_nuclei_boxes_text_object["color"] = x
                 viewer.layers["Context Nuclei Boxes"].text = SESSION.context_nuclei_boxes_text_object

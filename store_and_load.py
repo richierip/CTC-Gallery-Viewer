@@ -74,7 +74,7 @@ class sessionVariables:
         self.status_text_object = None
         self.context_nuclei_boxes_text_object = None
         self.context_nuclei_boxes_map_to_ind = {} # Save position in list for each cell
-        self.context_closest_cell_text_object = None
+        self.context_closest_cell_text_object = None # {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':validation_colors_hex}
         self.absorption_mode = False # True = light mode, False = Dark mode
         self.nuclei_boxes_vis = {"Gallery/Multichannel":False, "Context": "Hide"} # {"Gallery/Multichannel":True|False, "Context": "Show"|"Hide"|"Mouse"}
         self.status_layer_vis = True
