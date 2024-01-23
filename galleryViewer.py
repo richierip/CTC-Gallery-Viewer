@@ -10,10 +10,10 @@ import napari
 from napari.types import ImageData
 from napari.settings import get_settings
 from magicgui import magicgui #, magic_factory
-from PyQt5.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, 
+from qtpy.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, 
                         QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton, QScrollArea, QDockWidget)
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QFont, QImage, QGuiApplication, QPixmap
 import numpy as np
 import pandas as pd
 # import openpyxl # necessary, do not remove
@@ -28,7 +28,11 @@ import os
 import dask.array as da
 # import zarr
 import scipy.spatial as spatial
-from random import randint
+
+# For clipboard
+from io import BytesIO
+import win32clipboard
+from PIL import Image
 
 # These files were created as part of the GalleryViewer Project
 import store_and_load
@@ -1216,7 +1220,7 @@ def attach_functions_to_viewer(viewer):
             # print(f"Modifier is {SESSION.last_score_used}")
             exec("globals()[f'{scoring_target}_func'](VIEWER)")
             
-            # from PyQt5.QtGui import QMouseEvent
+            # from qtpy.QtGui import QMouseEvent
             # x = QMouseEvent()
             #TODO
 
@@ -1460,10 +1464,12 @@ def attach_functions_to_viewer(viewer):
                 SESSION.widget_dictionary['page cell layer'].setCurrentText(layer)
             SESSION.widget_dictionary['switch mode annotation'].setCurrentText(layer)
         
+        SESSION.widget_dictionary["image_save_target_entry"].setText(cid)
         SESSION.widget_dictionary['notes cell entry'].setText(cid)
         if SESSION.mode == "Context":
             SESSION.widget_dictionary['page cell id'].setText(cid)
         SESSION.widget_dictionary['switch mode cell'].setText(cid)
+
 
     ''' Dynamically make new functions that can change scoring decisions with a custom keypress. This
         will allow the user to choose their own scoring decisions, colors, and keybinds'''
@@ -1785,6 +1791,171 @@ def attach_functions_to_viewer(viewer):
 
 
 ######------------------------- Misc + Viewer keybindings ---------------------######
+        
+def save_cell_image(viewer: napari.Viewer, cell_id : str, clipboard :bool = True ):
+    
+    # Silence all layers
+    for layer in viewer.layers:
+        layer.visible = False
+    
+    # 
+    df = SESSION.session_cells
+    try:
+        if ANNOTATIONS_PRESENT:
+            cid, layer = cell_id.split()
+            singlecell_df = df[(df['Object Id']==int(cid)) & (df['Analysis Region']==str(layer))]
+        else:
+            singlecell_df = df[df['Object Id']==int(cell_id)]
+    except (ValueError, TypeError, IndexError):
+        # Cell doesn't exist
+        viewer.status = f"Unable to screenshot cell '{cell_id}'. This ID was not found in my table."
+        return False
+    
+    cell_x = singlecell_df.iloc[0]["center_x"]
+    cell_y = singlecell_df.iloc[0]["center_y"]
+    offset = userInfo.imageSize // 2
+    # Get images from dask in chosen channels
+
+    # if RAW_PYRAMID is None:
+    #     # print("Using zarr/dask")
+
+    sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
+    # Need to know this for multichannel mode
+    num_channels = len(userInfo.active_channels)
+    num_channels = num_channels - 1 if "Composite" in userInfo.active_channels else num_channels
+    for fluor in list(userInfo.channels):
+        # Passing gamma is currently bugged. Suggested change is to remove the validation in the _on_gamma_change 
+        #   (now located at napari/_vispy/layers/image.py
+        # See https://github.com/napari/napari/issues/1866
+        if (fluor == 'Composite') or (fluor not in userInfo.active_channels and "Composite" not in userInfo.active_channels):
+            continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
+        
+
+        fluor_gamma = 2-(2*ADJUSTMENT_SETTINGS[fluor+" gamma"]) + 0.001
+        fluor_contrast = [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]]
+        position = userInfo.channelOrder[fluor]
+        if SESSION.mode in ("Gallery","Context"):
+            cell_image = SESSION.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
+        elif SESSION.mode == "Multichannel":
+            cell_image = np.zeros((userInfo.imageSize,userInfo.imageSize*(num_channels+1)))
+            cell_punchout = SESSION.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute()
+            pos = userInfo.channels.index(fluor)
+            start = pos * userInfo.imageSize
+            end = (pos+1) * userInfo.imageSize
+            cell_image[0:userInfo.imageSize, start:end] = cell_punchout
+            cell_image[-userInfo.imageSize:,-userInfo.imageSize:] = cell_punchout
+        else:
+            viewer.status = "Ran into a problem: unexpected viewer mode"
+            raise ValueError(f"Unexpected session mode given: {SESSION.mode}")
+
+        # SESSION.dask_array[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
+        if SESSION.absorption_mode:
+            viewer.add_image(cell_image, name = f"Screenshot {fluor}", blending = 'minimum',
+                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
+                gamma=fluor_gamma, contrast_limits=fluor_contrast)
+            # viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'minimum',
+            #     colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
+            #     gamma=fluor_gamma, contrast_limits=fluor_contrast)
+            
+        else:
+            viewer.add_image(cell_image, name = f"Screenshot {fluor}", blending = 'additive',
+                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
+                gamma=fluor_gamma, contrast_limits=fluor_contrast)
+            # viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
+            #     colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
+            #     gamma=fluor_gamma, contrast_limits=fluor_contrast)
+    
+
+    # center this cell
+    # viewer.camera.center = (int(SESSION.image_scale*offset), int(SESSION.image_scale*offset))
+    
+
+    if SESSION.absorption_mode: # Light mode. Subtractive color space
+        if SESSION.mode in ("Gallery","Context"):
+            blended = np.ones((userInfo.imageSize,userInfo.imageSize) + (4,))
+        elif SESSION.mode == "Multichannel":
+            blended = np.ones((userInfo.imageSize,userInfo.imageSize*(num_channels+1)) + (4,))
+        else:
+            viewer.status = "Ran into a problem: unexpected viewer mode"
+            raise ValueError(f"Unexpected session mode given: {SESSION.mode}")
+        for layer in viewer.layers:
+            if layer.visible == False:
+                continue
+    
+            normalized_data = (((layer.data) - layer.contrast_limits[0]) / (layer.contrast_limits[1] - layer.contrast_limits[0]))** layer.gamma 
+            colormapped_data = 1- layer.colormap.map(normalized_data.flatten())
+            colormapped_data = colormapped_data.reshape(normalized_data.shape + (4,))
+
+            blended = blended-colormapped_data
+            
+    else: # Dark mode. Additive color space
+        if SESSION.mode in ("Gallery","Context"):
+            blended = np.zeros((userInfo.imageSize,userInfo.imageSize) + (4,))
+        elif SESSION.mode == "Multichannel":
+            blended = np.zeros((userInfo.imageSize,userInfo.imageSize*(num_channels+1)) + (4,))
+        else:
+            viewer.status = "Ran into a problem: unexpected viewer mode"
+            raise ValueError(f"Unexpected session mode given: {SESSION.mode}")
+        for layer in viewer.layers:
+            if layer.visible == False:
+                continue
+            normalized_data = ((layer.data - layer.contrast_limits[0]) / (layer.contrast_limits[1] - layer.contrast_limits[0])) ** layer.gamma
+            colormapped_data = layer.colormap.map(normalized_data.flatten())
+            colormapped_data = colormapped_data.reshape(normalized_data.shape + (4,))
+
+            blended = blended + colormapped_data
+
+    # Clipping mostly to avoid negative numbers that might be present from a light mode cell image
+    blended = blended.clip(min=0, max = 1)
+
+    from matplotlib.image import imsave
+    np.save("blended_cell_light.npy", blended)
+    blended[..., 3] = 1 # set alpha channel to 1
+    imsave("look_at_me!.png", blended)
+
+    im = (blended*255).astype(np.uint8)
+    # qimage = QImage(im.copy(), im.shape[1], im.shape[0], im.strides[0], QImage.Format_RGBA8888)
+    
+    # cb = QGuiApplication.clipboard()
+    # cb.setImage(qimage)
+
+    output = BytesIO()
+    Image.fromarray(im).convert("RGB").save(output, "BMP")
+    im_data = output.getvalue()[14:]
+    output.close()
+
+    def send_to_clipboard(clip_type, data):
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(clip_type, data)
+        win32clipboard.CloseClipboard()
+    send_to_clipboard(win32clipboard.CF_DIB, im_data)
+
+    from napari._qt.utils import add_flash_animation
+    # Here we are actually applying the effect to the `_welcome_widget`
+    # and not # the `native` widget because it does not work on the
+    # `native` widget. It's probably because the widget is in a stack
+    # with the `QtWelcomeWidget`.
+    # viewer._window._qt_viewer.addfl
+    add_flash_animation(viewer._window._qt_viewer._welcome_widget)
+
+    # Take screenshot
+    # viewer._window._qt_viewer.clipboard()
+    #Reset camera
+    # viewer.camera.center = SESSION.last_gallery_camera_coordinates["center"]
+    # viewer.camera.zoom = SESSION.last_gallery_camera_coordinates["z"]
+    # Delete layers and resume
+    viewer.layers.selection.clear()
+    for layer in viewer.layers:
+        if "Screenshot" in layer.name:
+            viewer.layers.selection.add(layer)
+    viewer.layers.remove_selected()
+    viewer.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
+    #Resets visible layers 
+    reuse_gamma()
+    
+
+
 
 #TODO make a button to do this as well?
 def set_viewer_to_neutral_zoom(viewer, reset_session = False):
@@ -2137,7 +2308,8 @@ def main(preprocess_class = None):
         preprocess_class._append_status('<font color="#f5551a">  Failed.</font> Attempting to load image as memory-mapped object...')
         try:
             pyramid = tifffile.memmap(qptiff)
-            preprocess_class._append_status('<font color="#7dbc39">  Done. </font> Parsing object data...')
+            preprocess_class._append_status('<font color="#7dbc39">  Done. </font>')
+            preprocess_class._append_status_br('Sorting object data...')
         except:
             preprocess_class._append_status('<font color="#f5551a">  Failed.</font> Attempting to load raw image, this will take a while ...')
             try:
@@ -2156,13 +2328,14 @@ def main(preprocess_class = None):
                 else:
                     pass #firstLayer = pyramid[:,:,0]
                 preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
-                preprocess_class._append_status_br('Initializing Napari session...')
+                preprocess_class._append_status_br('Sorting object data...')
             except:
                 preprocess_class._append_status('<font color="#f5551a">  Failed.</font><br> Aborting startup, please contact Peter.')
                 raise Exception("There was a problem reading the image data. Expecting a regular or memory-mapped tif/qptiff. Got something else.")
     finally:
         end_time = time.time()
         print(f'... completed in {end_time-start_time} seconds')
+    RAW_PYRAMID=pyramid 
 
 
     # Get rid of problematic bindings before starting napari viewer
@@ -2364,6 +2537,8 @@ def main(preprocess_class = None):
     absorption_widget = QPushButton("Absorption")
     absorption_widget.pressed.connect(toggle_absorption)
 
+    
+
     # Create main group in a vertical stack, and add to side box
     # mode_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
 
@@ -2378,6 +2553,34 @@ def main(preprocess_class = None):
     side_dock_layout.addWidget(show_hide_group)
     side_dock_layout.addWidget(absorption_widget)
     # side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+
+
+    # Start adding widgets for the next page. Will be accessible with a new tab
+    im_save_group = QGroupBox("Save a cell image")
+    im_save_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+    im_save_layout = QVBoxLayout(im_save_group)
+    # LineEdit
+    image_save_target_entry = QLineEdit()
+    image_save_target_entry.setPlaceholderText("ID to save")
+    SESSION.widget_dictionary["image_save_target_entry"] = image_save_target_entry
+    im_save_layout.addWidget(image_save_target_entry)
+    # Buttons
+    im_save_buttons_layout = QHBoxLayout()
+    image_save_button_clipboard = QPushButton("Save image to clipboard")
+    image_save_button_file = QPushButton("Save image to file")
+    image_save_button_clipboard.released.connect(lambda: save_cell_image(viewer, image_save_target_entry.text(), clipboard=True))
+    im_save_buttons_layout.addWidget(image_save_button_clipboard)
+    im_save_buttons_layout.addWidget(image_save_button_file)
+    im_save_layout.addLayout(im_save_buttons_layout)
+
+
+
+
+    overflow_page_dock_group = QGroupBox()
+    overflow_page_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    overflow_page_dock_layout = QVBoxLayout(overflow_page_dock_group)
+    overflow_page_dock_layout.addWidget(im_save_group)
+
 
 
 
@@ -2402,7 +2605,6 @@ def main(preprocess_class = None):
     preprocess_class._append_status_br('Sorting object data...')
     
     # Now process object data and fetch images
-    RAW_PYRAMID=pyramid
     try:
         tumor_cell_XYs = extract_phenotype_xldata(specific_cell=SPECIFIC_CELL, sort_by_intensity=local_sort)
     except KeyError as e:
@@ -2499,6 +2701,8 @@ def main(preprocess_class = None):
     side_dock_group.setAlignment(Qt.AlignHCenter)
     scroll_area.resize(side_dock_group.sizeHint())
     right_dock = viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right", tabify = True)
+    viewer.window.add_dock_widget(overflow_page_dock_group, name ="Experimental",area="right", tabify = True)
+
     # right_dock.resize(side_dock_group.sizeHint())
     print(side_dock_group.sizeHint())
     print(scroll_area.sizeHint())

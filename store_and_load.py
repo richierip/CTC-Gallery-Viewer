@@ -15,7 +15,7 @@ import pandas as pd
 from typing import Callable
 from PIL import ImageColor
 from itertools import product
-from PyQt5.QtGui import QFont
+from qtpy.QtGui import QFont
 from dataclasses import dataclass
 import logging
 import os

@@ -1,8 +1,8 @@
 #############################################################################
 
-from PyQt5.QtCore import QObject, Qt, QThread, QTimer
-from PyQt5.QtGui import QIcon, QPixmap,QColor,QFont
-from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,QMainWindow, QGridLayout, QDesktopWidget, QSizePolicy,QLayout,
+from qtpy.QtCore import QObject, Qt, QThread, QTimer
+from qtpy.QtGui import QIcon, QPixmap,QColor,QFont
+from qtpy.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,QMainWindow, QGridLayout, QDesktopWidget, QSizePolicy,QLayout,
                             QRadioButton, QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox,QDoubleSpinBox, QMenuBar, QAction, QFileDialog,
                             QHBoxLayout, QVBoxLayout)
 
