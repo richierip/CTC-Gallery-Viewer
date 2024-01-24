@@ -33,7 +33,7 @@ warnings.catch_warnings
 from typing import List, Callable
 from custom_qt_classes import ScoringDialog, ChannelDialog, StatusCombo
 
-VERSION_NUMBER = '1.2.1'
+VERSION_NUMBER = '1.3'
 FONT_SIZE = 12
 
 COLOR_TO_RGB = {'gray': '(170,170,170, 255)', 'purple':'(160,32,240, 255)', 'blue':'(100,100,255, 255)',
@@ -477,8 +477,8 @@ class ViewerPresets(QDialog):
             if fetch: 
                 self.fetchObjectDataPath()
 
-            # Have to reset the widgets here since these widgets could be filled out already
-            self.reset_mappings(examine_object_data=False)
+                # Have to reset the widgets here since these widgets could be filled out already
+                self.reset_mappings(examine_object_data=False)
 
             # Now get information and pass to widgets
             res = self._prefillObjectData()

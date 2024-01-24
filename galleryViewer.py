@@ -41,7 +41,7 @@ from custom_qt_classes import StatusCombo
 
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
-VERSION_NUMBER = '1.2.1'
+VERSION_NUMBER = '1.3'
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
 cell_colors = store_and_load.CELL_COLORS
 print('\n--------------- adding custom cmaps\n')
@@ -2715,6 +2715,8 @@ def main(preprocess_class = None):
     scroll_area.resize(side_dock_group.sizeHint())
     right_dock = viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right", tabify = True)
     viewer.window.add_dock_widget(overflow_page_dock_group, name ="Experimental",area="right", tabify = True)
+    right_dock.show()
+    right_dock.raise_()
 
     # right_dock.resize(side_dock_group.sizeHint())
     print(side_dock_group.sizeHint())

@@ -128,7 +128,7 @@ class userPresets:
         self.statuses = copy.copy(STATUSES) # Dict of statuses and string keybinds, e.g. {'status A':'a'}
         self.statuses_hex = copy.copy(STATUSES_HEX) # Dict of statuses and HEX codes of color mappings, e.g. {'status A':'#ff0000'}
         self.statuses_rgba = {key: ImageColor.getcolor(val, "RGBA") for key,val in self.statuses_hex.items()} # Dict of statuses and RGBA tuples color mappings, e.g. {'status A':(255,0,0,255)}
-        self.available_statuses_keybinds = ["q","w","e","t","y","u","o","d","f","j","k","l","z","x",",",".","/","[","]",";","'"]
+        self.available_statuses_keybinds = ["q","w","e","t","y","u","o","p","d","f","g","j","l","z","x",",",".","/","[","]",";","'"]
         self.view_settings = self.remake_viewsettings(pass_value=True) # Dict of view settings. Can change after reading from file. ex: {fluor A gamma: 0.5}
         self.view_settings_path = '' # Path to .viewsettings file. The file is a type of HALO export and will use XML formatting
         self.phenotype_mappings = {} # Dict of user selected phenotypes and their status mappings. Cells in the data of these phenotypes will be kept for viewing and assigned the given status 
