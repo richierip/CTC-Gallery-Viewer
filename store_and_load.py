@@ -94,6 +94,7 @@ class sessionVariables:
         self.context_marker_mode = "Disabled"
         self.context_marker_score = None
         self.scoring_function_called_by_mouse_move = False
+        self.tooltip_visible = False
 
 @dataclass
 class ViewerFonts:

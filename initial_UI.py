@@ -304,8 +304,11 @@ class ViewerPresets(QDialog):
         except:
             print('Bad input to "Specific Cell" widget. Saving as NoneType')
             self.userInfo.specific_cell = None
+    
     def saveImageSize(self):
-        self.userInfo.imageSize = self.imageSize.value()
+        val = self.imageSize.value()
+        # Make sure it's an even number. Odd number causes an off by one issue that I don't want to track down.
+        self.userInfo.imageSize = val if val%2==0 else val+1
     def savePageSize(self):
         self.userInfo.page_size = self.page_size_widget.value()
         self.row_size_widget.setRange(2,self.userInfo.page_size)

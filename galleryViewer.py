@@ -1333,11 +1333,11 @@ def attach_functions_to_viewer(viewer):
             else:
                 VIEWER.status = f'{image_name} intensities at {coords}: {output_str}'
 
-            #TODO decide on tooltip behavior. Could change appearance by making 
-            # To make this work in napari version 0.4.18, made a change in napari.components.viewer_model.py
-                # In ViewerModel._update_status_bar_from_cursor , commented out lines 483 to 489
-            # viewer.tooltip.visible = True
-            # viewer.tooltip.text = output_str
+        #TODO decide on tooltip behavior. Could change appearance by making 
+        # To make this work in napari version 0.4.18, made a change in napari.components.viewer_model.py
+            # In ViewerModel._update_status_bar_from_cursor , commented out lines 483 to 489
+        if viewer.tooltip.visible:
+            viewer.tooltip.text = f'<p style="font-size: 18px;">{output_str}</p>' 
 
     SESSION.display_intensity_func = display_intensity
     SESSION.find_mouse_func = find_mouse
@@ -1783,6 +1783,16 @@ def attach_functions_to_viewer(viewer):
             VIEWER.layers["Gallery " +fluor].interpolation = new
             VIEWER.layers["Multichannel "+fluor].interpolation = new
             VIEWER.layers["Context "+fluor].interpolation = new
+
+    @viewer.bind_key('Ctrl-i')
+    @catch_exceptions_to_log_file("runtime_toggle-tooltip")
+    def toggle_tooltip(viewer: napari.Viewer):
+        current = SESSION.tooltip_visible
+        SESSION.tooltip_visible = not current
+        viewer.tooltip.visible = not current
+        s = {True:"enabled",False:"Disabled"}[not current]
+        viewer.status = f"Tooltip {s}!"
+        
 
     @viewer.bind_key('Alt-m')
     @catch_exceptions_to_log_file("runtime_open-manual")
@@ -2339,12 +2349,15 @@ def main(preprocess_class = None):
 
 
     # Get rid of problematic bindings before starting napari viewer
+    # See file at napari\utils\shortcuts.py
     settings=get_settings()
-    for binding in ["napari:hold_for_pan_zoom","napari:activate_image_pan_zoom_mode", "napari:activate_image_transform_mode"]:
+    for binding in ["napari:hold_for_pan_zoom","napari:activate_image_pan_zoom_mode", "napari:activate_image_transform_mode",
+                    "napari:toggle_grid", "napari:transpose_axes","napari:roll_axes", "napari:reset_view",
+                    "napari:toggle_selected_visibility"]:
         try:
             print(settings.shortcuts.shortcuts.pop(binding))
-        except KeyError:
-            print("Keyerror")
+        except KeyError as e:
+            print(f"Can't find this binding: {e}")
             pass
     
     viewer = napari.Viewer(title=f'GalleryViewer v{VERSION_NUMBER} {SESSION.image_display_name}')
@@ -2598,7 +2611,7 @@ def main(preprocess_class = None):
 
     # print(f'\n {dir()}') # prints out the namespace variables 
     SESSION.side_dock_groupboxes = {"notes":notes_all_group, "page":page_group, "mode":mode_group, "hide": show_hide_group, 
-                                    "scoring":scoring_group, "cell description":cell_description_group}
+                                    "scoring":scoring_group, "cell description":cell_description_group, "image saving group":im_save_group}
     SESSION.radiogroups = {"Status layer group": status_layer_group, "Cell boxes group": nuc_boxes_group}
     
     preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
@@ -2665,7 +2678,7 @@ def main(preprocess_class = None):
     #TODO set theme
     VIEWER.theme = "dark"
 
-
+    # Lazy load full size images as dask array
     with tifffile.imread(userInfo.qptiff_path, aszarr=True) as zs:
         SESSION.zarr_store = zs
         sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
