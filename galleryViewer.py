@@ -460,11 +460,17 @@ def toggle_session_mode(target_mode, from_mouse: bool):
                     VIEWER.status = f"Can't find cell [{cid}] in the current page. Staying in {SESSION.mode} mode"
                     return False
             else:
-                match ANNOTATIONS_PRESENT:
+                match bool(ANNOTATIONS_PRESENT): # variable will be False, or a List of String names of annotations present in data
+                
                     case True:
                         target_cell_name = f"{SESSION.cell_under_mouse['Layer']} {str(SESSION.cell_under_mouse['cid'])}"
-                    case False:
+                        print("Case True")
+                    case False: # Will match 
                         target_cell_name = str(SESSION.cell_under_mouse['cid'])
+                        print("Case False")
+                    case _:
+                        # Placeholder. Should never get here at the moment.
+                        raise Exception("Something very wrong has happened")
 
             sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary
             row, col = list(SESSION.grid_to_ID["Multichannel"].keys())[list(SESSION.grid_to_ID["Multichannel"].values()).index(target_cell_name)].split(",")
@@ -626,9 +632,9 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
         z,y,x = VIEWER.camera.center
         # nearby_inds = SESSION.kdtree.query_ball_point([x/sc,y/sc], 550) # [x,y], dist -> indices in table
         if distanceSearchCenter:
-            dists, nearby_inds = SESSION.kdtree.query(distanceSearchCenter, k=100) # [x,y], dist -> indices in table
+            dists, nearby_inds = SESSION.kdtree.query(distanceSearchCenter, k=200) # [x,y], dist -> indices in table
         else:
-            dists, nearby_inds = SESSION.kdtree.query([x/sc,y/sc], k=100) # [x,y], dist -> indices in table
+            dists, nearby_inds = SESSION.kdtree.query([x/sc,y/sc], k=200) # [x,y], dist -> indices in table
 
         nearby_cells = SESSION.session_cells.iloc[nearby_inds] 
 
@@ -736,11 +742,12 @@ def update_scoring_tally(old_score, new_score, in_page = True):
 def update_scoring_tally_all(new_score):
     for score, key in userInfo.statuses.items():
         
+        page_size = len(SESSION.page_cells)
         if score == new_score:
-            difference = userInfo.page_size - SESSION.scoring_tally["Page"][score]
+            difference = page_size - SESSION.scoring_tally["Page"][score]
             SESSION.scoring_tally["Session"][score] = SESSION.scoring_tally["Session"][score] + difference
             SESSION.scoring_tally["Data"][score] = SESSION.scoring_tally["Data"][score] + difference
-            SESSION.scoring_tally["Page"][score] = userInfo.page_size
+            SESSION.scoring_tally["Page"][score] = page_size
         else:    
             SESSION.scoring_tally["Session"][score] = SESSION.scoring_tally["Session"][score] - SESSION.scoring_tally["Page"][score]
             SESSION.scoring_tally["Data"][score] = SESSION.scoring_tally["Data"][score] - SESSION.scoring_tally["Page"][score]
@@ -1337,7 +1344,7 @@ def attach_functions_to_viewer(viewer):
         # To make this work in napari version 0.4.18, made a change in napari.components.viewer_model.py
             # In ViewerModel._update_status_bar_from_cursor , commented out lines 483 to 489
         if viewer.tooltip.visible:
-            viewer.tooltip.text = f'<p style="font-size: 18px;">{output_str}</p>' 
+            viewer.tooltip.text = f'<p style="font-size: 20px;">{output_str}</p>' 
 
     SESSION.display_intensity_func = display_intensity
     SESSION.find_mouse_func = find_mouse
@@ -1463,6 +1470,7 @@ def attach_functions_to_viewer(viewer):
             if SESSION.mode == "Context":
                 SESSION.widget_dictionary['page cell layer'].setCurrentText(layer)
             SESSION.widget_dictionary['switch mode annotation'].setCurrentText(layer)
+            SESSION.widget_dictionary["image_save_target_annotation"].setCurrentText(layer)
         
         SESSION.widget_dictionary["image_save_target_entry"].setText(cid)
         SESSION.widget_dictionary['notes cell entry'].setText(cid)
@@ -1802,8 +1810,8 @@ def attach_functions_to_viewer(viewer):
 
 ######------------------------- Misc + Viewer keybindings ---------------------######
         
-def save_cell_image(viewer: napari.Viewer, cell_id : str, clipboard :bool = True ):
-    
+def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, clipboard :bool = True ):
+\
     # Silence all layers
     for layer in viewer.layers:
         layer.visible = False
@@ -1812,15 +1820,18 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, clipboard :bool = True
     df = SESSION.session_cells
     try:
         if ANNOTATIONS_PRESENT:
-            cid, layer = cell_id.split()
-            singlecell_df = df[(df['Object Id']==int(cid)) & (df['Analysis Region']==str(layer))]
+            singlecell_df = df[(df['Object Id']==int(cell_id)) & (df['Analysis Region']==str(layer_name))]
         else:
             singlecell_df = df[df['Object Id']==int(cell_id)]
     except (ValueError, TypeError, IndexError):
         # Cell doesn't exist
-        viewer.status = f"Unable to screenshot cell '{cell_id}'. This ID was not found in my table."
+        if ANNOTATIONS_PRESENT:
+            viewer.status = f"Unable to screenshot cell '{layer_name} {cell_id}'. This ID was not found in my table."
+        else:
+            viewer.status = f"Unable to screenshot cell '{cell_id}'. This ID was not found in my table."
         return False
     
+    # print(f"Trying to take screenshot for the following frame: {singlecell_df}")
     cell_x = singlecell_df.iloc[0]["center_x"]
     cell_y = singlecell_df.iloc[0]["center_y"]
     offset = userInfo.imageSize // 2
@@ -1891,11 +1902,18 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, clipboard :bool = True
         for layer in viewer.layers:
             if layer.visible == False:
                 continue
-    
-            normalized_data = (((layer.data) - layer.contrast_limits[0]) / (layer.contrast_limits[1] - layer.contrast_limits[0]))** layer.gamma 
+
+            # Subtract min or assign zero if value would be negative. subtracting would actually result in an overflow error since
+            #   this data type is apparently unsigned ints. 
+            normalized_data = np.where(layer.data <= layer.contrast_limits[0], 0, layer.data-layer.contrast_limits[0])
+            # normalized to 0-1 range and apply gamma correction
+            normalized_data = (normalized_data / (layer.contrast_limits[1] - layer.contrast_limits[0])) ** layer.gamma
+
+            # Map to color
             colormapped_data = 1- layer.colormap.map(normalized_data.flatten())
             colormapped_data = colormapped_data.reshape(normalized_data.shape + (4,))
 
+            # Blend in to composite image
             blended = blended-colormapped_data
             
     else: # Dark mode. Additive color space
@@ -1909,26 +1927,30 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, clipboard :bool = True
         for layer in viewer.layers:
             if layer.visible == False:
                 continue
-            normalized_data = ((layer.data - layer.contrast_limits[0]) / (layer.contrast_limits[1] - layer.contrast_limits[0])) ** layer.gamma
+            
+            # Subtract min or assign zero if value would be negative. subtracting would actually result in an overflow error since
+            #   this data type is apparently unsigned ints. 
+            normalized_data = np.where(layer.data <= layer.contrast_limits[0], 0, layer.data-layer.contrast_limits[0])
+            # normalized to 0-1 range and apply gamma correction
+            normalized_data = (normalized_data / (layer.contrast_limits[1] - layer.contrast_limits[0])) ** layer.gamma
+            
+            # Map to color
             colormapped_data = layer.colormap.map(normalized_data.flatten())
             colormapped_data = colormapped_data.reshape(normalized_data.shape + (4,))
 
+            # blend in to composite image
             blended = blended + colormapped_data
 
     # Clipping mostly to avoid negative numbers that might be present from a light mode cell image
     blended = blended.clip(min=0, max = 1)
 
     from matplotlib.image import imsave
-    np.save("blended_cell_light.npy", blended)
     blended[..., 3] = 1 # set alpha channel to 1
-    imsave("look_at_me!.png", blended)
+    # imsave("look_at_me!.png", blended)
 
     im = (blended*255).astype(np.uint8)
-    # qimage = QImage(im.copy(), im.shape[1], im.shape[0], im.strides[0], QImage.Format_RGBA8888)
-    
-    # cb = QGuiApplication.clipboard()
-    # cb.setImage(qimage)
 
+    # Copy the image to the system clipboard
     output = BytesIO()
     Image.fromarray(im).convert("RGB").save(output, "BMP")
     im_data = output.getvalue()[14:]
@@ -2572,16 +2594,29 @@ def main(preprocess_class = None):
     im_save_group = QGroupBox("Save a cell image")
     im_save_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
     im_save_layout = QVBoxLayout(im_save_group)
+    
     # LineEdit
     image_save_target_entry = QLineEdit()
     image_save_target_entry.setPlaceholderText("ID to save")
     SESSION.widget_dictionary["image_save_target_entry"] = image_save_target_entry
-    im_save_layout.addWidget(image_save_target_entry)
+    
+    # Layout 
+    imsave_entry_layout = QHBoxLayout()
+    imsave_entry_layout.addWidget(image_save_target_entry)
+    # Annotation widget:
+    if ANNOTATIONS_PRESENT:
+        imsave_annotations = QComboBox() ; imsave_annotations.addItems(ANNOTATIONS_PRESENT)
+        SESSION.widget_dictionary["image_save_target_annotation"] = imsave_annotations
+        imsave_entry_layout.addWidget(imsave_annotations)
+    im_save_layout.addLayout(imsave_entry_layout) # Add H layout to main V layout
+    
     # Buttons
     im_save_buttons_layout = QHBoxLayout()
     image_save_button_clipboard = QPushButton("Save image to clipboard")
     image_save_button_file = QPushButton("Save image to file")
-    image_save_button_clipboard.released.connect(lambda: save_cell_image(viewer, image_save_target_entry.text(), clipboard=True))
+    image_save_button_clipboard.released.connect(lambda: save_cell_image(viewer, 
+                image_save_target_entry.text(), imsave_annotations.currentText() if ANNOTATIONS_PRESENT else None,
+                clipboard=True))
     im_save_buttons_layout.addWidget(image_save_button_clipboard)
     im_save_buttons_layout.addWidget(image_save_button_file)
     im_save_layout.addLayout(im_save_buttons_layout)
