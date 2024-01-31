@@ -113,6 +113,7 @@ class userPresets:
                 cells_per_row = 8, statuses = None, ):
         self.qptiff_path = qptiff_path # String - image path
         self.last_system_folder_visited = "C:/"
+        self.last_image_save_folder = "C:/"
         self.objectDataPath = '' # String - object data path
         self.objectDataFrame = None # Pandas DataFrame created using read_csv. Storing this saves time when wanting the df later
         self.imageSize = imageSize # Int - size of EACH punchout around a cell

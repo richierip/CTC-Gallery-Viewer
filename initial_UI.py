@@ -503,7 +503,7 @@ class ViewerPresets(QDialog):
                 if annos == 0:
                     status = _generate_no_anno_string(phenos)
                 else: status = _generate_typical_string(annos,phenos)
-                status +='<br><font color="#ffa000">Warning - the image given has a different name than what was used to generate the object data</font>'
+                status +='<br><font color="#ffa000">Warning - the image given has a different name than the image that was used to generate the object data</font>'
                 self.status_label.setText(status)
                 self.setWidgetColorBackground(self.dataEntry, "#4c9b8f")
                 QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))

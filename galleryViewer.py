@@ -10,7 +10,7 @@ import napari
 from napari.types import ImageData
 from napari.settings import get_settings
 from magicgui import magicgui #, magic_factory
-from qtpy.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, 
+from qtpy.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, QFileDialog,
                         QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton, QScrollArea, QDockWidget)
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QFont, QImage, QGuiApplication, QPixmap
@@ -33,6 +33,7 @@ import scipy.spatial as spatial
 from io import BytesIO
 import win32clipboard
 from PIL import Image
+import pathlib
 
 # These files were created as part of the GalleryViewer Project
 import store_and_load
@@ -86,10 +87,16 @@ ANNOTATIONS_PRESENT = False # Track whether there is an 'Analysis Regions' field
 
 ## --- Composite functions 
 def adjust_composite_gamma(layer, gamma):
-    layer.gamma = 2-(2*gamma) + 0.001 # avoid gamma = 0 which causes an exception
+    try:
+        layer.gamma = 2-(2*gamma) + 0.001 # avoid gamma = 0 which causes an exception
+    except ValueError as e:
+        userInfo.log_exception(e, error_type="adjust-gamma-slider-exception")
 
 def adjust_composite_limits(layer, limits):
-    layer.contrast_limits = limits
+    try:
+        layer.contrast_limits = limits
+    except ValueError as e:
+        userInfo.log_exception(e, error_type="adjust-composite-limits-slider-exception")
 
 def reuse_gamma():
     # Make everything silent
@@ -172,7 +179,6 @@ def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData:
             #     VIEWER.layers[f"{m} "+fluor].visible = False
     VIEWER.window._qt_viewer.setFocus()
 
-adjust_gamma_widget.visible=False
 
 @magicgui(auto_call=True,
         white_in={"widget_type": "FloatSlider", "max":255,"min":1.0, "label": "White-in"},
@@ -319,7 +325,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             return True
         else:
             #TODO Maybe it's an excel sheet?
-            VIEWER.status = f'{Mode} Mode enabled. But, there was a problem saving your decisions. Close your data file?'
+            VIEWER.status = f'{Mode} Mode enabled. But, there was a problem saving your scoring     decisions. Close your data file?'
             return False
 
     if SESSION.mode != "Context" and from_mouse:
@@ -448,12 +454,16 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             if not from_mouse:
                 try:
                     cid = SESSION.widget_dictionary['switch mode cell'].text()
-                    if ANNOTATIONS_PRESENT:
+                    if cid == '':
+                        target_cell_info = SESSION.page_cells[SESSION.grid_to_ID["Multichannel"]["1,1"]] # get first
+                        target_cell_name = f"{target_cell_info['Layer']} {target_cell_info['cid']}" if ANNOTATIONS_PRESENT else str(target_cell_info['cid'])
+                    elif ANNOTATIONS_PRESENT:
                         layer = SESSION.widget_dictionary['switch mode annotation'].currentText()
                         target_cell_name = f"{layer} {cid}"
+                        target_cell_info = SESSION.current_cells[target_cell_name]
                     else:
                         target_cell_name = str(cid)
-                    target_cell_info = SESSION.current_cells[target_cell_name]
+                        target_cell_info = SESSION.current_cells[target_cell_name]
                     SESSION.cell_under_mouse = target_cell_info
                     print(target_cell_info)
                 except KeyError:
@@ -1809,14 +1819,33 @@ def attach_functions_to_viewer(viewer):
 
 
 ######------------------------- Misc + Viewer keybindings ---------------------######
-        
+
+def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard :bool = True, separate = False ):
+
+    # Set only chosen mode's layers visible so they will be processed by the blending function
+    page_shape = None
+    for layer in viewer.layers:
+        if mode_choice in layer.name and not ("Status" in layer.name or "Nuclei Boxes" in layer.name):
+            layer.visible = True
+            page_shape = layer.data.shape
+        else:
+            layer.visible = False
+
+    blended = _blend_visible_layers(viewer, page_shape, page_image = True)
+    viewer.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"] 
+    reuse_gamma() # Resets visible layers
+    if separate:
+        _slice_page_image(viewer, mode_choice, blended)
+    else:
+        _send_image_to_user(viewer, blended, clipboard)
+    # Done!
+
 def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, clipboard :bool = True ):
-\
+
     # Silence all layers
     for layer in viewer.layers:
         layer.visible = False
     
-    # 
     df = SESSION.session_cells
     try:
         if ANNOTATIONS_PRESENT:
@@ -1874,34 +1903,43 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
             viewer.add_image(cell_image, name = f"Screenshot {fluor}", blending = 'minimum',
                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
-            # viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'minimum',
-            #     colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
-            #     gamma=fluor_gamma, contrast_limits=fluor_contrast)
             
         else:
             viewer.add_image(cell_image, name = f"Screenshot {fluor}", blending = 'additive',
                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
-            # viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
-            #     colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
-            #     gamma=fluor_gamma, contrast_limits=fluor_contrast)
-    
+ 
+    blended = _blend_visible_layers(viewer, (userInfo.imageSize, userInfo.imageSize))
 
-    # center this cell
-    # viewer.camera.center = (int(SESSION.image_scale*offset), int(SESSION.image_scale*offset))
-    
+    # Delete layers and resume
+    viewer.layers.selection.clear()
+    for layer in viewer.layers:
+        if "Screenshot" in layer.name:
+            viewer.layers.selection.add(layer)
+    viewer.layers.remove_selected()
+    viewer.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
+    # Resets visible layers 
+    reuse_gamma()
+    _send_image_to_user(viewer, blended, clipboard)
+    # Done!
 
+def _blend_visible_layers(viewer, blended_image_shape, page_image = False):
+    num_channels = len(userInfo.active_channels)
+    num_channels = num_channels - 1 if "Composite" in userInfo.active_channels else num_channels
     if SESSION.absorption_mode: # Light mode. Subtractive color space
-        if SESSION.mode in ("Gallery","Context"):
-            blended = np.ones((userInfo.imageSize,userInfo.imageSize) + (4,))
+        if page_image: 
+            blended = np.ones(blended_image_shape + (4,))
+        elif SESSION.mode in ("Gallery","Context"):
+            blended = np.ones(blended_image_shape + (4,))
         elif SESSION.mode == "Multichannel":
-            blended = np.ones((userInfo.imageSize,userInfo.imageSize*(num_channels+1)) + (4,))
+            blended_image_shape = (blended_image_shape[0], blended_image_shape[1]*(num_channels+1))
+            blended = np.ones(blended_image_shape + (4,))
         else:
             viewer.status = "Ran into a problem: unexpected viewer mode"
             raise ValueError(f"Unexpected session mode given: {SESSION.mode}")
         for layer in viewer.layers:
             if layer.visible == False:
-                continue
+                continue # pass over everything except the screenshot layers
 
             # Subtract min or assign zero if value would be negative. subtracting would actually result in an overflow error since
             #   this data type is apparently unsigned ints. 
@@ -1917,10 +1955,13 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
             blended = blended-colormapped_data
             
     else: # Dark mode. Additive color space
-        if SESSION.mode in ("Gallery","Context"):
-            blended = np.zeros((userInfo.imageSize,userInfo.imageSize) + (4,))
+        if page_image:
+            blended = np.zeros(blended_image_shape + (4,))
+        elif SESSION.mode in ("Gallery","Context"):
+            blended = np.zeros(blended_image_shape + (4,))
         elif SESSION.mode == "Multichannel":
-            blended = np.zeros((userInfo.imageSize,userInfo.imageSize*(num_channels+1)) + (4,))
+            blended_image_shape = (blended_image_shape[0], blended_image_shape[1]*(num_channels+1))
+            blended = np.zeros(blended_image_shape + (4,))
         else:
             viewer.status = "Ran into a problem: unexpected viewer mode"
             raise ValueError(f"Unexpected session mode given: {SESSION.mode}")
@@ -1943,49 +1984,83 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
 
     # Clipping mostly to avoid negative numbers that might be present from a light mode cell image
     blended = blended.clip(min=0, max = 1)
-
-    from matplotlib.image import imsave
     blended[..., 3] = 1 # set alpha channel to 1
-    # imsave("look_at_me!.png", blended)
+    return blended
 
-    im = (blended*255).astype(np.uint8)
+def _send_image_to_user(viewer, blended, clipboard, image_name_override = False , silence_animation = False):
+    # Save image. Can leave if failure
+    if not clipboard:
+        # Need to save image only
+        from matplotlib.image import imsave
 
-    # Copy the image to the system clipboard
-    output = BytesIO()
-    Image.fromarray(im).convert("RGB").save(output, "BMP")
-    im_data = output.getvalue()[14:]
-    output.close()
+        try:
+            if not image_name_override:
+                parent_folder = userInfo.last_image_save_folder 
+                file_name, _ = QFileDialog.getSaveFileName(None,"Save single cell image",parent_folder,"PNG file (*.png);;All Files(*)")
+                userInfo.last_image_save_folder = os.path.normpath(pathlib.Path(file_name).parent)
+                imsave(file_name, blended)
+            else:
+                imsave(image_name_override, blended)
+            return True
+        except ValueError as e:
+            # User closed save window?
+            print(f"You just closed the save dialog!! {e} \n")
+            return False
 
-    def send_to_clipboard(clip_type, data):
-        win32clipboard.OpenClipboard()
-        win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardData(clip_type, data)
-        win32clipboard.CloseClipboard()
-    send_to_clipboard(win32clipboard.CF_DIB, im_data)
+    else:
+        im = (blended*255).astype(np.uint8)
 
-    from napari._qt.utils import add_flash_animation
-    # Here we are actually applying the effect to the `_welcome_widget`
-    # and not # the `native` widget because it does not work on the
-    # `native` widget. It's probably because the widget is in a stack
-    # with the `QtWelcomeWidget`.
-    # viewer._window._qt_viewer.addfl
-    add_flash_animation(viewer._window._qt_viewer._welcome_widget)
+        # Copy the image to the system clipboard
+        output = BytesIO()
+        Image.fromarray(im).convert("RGB").save(output, "BMP")
+        im_data = output.getvalue()[14:]
+        output.close()
 
-    # Take screenshot
-    # viewer._window._qt_viewer.clipboard()
-    #Reset camera
-    # viewer.camera.center = SESSION.last_gallery_camera_coordinates["center"]
-    # viewer.camera.zoom = SESSION.last_gallery_camera_coordinates["z"]
-    # Delete layers and resume
-    viewer.layers.selection.clear()
-    for layer in viewer.layers:
-        if "Screenshot" in layer.name:
-            viewer.layers.selection.add(layer)
-    viewer.layers.remove_selected()
-    viewer.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
-    #Resets visible layers 
-    reuse_gamma()
-    
+        def send_to_clipboard(clip_type, data):
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(clip_type, data)
+            win32clipboard.CloseClipboard()
+        send_to_clipboard(win32clipboard.CF_DIB, im_data)
+
+    if not silence_animation:
+        from napari._qt.utils import add_flash_animation
+        # Here we are actually applying the effect to the `_welcome_widget` and not # the `native` widget because it does
+        #  not work on the `native` widget. It's probably because the widget is in a stack with the `QtWelcomeWidget`.
+        add_flash_animation(viewer._window._qt_viewer._welcome_widget)
+        
+def _slice_page_image(viewer, page_mode, blended_image ):
+
+    parent_folder = userInfo.last_image_save_folder 
+    folder = str(QFileDialog.getExistingDirectory(None, "Select Directory", parent_folder))
+    print(folder)
+    userInfo.last_image_save_folder = os.path.normpath(pathlib.Path(folder).parent)
+
+    im_size = userInfo.imageSize + 2
+    if page_mode == "Gallery":
+        for cell_dict in SESSION.page_cells.values():
+            cname = f"{cell_dict['Layer']} {cell_dict['cid']}" if ANNOTATIONS_PRESENT else str(cell_dict['cid'])
+            row, col = list(SESSION.grid_to_ID[page_mode].keys())[list(SESSION.grid_to_ID[page_mode].values()).index(cname)].split(",")
+            row, col = (int(row),int(col))
+            col_start = (col-1)*(im_size)+1
+            row_start = (row-1)*(im_size)+1
+            blended_cell = blended_image[col_start : col_start + (im_size-2), row_start : row_start + (im_size-2), :]
+            image_path = pathlib.Path(folder).joinpath(f"{cname}.png")
+            _send_image_to_user(viewer, blended_cell, clipboard=False, image_name_override= image_path)
+
+    elif page_mode == "Multichannel":
+        for cell_dict in SESSION.page_cells.values():
+            cname = f"{cell_dict['Layer']} {cell_dict['cid']}" if ANNOTATIONS_PRESENT else str(cell_dict['cid'])
+            row, col = list(SESSION.grid_to_ID[page_mode].keys())[list(SESSION.grid_to_ID[page_mode].values()).index(cname)].split(",")
+            row, col = (int(row),int(col))
+            col_start = ((row-1)*(im_size))+1
+            blended_cell = blended_image[ col_start : col_start + (im_size-2), :, :]
+            image_path = pathlib.Path(folder).joinpath(f"{cname}.png")
+            _send_image_to_user(viewer, blended_cell, clipboard=False, image_name_override= image_path)
+    else:
+        raise ValueError(f"Expected 'Gallery' or Multichannel', got {page_mode}")
+    return True
+
 
 
 
@@ -2532,7 +2607,6 @@ def main(preprocess_class = None):
     nuc_boxes_show = QRadioButton("Show nuclei boxes"); nuc_boxes_show.setChecked(False)
     nuc_boxes_hide = QRadioButton("Hide nuclei boxes"); nuc_boxes_hide.setChecked(True)
     nuc_boxes_context = QRadioButton("Show box under mouse"); nuc_boxes_context.setChecked(False); nuc_boxes_context.setVisible(False)
-
     
     
     nuc_boxes_layout = QHBoxLayout(); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide); nuc_boxes_layout.addWidget(nuc_boxes_context)
@@ -2591,9 +2665,9 @@ def main(preprocess_class = None):
 
 
     # Start adding widgets for the next page. Will be accessible with a new tab
-    im_save_group = QGroupBox("Save a cell image")
-    im_save_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
-    im_save_layout = QVBoxLayout(im_save_group)
+    im_save_cell_group = QGroupBox("Save a cell image")
+    im_save_cell_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+    im_save_cell_layout = QVBoxLayout(im_save_cell_group)
     
     # LineEdit
     image_save_target_entry = QLineEdit()
@@ -2608,45 +2682,75 @@ def main(preprocess_class = None):
         imsave_annotations = QComboBox() ; imsave_annotations.addItems(ANNOTATIONS_PRESENT)
         SESSION.widget_dictionary["image_save_target_annotation"] = imsave_annotations
         imsave_entry_layout.addWidget(imsave_annotations)
-    im_save_layout.addLayout(imsave_entry_layout) # Add H layout to main V layout
+    im_save_cell_layout.addLayout(imsave_entry_layout) # Add H layout to main V layout
     
     # Buttons
-    im_save_buttons_layout = QHBoxLayout()
-    image_save_button_clipboard = QPushButton("Save image to clipboard")
-    image_save_button_file = QPushButton("Save image to file")
-    image_save_button_clipboard.released.connect(lambda: save_cell_image(viewer, 
+    im_save_cell_buttons_layout = QHBoxLayout()
+    # Save to clipboard
+    imsave_cell_button_clipboard = QPushButton("Save image to clipboard")
+    imsave_cell_button_clipboard.released.connect(lambda: save_cell_image(viewer, 
                 image_save_target_entry.text(), imsave_annotations.currentText() if ANNOTATIONS_PRESENT else None,
                 clipboard=True))
-    im_save_buttons_layout.addWidget(image_save_button_clipboard)
-    im_save_buttons_layout.addWidget(image_save_button_file)
-    im_save_layout.addLayout(im_save_buttons_layout)
+    # Save to file
+    imsave_cell_button_file = QPushButton("Save image to file")
+    imsave_cell_button_file.released.connect(lambda: save_cell_image(viewer, 
+                image_save_target_entry.text(), imsave_annotations.currentText() if ANNOTATIONS_PRESENT else None,
+                clipboard=False))
+    im_save_cell_buttons_layout.addWidget(imsave_cell_button_clipboard)
+    im_save_cell_buttons_layout.addWidget(imsave_cell_button_file)
+    im_save_cell_layout.addLayout(im_save_cell_buttons_layout)
 
+    # Group for saving image of all cells in the page
+    im_save_page_group = QGroupBox("Save a page image")
+    im_save_page_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+    im_save_page_layout = QVBoxLayout(im_save_page_group)
 
+    # options Layout 
+    im_save_page_options_layout = QHBoxLayout()
+    # Annotation combo (for mode)
+    im_save_mode_select = QComboBox()
+    im_save_mode_select.addItems(["Gallery", "Multichannel"])
+    SESSION.widget_dictionary["im_save_mode_select"] = im_save_mode_select
+    im_save_page_options_layout.addWidget(im_save_mode_select)
 
+    # Separate file combo option
+    im_save_separate_files = QComboBox()
+    im_save_separate_files.addItems(["Save full page image", "Save each cell separately"])
+    SESSION.widget_dictionary["im_save_separate_files"] = im_save_separate_files
+    im_save_page_options_layout.addWidget(im_save_separate_files)
+    
+    im_save_page_layout.addLayout(im_save_page_options_layout) # add to v layout
+    # Buttons layout
+    im_save_page_buttons_layout = QHBoxLayout()
+        # Save to clipboard button
+    imsave_page_button_clipboard = QPushButton("Save image to clipboard")
+    imsave_page_button_clipboard.released.connect(lambda: save_page_image(viewer, im_save_mode_select.currentText(), clipboard=True))
+    # Save to file
+    imsave_page_button_file = QPushButton("Save image(s) to file")
+    imsave_page_button_file.released.connect(lambda: save_page_image(viewer, im_save_mode_select.currentText(), 
+                                                                     clipboard=False, separate=True if 'separately' in im_save_separate_files.currentText() else False))
+    im_save_page_buttons_layout.addWidget(imsave_page_button_clipboard)
+    im_save_page_buttons_layout.addWidget(imsave_page_button_file)
+    im_save_page_layout.addLayout(im_save_page_buttons_layout)
 
     overflow_page_dock_group = QGroupBox()
     overflow_page_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
     overflow_page_dock_layout = QVBoxLayout(overflow_page_dock_group)
-    overflow_page_dock_layout.addWidget(im_save_group)
-
-
-
+    overflow_page_dock_layout.addWidget(im_save_cell_group)
+    overflow_page_dock_layout.addWidget(im_save_page_group)
 
 
     # Create bottom bar widgets
-    # bottom_dock_group = QGroupBox()
-    # bottom_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
-    # bottom_dock_layout = QHBoxLayout(bottom_dock_group)
-    viewer.window.add_dock_widget(adjust_gamma_widget, area = 'bottom')
-    viewer.window.add_dock_widget(adjust_whitein, area = 'bottom')
-    viewer.window.add_dock_widget(adjust_blackin, area = 'bottom')
+    viewer.window.add_dock_widget([adjust_gamma_widget,adjust_whitein,adjust_blackin], area = 'bottom')
+    
     # viewer.window.add_dock_widget(QLabel("TEST!"), name ="User tools 2",area="right", tabify = True)
 
     # right_dock.adjustSize()
 
     # print(f'\n {dir()}') # prints out the namespace variables 
     SESSION.side_dock_groupboxes = {"notes":notes_all_group, "page":page_group, "mode":mode_group, "hide": show_hide_group, 
-                                    "scoring":scoring_group, "cell description":cell_description_group, "image saving group":im_save_group}
+                                    "scoring":scoring_group, "cell description":cell_description_group, 
+                                    "image cell group":im_save_cell_group, "image page group":im_save_page_group}
     SESSION.radiogroups = {"Status layer group": status_layer_group, "Cell boxes group": nuc_boxes_group}
     
     preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
