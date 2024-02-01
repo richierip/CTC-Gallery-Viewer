@@ -280,16 +280,19 @@ class ViewerPresets(QDialog):
         #     self.previewObjectDataButton.setEnabled(False)
 
     def saveViewSettings(self):
+        import lxml
         self.userInfo.view_settings_path = os.path.normpath(self.viewSettingsEntry.text().strip('"')).strip('.')
         try:
-            if self.userInfo.view_settings_path:
-                df = pd.read_xml(self.userInfo.view_settings_path)
-                self.userInfo.transfer_view_settings(df)
+            df = pd.read_xml(self.userInfo.view_settings_path)
+            self.userInfo.transfer_view_settings(df)
             # print("Success!")
             # print(self.userInfo.view_settings)
-        except Exception as e:
+        except lxml.etree.XMLSyntaxError as e:
             self.userInfo.remake_viewsettings() # use defaults
-            self._log_problem(e, error_type= 'silent-viewsettings-issue')
+            if 'empty' in e:    
+                print("Entry box is empty, user wants to use defaults")
+            else:
+                self._log_problem(e, error_type= 'viewsettings-parse-issue')
 
     def saveSpecificCell(self):
         try:

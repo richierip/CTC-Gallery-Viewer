@@ -95,6 +95,8 @@ class sessionVariables:
         self.context_marker_score = None
         self.scoring_function_called_by_mouse_move = False
         self.tooltip_visible = False
+        self.multichannel_page_images = {} # {"DAPI" : np.Array ...}
+        self.multichannel_nuclei_box_coords = None
 
 @dataclass
 class ViewerFonts:

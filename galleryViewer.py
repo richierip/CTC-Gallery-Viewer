@@ -34,6 +34,7 @@ from io import BytesIO
 import win32clipboard
 from PIL import Image
 import pathlib
+import datetime
 
 # These files were created as part of the GalleryViewer Project
 import store_and_load
@@ -98,7 +99,60 @@ def adjust_composite_limits(layer, limits):
     except ValueError as e:
         userInfo.log_exception(e, error_type="adjust-composite-limits-slider-exception")
 
-def reuse_gamma():
+def hide_invisible_multichannel_fluors():
+    active_fluors_only = [x for x in userInfo.active_channels if x != "Composite"]
+    all_fluors = [x for x in userInfo.channels if x != "Composite"]
+    
+    if "Composite" in userInfo.active_channels or len(active_fluors_only) == len(userInfo.channels): # Reference list has 'Composite' in it
+        # Want to show everything in this case. Use the full image.
+        for fluor in userInfo.active_channels:
+            if fluor == "Composite": continue
+            VIEWER.layers[f"Multichannel {fluor}"].data = copy.copy(SESSION.multichannel_page_images[fluor])
+            VIEWER.layers[f"Multichannel Nuclei Boxes"].data = copy.copy(SESSION.multichannel_nuclei_box_coords)
+        return True
+    
+    # Something is missing. need to remake images
+    num_active_channels = len(active_fluors_only)
+    num_channels = len(all_fluors)
+    imsize = userInfo.imageSize+2
+    fullpage_col = 1
+    collapsed_col = 1
+    for fluor, pos in userInfo.channelOrder.items():
+        if fluor not in all_fluors: continue
+        print(f"looping on {fluor},{pos}  ||| {fullpage_col} {collapsed_col}")
+        if fluor in active_fluors_only:
+            collapsed_image = np.zeros((PAGE_SIZE*(userInfo.imageSize+2),(userInfo.imageSize+2) * num_channels))
+            # Set individual column
+            collapsed_image[:,((collapsed_col-1)*imsize)+1 : (collapsed_col*imsize)-1] = SESSION.multichannel_page_images[fluor][:,((fullpage_col-1)*imsize)+1 : (fullpage_col*imsize)-1]
+            if num_active_channels >1:
+                # Set composite column
+                collapsed_image[:,(num_active_channels*imsize)+1 : ((num_active_channels+1)*imsize)-1] = SESSION.multichannel_page_images[fluor][:,(num_channels*imsize)+1 : ((num_channels+1)*imsize)-1]
+            collapsed_col +=1
+            VIEWER.layers[f"Multichannel {fluor}"].data = collapsed_image
+        fullpage_col +=1
+
+        # x1 = int(cell["XMin"] + offset - cell_x) ; x2 = int(cell["XMax"] + offset - cell_x)
+        # y1 = int(cell["YMin"] + offset - cell_y) ; y2 = int(cell["YMax"] + offset - cell_y)
+        # cXg = (row_g-1)*(userInfo.imageSize+2) ; cYg = (col_g-1)*(userInfo.imageSize+2)
+        # cXm = (row_m-1)*(userInfo.imageSize+2) ; cYm = len(userInfo.channels)*(userInfo.imageSize+2)
+
+        # nuclei_box_coords_g.append([[cXg+y1, cYg+x1], [cXg+y2, cYg+x2]]) # x and y are actually flipped between napari and the object data
+        # nuclei_box_coords_m.append([[cXm+y1, cYm+x1], [cXm+y2, cYm+x2]]) 
+    
+    # Horizontally adjust nuclei boxes 
+    adjust_amount = num_channels - num_active_channels
+    if num_active_channels == 1:
+        adjust_amount +=1
+    hdist = adjust_amount * imsize
+    mbc = copy.copy(SESSION.multichannel_nuclei_box_coords)
+    mbc = [ [[x[0][0], x[0][1]-hdist], [x[1][0], x[1][1]-hdist]]  for x in mbc]
+    VIEWER.layers[f"Multichannel Nuclei Boxes"].data = mbc
+
+def restore_viewsettings_from_cache():
+
+    # Cut out the multichannel fluors that are not visible
+    hide_invisible_multichannel_fluors()
+
     # Make everything silent
     for layer in VIEWER.layers:
         layer.visible = False
@@ -118,6 +172,7 @@ def reuse_gamma():
         VIEWER.layers[f"{SESSION.mode} Status Squares"].visible = SESSION.status_layer_vis
         VIEWER.layers[f"{SESSION.mode} Status Numbers"].visible = SESSION.status_layer_vis
 
+
         # VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
     try:
         print(SESSION.nuclei_boxes_vis)
@@ -130,35 +185,6 @@ def reuse_gamma():
     except KeyError:
         pass
     
-
-def reuse_contrast_limits():
-        # Make everything active
-    for layer in VIEWER.layers:
-        layer.visible = False
-    for fluor in userInfo.channels:
-        if fluor == 'Composite':
-            continue
-        if "Composite" in userInfo.active_channels or fluor in userInfo.active_channels: 
-            VIEWER.layers[f"{SESSION.mode} {fluor}"].visible = True
-        # Now change settings for both, whether or not they are displayed right now.
-        adjust_composite_limits(VIEWER.layers["Gallery "+fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
-        adjust_composite_limits(VIEWER.layers["Multichannel "+fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
-        adjust_composite_limits(VIEWER.layers["Context "+fluor], [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]])
-
-    if SESSION.mode != "Context":
-        # VIEWER.layers[f"{SESSION.mode} Status Edges"].visible = SESSION.status_layer_vis
-        VIEWER.layers[f"{SESSION.mode} Status Squares"].visible = SESSION.status_layer_vis
-        VIEWER.layers[f"{SESSION.mode} Status Numbers"].visible = SESSION.status_layer_vis
-        # VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
-    try:
-        if SESSION.mode == "Context":
-            show_boxes = True if SESSION.nuclei_boxes_vis["Context"] =="Show" else False
-        else:
-            show_boxes = SESSION.nuclei_boxes_vis["Gallery/Multichannel"]
-        VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = show_boxes
-    except KeyError:
-        pass
-
 ## --- Bottom bar functions and GUI elements 
 
 @magicgui(auto_call=True,
@@ -276,15 +302,16 @@ def tally_checked_widgets():
             userInfo.active_channels.append(str(checkbox_name))
 
     # Make visible all channels according to rules
-    for fluor in userInfo.channels:
-        # Different set of layers if we are in context mode
-        lname = f'{SESSION.mode} {fluor}'
-        if fluor == "Composite":
-            continue
-        if "Composite" in userInfo.active_channels or fluor in userInfo.active_channels:
-            VIEWER.layers[lname].visible = True
-        else:
-            VIEWER.layers[lname].visible = False  
+    restore_viewsettings_from_cache()
+    # for fluor in userInfo.channels:
+    #     # Different set of layers if we are in context mode
+    #     lname = f'{SESSION.mode} {fluor}'
+    #     if fluor == "Composite":
+    #         continue
+    #     if "Composite" in userInfo.active_channels or fluor in userInfo.active_channels:
+    #         VIEWER.layers[lname].visible = True
+    #     else:
+    #         VIEWER.layers[lname].visible = False  
     VIEWER.window._qt_viewer.setFocus()
     # return myfunc
 
@@ -331,6 +358,8 @@ def toggle_session_mode(target_mode, from_mouse: bool):
     if SESSION.mode != "Context" and from_mouse:
         _, coords, _ = SESSION.find_mouse_func(VIEWER.cursor.position)
         if coords is None: # User has clicked outside the grid area with the chage mode hotkey pressed. Alert and do nothing.
+            if target_mode == "Context" and SESSION.mode == "Multichannel" and from_mouse:
+                pass #TODO
             VIEWER.status = f"Invalid cell selection: cannot change mode to {target_mode}"
             return False
 
@@ -431,7 +460,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             [target_cell_info["center_x"],target_cell_info["center_y"]])
 
         # Turn on / off the correct layers
-        reuse_gamma()
+        restore_viewsettings_from_cache()
 
         VIEWER.window._qt_viewer.setFocus() # return focus
         # Done. Leave function, no need to save cells
@@ -501,7 +530,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
 
         SESSION.mode = target_mode
         # Change visibilities of the correct layers
-        reuse_gamma()
+        restore_viewsettings_from_cache()
         VIEWER.window._qt_viewer.setFocus()
         return True
 
@@ -567,8 +596,8 @@ def show_next_cell_group():
     set_initial_scoring_tally(userInfo.objectDataFrame, SESSION.session_cells)
     # Perform adjustments before exiting function
     #TODO
-    reuse_contrast_limits() # Only checked fluors will be visible
-    reuse_gamma() 
+    # Only checked fluors will be visible
+    restore_viewsettings_from_cache() 
     set_viewer_to_neutral_zoom(VIEWER, reset_session=True) # Fix zoomed out issue
     VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
     VIEWER.window._qt_viewer.setFocus()
@@ -1026,6 +1055,7 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
+            SESSION.multichannel_page_images[fluor] = page_image_multichannel[fluor]
     # if composite_only:
 
     features = {'cid': cid_list}
@@ -1041,7 +1071,7 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
                                         face_color='#00000000', scale=sc)
     viewer.add_shapes(nuclei_box_coords_m, name="Multichannel Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
                                         face_color='#00000000', scale=sc)
-    
+    SESSION.multichannel_nuclei_box_coords = nuclei_box_coords_m
     # print(status_box_coords_g)
     # print(edge_col_list)
 
@@ -1124,6 +1154,14 @@ def attach_functions_to_viewer(viewer):
         if coords[0] < 0 or coords[1]<0:
             if SESSION.mode == "Context": return {"cell":None,"coords": None,"vals": None}
             return "None" , None, None
+        if SESSION.mode == "Multichannel": 
+            # Bail if in multichannel mode and mouse is off to the right. Hard coding this since the grid to id dict
+            #   has the full multichannel grid shape, but now I am allowing users to shrink the grid when toggling channels.
+
+            if coords[1] > (len([x for x in userInfo.active_channels if x !="Composite"])+1)*(userInfo.imageSize+2) and "Composite" not in userInfo.active_channels:
+                
+                return "None" , None, None
+            
         if SESSION.mode == "Context":
             for fluor in userInfo.channels:
                 if fluor == "Composite": continue
@@ -1150,6 +1188,7 @@ def attach_functions_to_viewer(viewer):
             return {"cell":closest_cell,"coords": (coords[1],coords[0]),"vals": vals} # flips axes of coordinates
     
 
+            
         else: # Gallery mode or Multichannel mode    
             row,col = pixel_coord_to_grid(coords)
             try:
@@ -1785,8 +1824,7 @@ def attach_functions_to_viewer(viewer):
     def reset_viewsettings(viewer):
         global ADJUSTMENT_SETTINGS
         ADJUSTMENT_SETTINGS = copy.copy(ORIGINAL_ADJUSTMENT_SETTINGS)
-        reuse_gamma()
-        reuse_contrast_limits()
+        restore_viewsettings_from_cache()
     
     @viewer.bind_key('i')
     @catch_exceptions_to_log_file("runtime_switch-interpolation")
@@ -1825,15 +1863,18 @@ def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard
     # Set only chosen mode's layers visible so they will be processed by the blending function
     page_shape = None
     for layer in viewer.layers:
-        if mode_choice in layer.name and not ("Status" in layer.name or "Nuclei Boxes" in layer.name):
-            layer.visible = True
+        layer.visible = False
+        for fluor in userInfo.channels:
+            if "Composite" not in userInfo.active_channels and fluor not in userInfo.active_channels:
+                continue
+            layer = VIEWER.layers[f"{mode_choice} {fluor}"]
+            print(f"Setting page shape on {layer.name}. shape is {layer.data.shape}")
             page_shape = layer.data.shape
-        else:
-            layer.visible = False
+            layer.visible = True
 
     blended = _blend_visible_layers(viewer, page_shape, page_image = True)
     viewer.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"] 
-    reuse_gamma() # Resets visible layers
+    restore_viewsettings_from_cache() # Resets visible layers
     if separate:
         _slice_page_image(viewer, mode_choice, blended)
     else:
@@ -1873,7 +1914,9 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
     # Need to know this for multichannel mode
     num_channels = len(userInfo.active_channels)
     num_channels = num_channels - 1 if "Composite" in userInfo.active_channels else num_channels
+    pos = 0
     for fluor in list(userInfo.channels):
+
         # Passing gamma is currently bugged. Suggested change is to remove the validation in the _on_gamma_change 
         #   (now located at napari/_vispy/layers/image.py
         # See https://github.com/napari/napari/issues/1866
@@ -1887,13 +1930,13 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
         if SESSION.mode in ("Gallery","Context"):
             cell_image = SESSION.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
         elif SESSION.mode == "Multichannel":
-            cell_image = np.zeros((userInfo.imageSize,userInfo.imageSize*(num_channels+1)))
+            cell_image = np.zeros((userInfo.imageSize,userInfo.imageSize*(len([x for x in userInfo.active_channels if x !="Composite"])+1)))
             cell_punchout = SESSION.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute()
-            pos = userInfo.channels.index(fluor)
             start = pos * userInfo.imageSize
             end = (pos+1) * userInfo.imageSize
             cell_image[0:userInfo.imageSize, start:end] = cell_punchout
             cell_image[-userInfo.imageSize:,-userInfo.imageSize:] = cell_punchout
+            pos +=1
         else:
             viewer.status = "Ran into a problem: unexpected viewer mode"
             raise ValueError(f"Unexpected session mode given: {SESSION.mode}")
@@ -1919,11 +1962,12 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
     viewer.layers.remove_selected()
     viewer.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
     # Resets visible layers 
-    reuse_gamma()
+    restore_viewsettings_from_cache()
     _send_image_to_user(viewer, blended, clipboard)
     # Done!
 
 def _blend_visible_layers(viewer, blended_image_shape, page_image = False):
+    print(f"incoming image shape: {blended_image_shape}")
     num_channels = len(userInfo.active_channels)
     num_channels = num_channels - 1 if "Composite" in userInfo.active_channels else num_channels
     if SESSION.absorption_mode: # Light mode. Subtractive color space
@@ -1937,10 +1981,10 @@ def _blend_visible_layers(viewer, blended_image_shape, page_image = False):
         else:
             viewer.status = "Ran into a problem: unexpected viewer mode"
             raise ValueError(f"Unexpected session mode given: {SESSION.mode}")
+        
         for layer in viewer.layers:
             if layer.visible == False:
                 continue # pass over everything except the screenshot layers
-
             # Subtract min or assign zero if value would be negative. subtracting would actually result in an overflow error since
             #   this data type is apparently unsigned ints. 
             normalized_data = np.where(layer.data <= layer.contrast_limits[0], 0, layer.data-layer.contrast_limits[0])
@@ -1968,6 +2012,7 @@ def _blend_visible_layers(viewer, blended_image_shape, page_image = False):
         for layer in viewer.layers:
             if layer.visible == False:
                 continue
+            print(f"Blending func: Iterating over {layer.name}. Shape is {layer.data.shape}")
             
             # Subtract min or assign zero if value would be negative. subtracting would actually result in an overflow error since
             #   this data type is apparently unsigned ints. 
@@ -2033,8 +2078,9 @@ def _slice_page_image(viewer, page_mode, blended_image ):
 
     parent_folder = userInfo.last_image_save_folder 
     folder = str(QFileDialog.getExistingDirectory(None, "Select Directory", parent_folder))
-    print(folder)
     userInfo.last_image_save_folder = os.path.normpath(pathlib.Path(folder).parent)
+    # save_folder_name = datetime.today().strftime(f'{}_%H%M%S.txt')
+
 
     im_size = userInfo.imageSize + 2
     if page_mode == "Gallery":
@@ -2045,7 +2091,7 @@ def _slice_page_image(viewer, page_mode, blended_image ):
             col_start = (col-1)*(im_size)+1
             row_start = (row-1)*(im_size)+1
             blended_cell = blended_image[col_start : col_start + (im_size-2), row_start : row_start + (im_size-2), :]
-            image_path = pathlib.Path(folder).joinpath(f"{cname}.png")
+            image_path = pathlib.Path(folder).joinpath(datetime.today().strftime(f'{cname}_%H%M%S.png'))
             _send_image_to_user(viewer, blended_cell, clipboard=False, image_name_override= image_path)
 
     elif page_mode == "Multichannel":
@@ -2055,7 +2101,7 @@ def _slice_page_image(viewer, page_mode, blended_image ):
             row, col = (int(row),int(col))
             col_start = ((row-1)*(im_size))+1
             blended_cell = blended_image[ col_start : col_start + (im_size-2), :, :]
-            image_path = pathlib.Path(folder).joinpath(f"{cname}.png")
+            image_path = pathlib.Path(folder).joinpath(datetime.today().strftime(f'{cname}_%H%M%S.png'))
             _send_image_to_user(viewer, blended_cell, clipboard=False, image_name_override= image_path)
     else:
         raise ValueError(f"Expected 'Gallery' or Multichannel', got {page_mode}")
@@ -2742,7 +2788,7 @@ def main(preprocess_class = None):
 
     # Create bottom bar widgets
     viewer.window.add_dock_widget([adjust_gamma_widget,adjust_whitein,adjust_blackin], area = 'bottom')
-    
+
     # viewer.window.add_dock_widget(QLabel("TEST!"), name ="User tools 2",area="right", tabify = True)
 
     # right_dock.adjustSize()
@@ -2838,8 +2884,7 @@ def main(preprocess_class = None):
     chn_key_wrapper(viewer)
     if preprocess_class is not None: preprocess_class.close() # close other window
     # Set adjustment settings to their default now that all images are loaded
-    reuse_contrast_limits()
-    reuse_gamma()
+    restore_viewsettings_from_cache()
     viewer.layers.selection.active = viewer.layers[f"Gallery {userInfo.channels[0]}"]  
 
 
@@ -2855,7 +2900,7 @@ def main(preprocess_class = None):
     right_dock = viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right", tabify = True)
     viewer.window.add_dock_widget(overflow_page_dock_group, name ="Experimental",area="right", tabify = True)
     right_dock.show()
-    right_dock.raise_()
+    right_dock.raise_() # Make the user tools dock come up first
 
     # right_dock.resize(side_dock_group.sizeHint())
     print(side_dock_group.sizeHint())
