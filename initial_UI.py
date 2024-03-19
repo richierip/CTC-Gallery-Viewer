@@ -12,25 +12,20 @@ import time
 import store_and_load
 from galleryViewer import GUI_execute
 import ctypes
-import logging
-from datetime import datetime
 import os
 import warnings
 warnings.filterwarnings("ignore")
 import pandas as pd
 import copy
 import pathlib
-import custom_color_functions
 
 # Used in fetching and processing metadata
 from random import choice
 import tifffile
 import xml.etree.ElementTree as ET
-from re import sub
 import webbrowser # for opening github
 import warnings
 warnings.catch_warnings
-from typing import List, Callable
 from custom_qt_classes import ScoringDialog, ChannelDialog, StatusCombo
 
 VERSION_NUMBER = '1.3'
@@ -91,7 +86,7 @@ class ViewerPresets(QDialog):
             new_anno_label += f'{key}<br>'
         self.userInfo.annotation_mappings_label = new_anno_label
 
-        self.status_label = QLabel("init")
+        self.status_label = QLabel()
         self.status_label.setStyleSheet('color:#075cbf ; font-size: 15pt')
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setVisible(False)
@@ -127,9 +122,11 @@ class ViewerPresets(QDialog):
 
         
         self.viewSettingsEntry = QLineEdit()
-        self.viewSettingsEntry.insert(self.userInfo.view_settings_path)
+        self.viewSettingsEntry.insert(pathlib.Path(self.userInfo.view_settings_path).name)
         self.viewSettingsEntry.setPlaceholderText('Enter path to a .viewsettings file (optional)')
         self.viewSettingsEntry.setFixedWidth(800)
+
+        self.getViewsettingsPathButton = QPushButton("Set default view settings")
 
         # viewSettingsLabel = QLabel("View Settings: ")
         # viewSettingsLabel.setBuddy(self.viewSettingsEntry)
@@ -144,7 +141,7 @@ class ViewerPresets(QDialog):
         self.findDataButton.pressed.connect(self.loadGallery)
         self.qptiffEntry.textEdited.connect(self.saveQptiff)
         self.dataEntry.textEdited.connect(self.saveObjectData)
-        # self.viewSettingsEntry.textEdited.connect(self.saveViewSettings)
+        self.getViewsettingsPathButton.pressed.connect(self.fetchViewsettingsPath)
         self.previewObjectDataButton.pressed.connect(self.prefillObjectData)
         self.previewImageDataButton.pressed.connect(self.prefillImageData)
 
@@ -184,6 +181,7 @@ class ViewerPresets(QDialog):
         # topLayout.addWidget(viewSettingsLabel,3,0,1,0)
         topLayout.addWidget(self.previewObjectDataButton,2,2)
         topLayout.addWidget(self.viewSettingsEntry,3,1)
+        topLayout.addWidget(self.getViewsettingsPathButton,3,2)
         # topLayout.addWidget(self.findDataButton,2,1)
 
         self.mainLayout = QGridLayout()
@@ -212,6 +210,8 @@ class ViewerPresets(QDialog):
         if self.userInfo.objectDataPath is not None and  self.userInfo.qptiff_path is not None:
             self.dataEntry.insert(pathlib.Path(self.userInfo.objectDataPath).name)
             self.prefillObjectData(fetch=False)
+        if self.userInfo.view_settings_path is not None:
+            self.saveViewSettings()
         self.clearFocus()
 
     
@@ -281,19 +281,30 @@ class ViewerPresets(QDialog):
 
     def saveViewSettings(self):
         import lxml
-        self.userInfo.view_settings_path = os.path.normpath(self.viewSettingsEntry.text().strip('"')).strip('.')
         try:
             df = pd.read_xml(self.userInfo.view_settings_path)
             self.userInfo.transfer_view_settings(df)
-            # print("Success!")
-            # print(self.userInfo.view_settings)
+            self._append_status_br('<font color="#4c9b8f">Successfully imported .viewsettings file!</font>')
+                
+                
+            self.setWidgetColorBackground(self.viewSettingsEntry, "#55ff55")
+            QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.viewSettingsEntry, "#ffffff"))
+
         except lxml.etree.XMLSyntaxError as e:
             self.userInfo.remake_viewsettings() # use defaults
-            if 'empty' in e:    
+            if 'empty' in str(e):
+                self._append_status_br('No .viewsettings file selected, using defaults')    
                 print("Entry box is empty, user wants to use defaults")
             else:
+                self._append_status_br('<font color="#ffa000"> Unable to read .viewsettings file, will use defaults instead</font>')  
                 self._log_problem(e, error_type= 'viewsettings-parse-issue')
-
+                self.setWidgetColorBackground(self.viewSettingsEntry, "#4c9b8f")
+                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.viewSettingsEntry, "#ffffff"))
+        except Exception as e:
+                self._append_status_br('<font color="#ffa000"> Unable to read .viewsettings file, will use defaults instead</font>')  
+                self._log_problem(e, error_type= 'unspecified-viewsettings-issue')
+                self.setWidgetColorBackground(self.viewSettingsEntry, "#4c9b8f")
+                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.viewSettingsEntry, "#ffffff"))
     def saveSpecificCell(self):
         try:
             if self.specificCellChoice.text() == '':
@@ -446,11 +457,30 @@ class ViewerPresets(QDialog):
         # Log the crash and report key variables
         self.userInfo.log_exception(e, logpath, error_type)
 
+    def fetchViewsettingsPath(self):
+        path = self.userInfo.last_system_folder_visited
+
+        print(f"path {path}")
+        current_entry = self.viewSettingsEntry.text().strip('"').strip("' ")
+        if os.path.exists(current_entry) and (current_entry.lower().endswith(".viewsettings") ):
+            fileName = current_entry
+        else:
+            fileName, _ = QFileDialog.getOpenFileName(self,"Select a HALO viewsettings file", path,"HALO viewsettigs (*.viewsettings)")
+        # self.userInfo.last_system_folder_visited = os.path.normpath(pathlib.Path(fileName).parent)
+        self.userInfo.view_settings_path = os.path.normpath(fileName)
+        self.saveViewSettings() # Try to import
+        self.viewSettingsEntry.clear()
+        self.viewSettingsEntry.insert(pathlib.Path(fileName).name)
+
     def fetchObjectDataPath(self):
         path = self.userInfo.last_system_folder_visited
 
         print(f"path {path}")
-        fileName, _ = QFileDialog.getOpenFileName(self,"Select a HALO Object Data file", path,"HALO Object Data (*.csv)")
+        current_entry = self.dataEntry.text().strip('"').strip("' ")
+        if os.path.exists(current_entry) and (current_entry.lower().endswith(".qptiff") or current_entry.lower().endswith(".tif")):
+            fileName = current_entry
+        else:
+            fileName, _ = QFileDialog.getOpenFileName(self,"Select a HALO Object Data file", path,"HALO Object Data (*.csv)")
         self.userInfo.last_system_folder_visited = os.path.normpath(pathlib.Path(fileName).parent)
         self.userInfo.objectDataPath = os.path.normpath(fileName)
         self.dataEntry.clear()
@@ -594,7 +624,11 @@ class ViewerPresets(QDialog):
 
     def fetchImagePath(self):
         path = self.userInfo.last_system_folder_visited
-        fileName, _ = QFileDialog.getOpenFileName(self,"Select an image to load", path,"Akoya QPTIFF (*.qptiff);;Akoya QPTIFF (*.QPTIFF)")  
+        current_entry = self.qptiffEntry.text().strip('"').strip("' ")
+        if os.path.exists(current_entry) and (current_entry.lower().endswith(".qptiff") or current_entry.lower().endswith(".tif")):
+            fileName = current_entry
+        else:
+            fileName, _ = QFileDialog.getOpenFileName(self,"Select an image to load", path,"Akoya QPTIFF (*.qptiff);;Akoya QPTIFF (*.QPTIFF)")  
         
         self.userInfo.last_system_folder_visited = os.path.normpath(pathlib.Path(fileName).parent)
         self.userInfo.qptiff_path = os.path.normpath(fileName)
@@ -1156,7 +1190,6 @@ class ViewerPresets(QDialog):
             self.findDataButton.setEnabled(True)
             return None
 
-        self.saveViewSettings()
         store_and_load.storeObject(self.userInfo, 'data/presets')
         self.userInfo.session.image_display_name = pathlib.Path(self.userInfo.qptiff_path).name # save name of image for display later
         self.userInfo.session.image_scale = self._retrieve_image_scale()

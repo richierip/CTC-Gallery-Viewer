@@ -20,6 +20,7 @@ from dataclasses import dataclass
 import logging
 import os
 from datetime import datetime
+from qtpy.QtWidgets import QToolTip
 
 CELL_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'cyan', 'pink'] # List of colors available to use as colormaps
 CHANNELS_STR = ["DAPI", "Opal 570", "Opal 690", "Opal 480","Opal 620","Opal 780", "Opal 520", "AF"] # List of String names for fluors the user wants to display  
@@ -64,7 +65,7 @@ class sessionVariables:
         self.grid_to_ID = {"Gallery":{}, "Multichannel":{}}
         self.page_status_layers = {"Gallery": [], "Multichannel": []}
         self.session_cells = pd.DataFrame() # all cells in all pages
-        self.cell_under_mouse = {} # Will update with below info for one cell
+        self.cell_under_mouse = {} # Will update with 'current cells' info for one cell
         self.cell_under_mouse_changed = False # Stores a flag to signal this event
         self.context_target = {} # Saves information for the cell of interest in Context Mode
         self.current_cells =  {'Layer':str,"cid": int,"center_x": int,'center_y': int,
@@ -83,6 +84,7 @@ class sessionVariables:
         self.intensity_columns = []
         self.validation_columns = []
         self.mouse_coords = (0,0) # (y,x)
+        self.mouse_coords_world = (0,0) # Used in dummyCoords class to preserve the world coordinates when user moves with arrow keys
         self.display_intensity_func = Callable
         self.find_mouse_func = Callable
         self.side_dock_groupboxes = {}
@@ -97,11 +99,13 @@ class sessionVariables:
         self.tooltip_visible = False
         self.multichannel_page_images = {} # {"DAPI" : np.Array ...}
         self.multichannel_nuclei_box_coords = None
+        self.page = 1
 
 @dataclass
 class ViewerFonts:
     """Hold various fonts to be used in the GUI and Viewer sidebar widget area"""
     small :QFont = QFont("Verdana", 6, weight=QFont.Normal)
+    button_small = QFont("Calibri", 6, weight=QFont.Normal)
 
 
 class userPresets:
@@ -155,9 +159,10 @@ class userPresets:
         for all channels in the data'''
     def remake_viewsettings(self, pass_value = False):
         vs_list = [f"{x[0]} {x[1]}" for x in product(list(self.channelOrder.keys()), ['gamma', 'white-in', 'black-in'])]
-        self.view_settings = {v:[0.5, 255, 0][i%3] for i,v in enumerate(vs_list)}
         if pass_value:
             return {v:[0.5, 255, 0][i%3] for i,v in enumerate(vs_list)}
+        else:
+            self.view_settings = {v:[0.5, 255, 0][i%3] for i,v in enumerate(vs_list)}
     
     # def remake_channelColors(self):
     #     self.channelColors = dict(zip(self.channels,CELL_COLORS))

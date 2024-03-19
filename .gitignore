@@ -31,6 +31,7 @@ jchen_imageload_test.py
 lineEditTesting.py
 needed.txt
 view_settings_parser.py
+*.png
 
 # Compiled source #
 ###################

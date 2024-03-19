@@ -10,15 +10,17 @@ import napari
 from napari.types import ImageData
 from napari.settings import get_settings
 from magicgui import magicgui #, magic_factory
-from qtpy.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, QFileDialog,
-                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton, QScrollArea, QDockWidget)
-from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, QFileDialog, QSpinBox,
+                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton, QScrollArea, QDockWidget, QToolTip)
+from qtpy.QtCore import Qt,QPoint, QRect
 from qtpy.QtGui import QFont, QImage, QGuiApplication, QPixmap
 import numpy as np
 import pandas as pd
 # import openpyxl # necessary, do not remove
-from matplotlib import cm # necessary, do not remove
+from matplotlib import cm, ticker # necessary, do not remove
 from matplotlib import colors as mplcolors # Necessary, do not remove
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import copy
 import time
 import custom_color_functions # Necessary, do not remove
@@ -28,13 +30,14 @@ import os
 import dask.array as da
 # import zarr
 import scipy.spatial as spatial
+from seaborn import histplot
 
 # For clipboard
 from io import BytesIO
 import win32clipboard
 from PIL import Image
 import pathlib
-import datetime
+from datetime import datetime
 
 # These files were created as part of the GalleryViewer Project
 import store_and_load
@@ -100,33 +103,39 @@ def adjust_composite_limits(layer, limits):
         userInfo.log_exception(e, error_type="adjust-composite-limits-slider-exception")
 
 def hide_invisible_multichannel_fluors():
-    active_fluors_only = [x for x in userInfo.active_channels if x != "Composite"]
-    all_fluors = [x for x in userInfo.channels if x != "Composite"]
     
+    all_fluors = [x for x in userInfo.channels if x != "Composite"]
+    active_fluors_only = all_fluors if "Composite" in userInfo.active_channels else [x for x in userInfo.active_channels]
+
     if "Composite" in userInfo.active_channels or len(active_fluors_only) == len(userInfo.channels): # Reference list has 'Composite' in it
         # Want to show everything in this case. Use the full image.
-        for fluor in userInfo.active_channels:
+        for fluor in userInfo.channels:
             if fluor == "Composite": continue
             VIEWER.layers[f"Multichannel {fluor}"].data = copy.copy(SESSION.multichannel_page_images[fluor])
             VIEWER.layers[f"Multichannel Nuclei Boxes"].data = copy.copy(SESSION.multichannel_nuclei_box_coords)
         return True
-    
+
     # Something is missing. need to remake images
     num_active_channels = len(active_fluors_only)
     num_channels = len(all_fluors)
     imsize = userInfo.imageSize+2
+    page_shape = (PAGE_SIZE*(userInfo.imageSize+2),(userInfo.imageSize+2) * (num_active_channels+1)) 
+    if num_active_channels ==1 : 
+        page_shape = (PAGE_SIZE*(userInfo.imageSize+2),(userInfo.imageSize+2) * (num_active_channels)) 
+
     fullpage_col = 1
     collapsed_col = 1
-    for fluor, pos in userInfo.channelOrder.items():
+    for fluor in userInfo.channels:
         if fluor not in all_fluors: continue
-        print(f"looping on {fluor},{pos}  ||| {fullpage_col} {collapsed_col}")
+        # print(f"looping on {fluor},{pos}  ||| {fullpage_col} {collapsed_col}")
         if fluor in active_fluors_only:
-            collapsed_image = np.zeros((PAGE_SIZE*(userInfo.imageSize+2),(userInfo.imageSize+2) * num_channels))
+            collapsed_image = np.zeros(page_shape)
+            fluor_im = copy.copy(SESSION.multichannel_page_images[fluor][:,((fullpage_col-1)*imsize)+1 : (fullpage_col*imsize)-1])
             # Set individual column
-            collapsed_image[:,((collapsed_col-1)*imsize)+1 : (collapsed_col*imsize)-1] = SESSION.multichannel_page_images[fluor][:,((fullpage_col-1)*imsize)+1 : (fullpage_col*imsize)-1]
+            collapsed_image[:,((collapsed_col-1)*imsize)+1 : (collapsed_col*imsize)-1] = fluor_im
             if num_active_channels >1:
                 # Set composite column
-                collapsed_image[:,(num_active_channels*imsize)+1 : ((num_active_channels+1)*imsize)-1] = SESSION.multichannel_page_images[fluor][:,(num_channels*imsize)+1 : ((num_channels+1)*imsize)-1]
+                collapsed_image[:,(num_active_channels*imsize)+1 : ((num_active_channels+1)*imsize)-1] = fluor_im
             collapsed_col +=1
             VIEWER.layers[f"Multichannel {fluor}"].data = collapsed_image
         fullpage_col +=1
@@ -148,10 +157,11 @@ def hide_invisible_multichannel_fluors():
     mbc = [ [[x[0][0], x[0][1]-hdist], [x[1][0], x[1][1]-hdist]]  for x in mbc]
     VIEWER.layers[f"Multichannel Nuclei Boxes"].data = mbc
 
-def restore_viewsettings_from_cache():
+def restore_viewsettings_from_cache(arrange_multichannel = False):
 
     # Cut out the multichannel fluors that are not visible
-    hide_invisible_multichannel_fluors()
+    if arrange_multichannel:
+        hide_invisible_multichannel_fluors()
 
     # Make everything silent
     for layer in VIEWER.layers:
@@ -166,6 +176,13 @@ def restore_viewsettings_from_cache():
         adjust_composite_gamma(VIEWER.layers["Gallery "+fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
         adjust_composite_gamma(VIEWER.layers["Multichannel "+fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
         adjust_composite_gamma(VIEWER.layers["Context "+fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
+        # fix white in / black in
+        adjust_composite_limits(VIEWER.layers["Gallery "+fluor],
+                (ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]))
+        adjust_composite_limits(VIEWER.layers["Multichannel "+fluor],
+                (ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]))
+        adjust_composite_limits(VIEWER.layers["Context "+fluor],
+                (ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]))
 
     if SESSION.mode != "Context":
         # VIEWER.layers[f"{SESSION.mode} Status Edges"].visible = SESSION.status_layer_vis
@@ -175,8 +192,6 @@ def restore_viewsettings_from_cache():
 
         # VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
     try:
-        print(SESSION.nuclei_boxes_vis)
-        print(SESSION.mode)
         if SESSION.mode == "Context":
             show_boxes = True if SESSION.nuclei_boxes_vis["Context"] =="Show" else False
         else:
@@ -204,7 +219,7 @@ def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData:
             # if ("Composite" not in userInfo.active_channels or fluor not in userInfo.active_channels) or SESSION.mode !=m: 
             #     VIEWER.layers[f"{m} "+fluor].visible = False
     VIEWER.window._qt_viewer.setFocus()
-
+    SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
 
 @magicgui(auto_call=True,
         white_in={"widget_type": "FloatSlider", "max":255,"min":1.0, "label": "White-in"},
@@ -220,6 +235,7 @@ def adjust_whitein(white_in: float = 255) -> ImageData:
         for m in ["Gallery", "Multichannel", "Context"]:
             adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [ADJUSTMENT_SETTINGS[fluor+" black-in"],white_in])
     VIEWER.window._qt_viewer.setFocus()
+    SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
 
 
 @magicgui(auto_call=True,
@@ -237,6 +253,13 @@ def adjust_blackin(black_in: float = 0) -> ImageData:
         for m in ["Gallery", "Multichannel", "Context"]:
             adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [black_in,ADJUSTMENT_SETTINGS[fluor+" white-in"]])
     VIEWER.window._qt_viewer.setFocus()
+    SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
+
+def reset_viewsettings():
+    global ADJUSTMENT_SETTINGS
+    ADJUSTMENT_SETTINGS = copy.copy(ORIGINAL_ADJUSTMENT_SETTINGS)
+    restore_viewsettings_from_cache(arrange_multichannel=True if SESSION.mode == 'Multichannel' else False)
+    SESSION.widget_dictionary["reset_vs_button"].setDisabled(True)
 
 def toggle_absorption():
     #TODO make absorption work for context more?
@@ -257,7 +280,9 @@ def toggle_absorption():
             #     continue
             sess = layer.name.split()[0] + " "
             layer.colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[layer.name.replace(sess,"")])
-            layer.blending = 'Additive'
+            layer.blending = 'Additive' 
+        SESSION.widget_dictionary['imsave_cell_borders'].setCurrentText("White borders")
+        SESSION.widget_dictionary['imsave_page_borders'].setCurrentText("White borders")
     else:
         SESSION.absorption_mode = True
         for layer in VIEWER.layers:
@@ -279,6 +304,8 @@ def toggle_absorption():
             sess = layer.name.split()[0] + " "
             layer.colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[layer.name.replace(sess,"")]+' inverse')
             layer.blending = 'Minimum'
+        SESSION.widget_dictionary['imsave_cell_borders'].setCurrentText("Black borders")
+        SESSION.widget_dictionary['imsave_page_borders'].setCurrentText("Black borders")
     if not SESSION.mode == "Context":
         #TODO
         pass
@@ -302,7 +329,7 @@ def tally_checked_widgets():
             userInfo.active_channels.append(str(checkbox_name))
 
     # Make visible all channels according to rules
-    restore_viewsettings_from_cache()
+    restore_viewsettings_from_cache(arrange_multichannel=True if SESSION.mode == "Multichannel" else False)
     # for fluor in userInfo.channels:
     #     # Different set of layers if we are in context mode
     #     lname = f'{SESSION.mode} {fluor}'
@@ -390,17 +417,16 @@ def toggle_session_mode(target_mode, from_mouse: bool):
                     cname = str(cid)
                 target_cell_info = SESSION.current_cells[cname]
                 SESSION.cell_under_mouse = target_cell_info
-                print(target_cell_info)
+                # print(target_cell_info)
             except KeyError:
                 VIEWER.status = f"Can't find cell [{cid}] in the current page. Staying in {SESSION.mode} mode"
                 return False
         else:
             target_cell_info = SESSION.cell_under_mouse
-            print(target_cell_info)
+            # print(target_cell_info)
 
         SESSION.context_target = target_cell_info
         cell_num = str(target_cell_info["cid"])
-        # print(cell_num)
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary.
 
         # Find offset coordinates
@@ -434,11 +460,11 @@ def toggle_session_mode(target_mode, from_mouse: bool):
         SESSION.widget_dictionary["marker button"].setVisible(True)
         SESSION.widget_dictionary['show status layer radio'].setVisible(False) # Disable these widget
         SESSION.widget_dictionary['hide status layer radio'].setVisible(False) 
-
+        
 
         if from_mouse:
             _, (mX,mY), _ = SESSION.find_mouse_func(VIEWER.cursor.position, scope="local")
-            # print(f"mx {mX} and mY {mY}")
+
             # Change cursor value
             sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary.
             class dummyCursor:
@@ -460,7 +486,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             [target_cell_info["center_x"],target_cell_info["center_y"]])
 
         # Turn on / off the correct layers
-        restore_viewsettings_from_cache()
+        restore_viewsettings_from_cache(arrange_multichannel=True if target_mode=="Multichannel" else False)
 
         VIEWER.window._qt_viewer.setFocus() # return focus
         # Done. Leave function, no need to save cells
@@ -476,8 +502,6 @@ def toggle_session_mode(target_mode, from_mouse: bool):
 
         if SESSION.mode != "Context": # Now, we must be changing to Gallery OR Multichannel. Want to save to DataFrame, not disk
             _save_validation(VIEWER, target_mode)
-            print(f"Number of cells in current page is {len(SESSION.current_cells)} and type is {type(SESSION.current_cells)}")
-            
 
         if target_mode == "Multichannel":
             if not from_mouse:
@@ -494,7 +518,6 @@ def toggle_session_mode(target_mode, from_mouse: bool):
                         target_cell_name = str(cid)
                         target_cell_info = SESSION.current_cells[target_cell_name]
                     SESSION.cell_under_mouse = target_cell_info
-                    print(target_cell_info)
                 except KeyError:
                     VIEWER.status = f"Can't find cell [{cid}] in the current page. Staying in {SESSION.mode} mode"
                     return False
@@ -503,10 +526,8 @@ def toggle_session_mode(target_mode, from_mouse: bool):
                 
                     case True:
                         target_cell_name = f"{SESSION.cell_under_mouse['Layer']} {str(SESSION.cell_under_mouse['cid'])}"
-                        print("Case True")
                     case False: # Will match 
                         target_cell_name = str(SESSION.cell_under_mouse['cid'])
-                        print("Case False")
                     case _:
                         # Placeholder. Should never get here at the moment.
                         raise Exception("Something very wrong has happened")
@@ -517,20 +538,22 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             cellCanvasY = ((row-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
             cellCanvasX = (len(userInfo.channels)+1)*(userInfo.imageSize+2) /2 # Add 1 to channels to account for merged image
             SESSION.last_multichannel_camera_coordinates["center"] = (cellCanvasY*sc, cellCanvasX*sc)
-            # print(f"Targeting {cellCanvasY,cellCanvasX}")
+            
             VIEWER.camera.center = SESSION.last_multichannel_camera_coordinates["center"]
             VIEWER.camera.zoom = SESSION.last_multichannel_camera_coordinates["z"]
-        
+
+
         elif target_mode == "Gallery":
             VIEWER.camera.center = SESSION.last_gallery_camera_coordinates["center"]
             VIEWER.camera.zoom = SESSION.last_gallery_camera_coordinates["z"]
+
         else:
             raise Exception(f"Invalid parameter passed to toggle_session_mode: {target_mode}. Must be 'Gallery' or 'Multichannel'.")
         
 
         SESSION.mode = target_mode
         # Change visibilities of the correct layers
-        restore_viewsettings_from_cache()
+        restore_viewsettings_from_cache(arrange_multichannel=True if target_mode =="Multichannel" else False)
         VIEWER.window._qt_viewer.setFocus()
         return True
 
@@ -557,6 +580,7 @@ def show_next_cell_group():
         cid = widgets["page cell id"].text()
         page_widget = widgets["page combobox"]
         page = int(page_widget.currentText().split()[-1])
+        SESSION.page = page
         if ANNOTATIONS_PRESENT:
             ann_layer = widgets["page cell layer"].currentText()
         else:
@@ -597,7 +621,7 @@ def show_next_cell_group():
     # Perform adjustments before exiting function
     #TODO
     # Only checked fluors will be visible
-    restore_viewsettings_from_cache() 
+    restore_viewsettings_from_cache(arrange_multichannel= True if SESSION.mode == "Multichannel" else False) 
     set_viewer_to_neutral_zoom(VIEWER, reset_session=True) # Fix zoomed out issue
     VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
     VIEWER.window._qt_viewer.setFocus()
@@ -675,7 +699,10 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
         else:
             dists, nearby_inds = SESSION.kdtree.query([x/sc,y/sc], k=200) # [x,y], dist -> indices in table
 
-        nearby_cells = SESSION.session_cells.iloc[nearby_inds] 
+        # if there are fewer than k cells, there will be occurences of length of data +1 in the data. Remove these
+        #   so we can get real indices from the table
+         
+        nearby_cells = SESSION.session_cells.iloc[nearby_inds[nearby_inds!=SESSION.session_cells.shape[0]] ] 
 
         # Add box around cells
         nuclei_box_coords = []
@@ -742,9 +769,6 @@ def set_initial_scoring_tally(df, session_df, page_only = True):
         cols = [x for x in session_df.columns if "Validation" in x]
         zeroes_dict = dict(zip(list(userInfo.statuses.keys()) , [0 for i in range(len(userInfo.statuses))]))
         SESSION.scoring_tally =  {"Session":copy.copy(zeroes_dict), "Data":copy.copy(zeroes_dict), "Page":copy.copy(zeroes_dict)}
-        print(SESSION.scoring_tally)
-
-
 
         # Counts for the whole cell set
         melted = df[cols].melt()
@@ -903,7 +927,7 @@ def set_cell_description_label(ID, display_text_override = None):
 
 def retrieve_status(cell_id, status, new_page):
     ''' Kind of an anachronistic function at this point.'''
-    # print(f'Getting status for {cell_id}')
+    
     if new_page:
         if type(status) is not str or status not in STATUS_COLORS.keys():
             status = "Unseen"
@@ -967,7 +991,6 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
         if col_g ==1: row_g+=1
         col_m = 1 ;  row_m+=1 
 
-        # print(f'Next round of while. Still {len(cells)} cells left. G Row {row_g}, Col {col_g} || M Row {row_m}, Col {col_m}')
         cell = cells.pop(); 
         cell_anno = cell["Layer"]; cell_id = cell['cid']; cell_x = cell['center_x']; cell_y = cell['center_y']
         cname = str(cell_id) if cell_anno is None else f"{cell_anno} {cell_id}"
@@ -992,23 +1015,22 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
 
         # Create array of channel indices in image data. Will use to fetch from the dask array
         positions = []
-        for fluor, pos in userInfo.channelOrder.items(): # loop through channels
+        for fluor in userInfo.channels: # loop through channels
             if fluor in userInfo.channels and fluor != 'Composite':
-                positions.append(pos)
+                positions.append(userInfo.channelOrder[fluor]) # channelOrder dict holds mappings of fluors to position in image data
 
         if RAW_PYRAMID is None:
             # print("Using zarr/dask")
             cell_punchout = SESSION.dask_array[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
         else:
-            print("Using full size (raw) image. DANGER")
+            print("Using full size (raw) image. DANGER. DEPRECATED!")
             # dask / zarr lazy reading didn't work, so entire image should be in memory as np array
             # This method is deprecated at this point. Probably won't work.
-            cell_punchout = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,pos].astype(np.uint8)
-        # print(f'Trying to add {cell_name} layer with fluor-color(cm):{fluor}-{userInfo.channelColors[fluor]}')
-        
+            # cell_punchout = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,pos].astype(np.uint8)
+
         fluor_index = 0
-        for fluor, pos in userInfo.channelOrder.items(): # loop through channels
-            if fluor in userInfo.channels and fluor != 'Composite':
+        for fluor in userInfo.channels: # loop through channels
+            if fluor != 'Composite':
                 # multichannel mode: individual image
                 page_image_multichannel[fluor][(row_m-1)*(userInfo.imageSize+2)+1:row_m*(userInfo.imageSize+2)-1,
                             (col_m-1)*(userInfo.imageSize+2)+1:col_m*(userInfo.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
@@ -1026,6 +1048,7 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
                 page_image_gallery[fluor][(row_g-1)*(userInfo.imageSize+2)+1:row_g*(userInfo.imageSize+2)-1, (col_g-1)*(userInfo.imageSize+2)+1:col_g*(userInfo.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
                 # SESSION.page_status_layers["Gallery"][(row_g-1)*(userInfo.imageSize+2):row_g*(userInfo.imageSize+2), (col_g-1)*(userInfo.imageSize+2):col_g*(userInfo.imageSize+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Gallery")
                 fluor_index+=1
+        SESSION.multichannel_page_images = copy.copy(page_image_multichannel)
 
 
     print(f"\nMy scale is {SESSION.image_scale}")
@@ -1055,7 +1078,6 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
-            SESSION.multichannel_page_images[fluor] = page_image_multichannel[fluor]
     # if composite_only:
 
     features = {'cid': cid_list}
@@ -1072,8 +1094,6 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
     viewer.add_shapes(nuclei_box_coords_m, name="Multichannel Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
                                         face_color='#00000000', scale=sc)
     SESSION.multichannel_nuclei_box_coords = nuclei_box_coords_m
-    # print(status_box_coords_g)
-    # print(edge_col_list)
 
     # Defunct borders around each cell image. Don't think it's necessary, and definitely adds more visual clutter
     # viewer.add_shapes(status_box_coords_g, name="Gallery Status Edges", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
@@ -1132,8 +1152,15 @@ def attach_functions_to_viewer(viewer):
         return row_num, col_num
     
     def multichannel_fetch_val(local_x,global_y, fluor):
-        offset_x = (userInfo.imageSize+2) * list(userInfo.channels).index(fluor)
-        return (global_y, offset_x+local_x)
+        if "Composite" in userInfo.active_channels: 
+            offset_x = (userInfo.imageSize+2) * list([x for x in userInfo.channels if x!="Composite"]).index(fluor)
+            return (global_y, offset_x+local_x)
+        elif fluor in userInfo.active_channels:
+            offset_x = (userInfo.imageSize+2) * list([x for x in userInfo.active_channels if x!="Composite"]).index(fluor)
+            return (global_y, offset_x+local_x)
+        else:
+            return (-10,-10) # will result in a None from layer.data.get_value
+
     
 
     '''Locate mouse on the canvas. Returns the name of the cell under the mouse, current mouse 
@@ -1257,6 +1284,7 @@ def attach_functions_to_viewer(viewer):
     @viewer.mouse_move_callbacks.append
     def mouse_movement_wrapper(viewer, event):
         # The 'event' here is from vispy.app.canvas.MouseEvent
+        SESSION.mouse_coords_world = event._pos # Store this 
         display_intensity(viewer,event)
         label_cells_mouseover(viewer,event)
         #Reset flag each cycle, so this signal can only last for one. Important to stop lagginess!!!
@@ -1297,7 +1325,8 @@ def attach_functions_to_viewer(viewer):
             if (vals is None) or (next(iter(vals.values())) is None):
                 # Don't do anything else - the cursor is out of bounds of the image
                 VIEWER.status = 'Out of bounds'
-                return True 
+                SESSION.cell_under_mouse = None
+                return False 
             
             if cell is not None:
                 cid = cell["Object Id"]
@@ -1337,10 +1366,8 @@ def attach_functions_to_viewer(viewer):
                 # reset active layer to an image
                 viewer.layers.selection.active = viewer.layers[f"Gallery {userInfo.channels[0]}"] 
 
-            # print(f"Vals is type {type(vals)} and content is {vals}")
-            # exit()
+    
             # Deal with pixel intensities
-            
             output_str = ''
             for fluor, val in vals.items():
                 if val != "-": val = int(val)
@@ -1367,7 +1394,9 @@ def attach_functions_to_viewer(viewer):
             if vals is None:
                 # Don't do anything else
                 VIEWER.status = 'Out of bounds'
+                SESSION.cell_under_mouse = None
                 return True
+            
             SESSION.cell_under_mouse = SESSION.current_cells[cell_name] # save info
             cell_num = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_num,'')
 
@@ -1392,15 +1421,19 @@ def attach_functions_to_viewer(viewer):
         #TODO decide on tooltip behavior. Could change appearance by making 
         # To make this work in napari version 0.4.18, made a change in napari.components.viewer_model.py
             # In ViewerModel._update_status_bar_from_cursor , commented out lines 483 to 489
-        if viewer.tooltip.visible:
-            viewer.tooltip.text = f'<p style="font-size: 20px;">{output_str}</p>' 
+        if SESSION.tooltip_visible:
+            # napari.Viewer._window._qt_window
+            
+            # Gets mouse position at event._pos, maps to
+            pos = viewer._window._qt_window.mapToGlobal(QPoint(*event._pos).__add__(QPoint(12,-33)))
+            # print(f'{QPoint(*event._pos)} || {pos}')
+            QToolTip.showText(pos, 
+                              f'<p style="font-size: 20px;">{output_str}</p>', 
+                              viewer._window._qt_window)
+            # viewer.tooltip.text = f'<p style="font-size: 20px;">{output_str}</p>' 
 
     SESSION.display_intensity_func = display_intensity
     SESSION.find_mouse_func = find_mouse
-    #TODO trigger pixel readout update when pan or zoom occurs
-
-    # viewer.camera.events.connect(display_intensity)
-    # napari.Viewer.camera.zoom.
 
     def change_status_display(cell_name, next_status):
         next_color_txt = userInfo.statuses_rgba[next_status]
@@ -1430,7 +1463,6 @@ def attach_functions_to_viewer(viewer):
         # print(f"!!! {SESSION.mode} {SESSION.context_nuclei_boxes_text_object} {SESSION.context_nuclei_boxes_map_to_ind}")
         if SESSION.mode =="Context" and SESSION.context_nuclei_boxes_text_object is not None and SESSION.context_nuclei_boxes_map_to_ind:
             try:
-                print("In function")
                 ind_target = SESSION.context_nuclei_boxes_map_to_ind[str(cell_name)]
                 x = viewer.layers["Context Nuclei Boxes"].edge_color # List of colors
                 x[ind_target] = next_color_txt # Change only the color of this cell
@@ -1476,15 +1508,13 @@ def attach_functions_to_viewer(viewer):
     @viewer.bind_key('Space', overwrite = True)
     @catch_exceptions_to_log_file("runtime_assign-next-status")
     def toggle_status(viewer):
-        if SESSION.mode == "Context": 
-            cell = SESSION.cell_under_mouse
-            if cell is None:
-                return False # leave if the mouse is not near a cell (not sure that this could even happen)
-            cell_name = f"{cell['Layer']} {cell['cid']}" if ANNOTATIONS_PRESENT else str(cell['cid'])  
-        else:
-            cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-            if val is None:
-                return None
+        # Allows us to get the cell that is actually under the mouse. If we used the viewer's coordinates, it would show the coords on last
+        #   mouse move. Since the user can move around with the arrow keys as well this does not suffice 
+        cell = SESSION.cell_under_mouse
+        if cell is None:
+            return False # leave if the mouse is not near a cell (not sure that this could even happen)
+        cell_name = f"{cell['Layer']} {cell['cid']}" if ANNOTATIONS_PRESENT else str(cell['cid'])  
+
             
 
         cur_status = SESSION.status_list[str(cell_name)]
@@ -1510,7 +1540,8 @@ def attach_functions_to_viewer(viewer):
     @catch_exceptions_to_log_file("runtime_left-click-cell")
     def user_clicked(viewer, event):
         #TODO decide on the behavior for clicking on a cell
-        
+        if SESSION.cell_under_mouse is None:
+            return None # Nothing to do if no cell under mouse
         layer = SESSION.cell_under_mouse['Layer']
         cid = str(SESSION.cell_under_mouse['cid'])
         # Allow user to click on a cell to get it's name into the entry box  
@@ -1520,12 +1551,15 @@ def attach_functions_to_viewer(viewer):
                 SESSION.widget_dictionary['page cell layer'].setCurrentText(layer)
             SESSION.widget_dictionary['switch mode annotation'].setCurrentText(layer)
             SESSION.widget_dictionary["image_save_target_annotation"].setCurrentText(layer)
+            SESSION.widget_dictionary["hist_annotation"].setCurrentText(layer)
         
         SESSION.widget_dictionary["image_save_target_entry"].setText(cid)
         SESSION.widget_dictionary['notes cell entry'].setText(cid)
         if SESSION.mode == "Context":
             SESSION.widget_dictionary['page cell id'].setText(cid)
         SESSION.widget_dictionary['switch mode cell'].setText(cid)
+        SESSION.widget_dictionary["hist_target_entry"].setText(cid)
+        
 
 
     ''' Dynamically make new functions that can change scoring decisions with a custom keypress. This
@@ -1534,15 +1568,14 @@ def attach_functions_to_viewer(viewer):
         @viewer.bind_key(keybind)
         @catch_exceptions_to_log_file("runtime_change-status")
         def set_score(viewer):
-            if SESSION.mode == "Context": 
-                cell = SESSION.cell_under_mouse
-                if cell is None:
-                    return False # leave if the mouse is not near a cell (not sure that this could even happen)
-                cell_name = f"{cell['Layer']} {cell['cid']}" if ANNOTATIONS_PRESENT else str(cell['cid'])    
-            else:
-                cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
-                if val is None:
-                    return None
+
+            # Allows us to get the cell that is actually under the mouse. If we used the viewer's coordinates, it would show the coords on last
+            #   mouse move. Since the user can move around with the arrow keys as well this does not suffice 
+            cell = SESSION.cell_under_mouse 
+            if cell is None:
+                return False # leave if the mouse is not near a cell (not sure that this could even happen)
+            cell_name = f"{cell['Layer']} {cell['cid']}" if ANNOTATIONS_PRESENT else str(cell['cid'])    
+            
             
             if SESSION.mode == "Context" and SESSION.nuclei_boxes_vis["Context"] == "Mouse":
                 # Change Context boxes and mouse only box colors
@@ -1599,13 +1632,14 @@ def attach_functions_to_viewer(viewer):
     @viewer.mouse_drag_callbacks.append
     @catch_exceptions_to_log_file("runtime_change-session-mode-on-click")
     def load_context_mode(viewer, event):
-        print(event.modifiers)
         if ("Control" in event.modifiers) and ("Shift" in event.modifiers):
             pass
         elif "Shift" in event.modifiers:
             if SESSION.mode == "Multichannel":
                 toggle_session_mode_catch_exceptions(SESSION.last_mode)
             else:
+                if SESSION.cell_under_mouse is None: 
+                    return False # Can't do anything without a target cell
                 layer = SESSION.cell_under_mouse["Layer"]
                 cid = str(SESSION.cell_under_mouse["cid"])
                 if ANNOTATIONS_PRESENT:
@@ -1617,6 +1651,8 @@ def attach_functions_to_viewer(viewer):
             if SESSION.mode == "Context":
                 toggle_session_mode_catch_exceptions(SESSION.last_mode)
             else:
+                if SESSION.cell_under_mouse is None: 
+                    return False # Can't do anything without a target cell
                 layer =SESSION.cell_under_mouse["Layer"]
                 cid = str(SESSION.cell_under_mouse["cid"])
                 if ANNOTATIONS_PRESENT:
@@ -1689,8 +1725,9 @@ def attach_functions_to_viewer(viewer):
         set_viewer_to_neutral_zoom(viewer)
 
     class dummyCursor:
-        def __init__(self, y, x) -> None:
+        def __init__(self, y, x, world_coords) -> None:
             self.position = (y,x)
+            self._pos = world_coords
 
     @viewer.bind_key('Up')
     @catch_exceptions_to_log_file("runtime_arrow-pan")
@@ -1708,8 +1745,8 @@ def attach_functions_to_viewer(viewer):
         viewer.camera.center = (y-int(step_size),x)
 
         curY, curX = SESSION.mouse_coords
-        display_intensity(viewer, dummyCursor(curY-step_size, curX))
-        # SESSION.mouse_coords = (curX, curY-step_size)
+        SESSION.cell_under_mouse_changed = True
+        display_intensity(viewer, dummyCursor(curY-step_size, curX, SESSION.mouse_coords_world))
 
     @viewer.bind_key('Down')
     @catch_exceptions_to_log_file("runtime_arrow-pan")
@@ -1726,8 +1763,8 @@ def attach_functions_to_viewer(viewer):
         viewer.camera.center = (y+int(step_size),x)
 
         curY, curX = SESSION.mouse_coords
-        display_intensity(viewer, dummyCursor(curY+step_size, curX))
-        # SESSION.mouse_coords = (curX, curY+step_size)
+        SESSION.cell_under_mouse_changed = True
+        display_intensity(viewer, dummyCursor(curY+step_size, curX, SESSION.mouse_coords_world))
     
     @viewer.bind_key('Left')
     @catch_exceptions_to_log_file("runtime_arrow-pan")
@@ -1744,8 +1781,8 @@ def attach_functions_to_viewer(viewer):
 
         viewer.camera.center = (y,x-int(step_size))
         curY, curX = SESSION.mouse_coords
-        display_intensity(viewer, dummyCursor(curY,curX-step_size))
-        # SESSION.mouse_coords = (curX-step_size, curY)
+        SESSION.cell_under_mouse_changed = True
+        display_intensity(viewer, dummyCursor(curY,curX-step_size, SESSION.mouse_coords_world))
 
         #TODO trigger mouse update here
         # napari.Viewer.window.qt_viewer._process_mouse_event
@@ -1767,8 +1804,8 @@ def attach_functions_to_viewer(viewer):
 
         viewer.camera.center = (y,x+int(step_size))
         curY, curX = SESSION.mouse_coords
-        # SESSION.mouse_coords = (curX+step_size, curY)\
-        display_intensity(viewer, dummyCursor(curY, curX+step_size))
+        SESSION.cell_under_mouse_changed = True
+        display_intensity(viewer, dummyCursor(curY, curX+step_size, SESSION.mouse_coords_world))
 
 
     # On Macs, ctrl-arrow key is taken by something else.
@@ -1821,11 +1858,9 @@ def attach_functions_to_viewer(viewer):
     
     @viewer.bind_key('r')
     @catch_exceptions_to_log_file("runtime_reset-viewsettings")
-    def reset_viewsettings(viewer):
-        global ADJUSTMENT_SETTINGS
-        ADJUSTMENT_SETTINGS = copy.copy(ORIGINAL_ADJUSTMENT_SETTINGS)
-        restore_viewsettings_from_cache()
-    
+    def call_reset_viewsettings(viewer):
+        reset_viewsettings()
+
     @viewer.bind_key('i')
     @catch_exceptions_to_log_file("runtime_switch-interpolation")
     def toggle_interpolation(viewer):
@@ -1845,8 +1880,8 @@ def attach_functions_to_viewer(viewer):
     def toggle_tooltip(viewer: napari.Viewer):
         current = SESSION.tooltip_visible
         SESSION.tooltip_visible = not current
-        viewer.tooltip.visible = not current
-        s = {True:"enabled",False:"Disabled"}[not current]
+        # viewer.tooltip.visible = not current
+        s = {True:"enabled",False:"disabled"}[not current]
         viewer.status = f"Tooltip {s}!"
         
 
@@ -1858,8 +1893,9 @@ def attach_functions_to_viewer(viewer):
 
 ######------------------------- Misc + Viewer keybindings ---------------------######
 
-def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard :bool = True, separate = False ):
+def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard :bool = True, separate = False, borders="Black borders"):
 
+    restore_viewsettings_from_cache(arrange_multichannel=True if mode_choice == 'Multichannel' else False) # Resets visible layers
     # Set only chosen mode's layers visible so they will be processed by the blending function
     page_shape = None
     for layer in viewer.layers:
@@ -1868,20 +1904,59 @@ def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard
             if "Composite" not in userInfo.active_channels and fluor not in userInfo.active_channels:
                 continue
             layer = VIEWER.layers[f"{mode_choice} {fluor}"]
-            print(f"Setting page shape on {layer.name}. shape is {layer.data.shape}")
             page_shape = layer.data.shape
             layer.visible = True
 
-    blended = _blend_visible_layers(viewer, page_shape, page_image = True)
+    blended = _blend_visible_layers(viewer, page_shape, mode_choice, page_image = True)
+
+    ##-------------------- add contrasting borders to page image if desired
+    if (borders =="Black borders" and SESSION.absorption_mode) or (borders =="White borders" and not SESSION.absorption_mode):
+        row,col = 0,0
+        fill = 0 if SESSION.absorption_mode else 1
+        lim = userInfo.page_size if mode_choice == 'Gallery' else userInfo.page_size * SESSION.cells_per_row[mode_choice]
+        print(f"Image shape is {blended.shape}")
+        for _ in range(lim):
+            if col == SESSION.cells_per_row[mode_choice]:
+                col = 0
+                row = row+1
+            
+            x1 = (row*(userInfo.imageSize+2)) ; x2 = x1 + userInfo.imageSize + 2
+            y1 = (col*(userInfo.imageSize+2)) ; y2 = y1 + userInfo.imageSize + 2
+
+            print(f"My Xs are {x1} {x2} and my Ys are {y1} {y2}")
+            if (x2,y2) == blended.shape[:2]:
+                blended[x1:,y1] = fill
+                blended[x1:,-1] = fill
+                blended[x1,y1:] = fill
+                blended[-1,y1:] = fill
+            elif x2 == blended.shape[0]:
+                blended[x1:,y1] = fill
+                blended[x1:,y2] = fill
+                blended[x1,y1:y2] = fill
+                blended[-1,y1:y2] = fill
+            elif y2 == blended.shape[1]:
+                blended[x1:x2,y1] = fill
+                blended[x1:x2,-1] = fill
+                blended[x1,y1:] = fill
+                blended[x2,y1:] = fill
+            else:
+                blended[x1:x2,y1] = fill
+                blended[x1:x2,y2] = fill
+                blended[x1,y1:y2] = fill
+                blended[x2,y1:y2] = fill
+            col +=1
+
+
     viewer.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"] 
-    restore_viewsettings_from_cache() # Resets visible layers
     if separate:
         _slice_page_image(viewer, mode_choice, blended)
     else:
         _send_image_to_user(viewer, blended, clipboard)
+    restore_viewsettings_from_cache()
+    viewer.window._qt_viewer.setFocus() # restore focus
     # Done!
 
-def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, clipboard :bool = True ):
+def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, clipboard :bool = True, borders = 'No borders' ):
 
     # Silence all layers
     for layer in viewer.layers:
@@ -1912,8 +1987,7 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
 
     sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
     # Need to know this for multichannel mode
-    num_channels = len(userInfo.active_channels)
-    num_channels = num_channels - 1 if "Composite" in userInfo.active_channels else num_channels
+    num_channels = len(userInfo.active_channels) if "Composite" not in userInfo.active_channels else len(userInfo.channels)
     pos = 0
     for fluor in list(userInfo.channels):
 
@@ -1929,13 +2003,24 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
         position = userInfo.channelOrder[fluor]
         if SESSION.mode in ("Gallery","Context"):
             cell_image = SESSION.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
+            imsize = userInfo.imageSize
         elif SESSION.mode == "Multichannel":
-            cell_image = np.zeros((userInfo.imageSize,userInfo.imageSize*(len([x for x in userInfo.active_channels if x !="Composite"])+1)))
+            if borders != "No borders":
+                imsize = userInfo.imageSize
+            else:
+                imsize = userInfo.imageSize+2
+            cell_image = np.zeros((imsize, imsize*(num_channels+1)))
             cell_punchout = SESSION.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute()
-            start = pos * userInfo.imageSize
-            end = (pos+1) * userInfo.imageSize
-            cell_image[0:userInfo.imageSize, start:end] = cell_punchout
-            cell_image[-userInfo.imageSize:,-userInfo.imageSize:] = cell_punchout
+            if borders != "No borders":
+                start = pos * userInfo.imageSize
+                end = (pos+1) * userInfo.imageSize
+                cell_image[0:userInfo.imageSize, start:end] = cell_punchout
+                cell_image[-userInfo.imageSize:,-userInfo.imageSize:] = cell_punchout
+            else:
+                start = (pos * imsize)+1
+                end = ((pos+1) * imsize) -1
+                cell_image[1:imsize-1, start:end] = cell_punchout
+                cell_image[-(imsize-1):-1,-(imsize-1):-1] = cell_punchout
             pos +=1
         else:
             viewer.status = "Ran into a problem: unexpected viewer mode"
@@ -1952,7 +2037,27 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
                 colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
  
-    blended = _blend_visible_layers(viewer, (userInfo.imageSize, userInfo.imageSize))
+    blended = _blend_visible_layers(viewer, (imsize, imsize))
+
+    # Add line separations if desired
+    if borders != 'No borders':
+        fill = 0 if borders == 'Black borders' else 1
+        if SESSION.mode == "Multichannel": 
+            blended[0,:] = fill
+            blended[-1,:] = fill
+            for i in range(SESSION.cells_per_row['Multichannel']):
+                y1 = i* imsize
+                y2 = y1 + imsize
+                blended[:,y1] = fill
+                try:
+                    blended[:,y2] = fill
+                except IndexError:
+                    blended[:,-1] = fill
+        else:
+            blended[0,:] = fill
+            blended[-1,:] = fill
+            blended[:,0] = fill
+            blended[:,-1] = fill
 
     # Delete layers and resume
     viewer.layers.selection.clear()
@@ -1964,12 +2069,16 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
     # Resets visible layers 
     restore_viewsettings_from_cache()
     _send_image_to_user(viewer, blended, clipboard)
+    viewer.window._qt_viewer.setFocus() # restore focus
     # Done!
 
-def _blend_visible_layers(viewer, blended_image_shape, page_image = False):
+def _blend_visible_layers(viewer, blended_image_shape, mode_choice = None, page_image = False):
     print(f"incoming image shape: {blended_image_shape}")
-    num_channels = len(userInfo.active_channels)
-    num_channels = num_channels - 1 if "Composite" in userInfo.active_channels else num_channels
+    num_channels = len(userInfo.active_channels) if "Composite" not in userInfo.active_channels else len(userInfo.channels)
+    # num_channels = num_channels - 1 if "Composite" in userInfo.active_channels else num_channels
+    print(userInfo.active_channels)
+    print(userInfo.channels)
+    print(num_channels)
     if SESSION.absorption_mode: # Light mode. Subtractive color space
         if page_image: 
             blended = np.ones(blended_image_shape + (4,))
@@ -2012,7 +2121,6 @@ def _blend_visible_layers(viewer, blended_image_shape, page_image = False):
         for layer in viewer.layers:
             if layer.visible == False:
                 continue
-            print(f"Blending func: Iterating over {layer.name}. Shape is {layer.data.shape}")
             
             # Subtract min or assign zero if value would be negative. subtracting would actually result in an overflow error since
             #   this data type is apparently unsigned ints. 
@@ -2030,9 +2138,11 @@ def _blend_visible_layers(viewer, blended_image_shape, page_image = False):
     # Clipping mostly to avoid negative numbers that might be present from a light mode cell image
     blended = blended.clip(min=0, max = 1)
     blended[..., 3] = 1 # set alpha channel to 1
+
     return blended
 
 def _send_image_to_user(viewer, blended, clipboard, image_name_override = False , silence_animation = False):
+
     # Save image. Can leave if failure
     if not clipboard:
         # Need to save image only
@@ -2046,7 +2156,6 @@ def _send_image_to_user(viewer, blended, clipboard, image_name_override = False 
                 imsave(file_name, blended)
             else:
                 imsave(image_name_override, blended)
-            return True
         except ValueError as e:
             # User closed save window?
             print(f"You just closed the save dialog!! {e} \n")
@@ -2058,7 +2167,7 @@ def _send_image_to_user(viewer, blended, clipboard, image_name_override = False 
         # Copy the image to the system clipboard
         output = BytesIO()
         Image.fromarray(im).convert("RGB").save(output, "BMP")
-        im_data = output.getvalue()[14:]
+        im_data = output.getvalue()[14:] # not entirely sure about the mechanics here but we need to cut off the first couple bits
         output.close()
 
         def send_to_clipboard(clip_type, data):
@@ -2068,46 +2177,155 @@ def _send_image_to_user(viewer, blended, clipboard, image_name_override = False 
             win32clipboard.CloseClipboard()
         send_to_clipboard(win32clipboard.CF_DIB, im_data)
 
+    # Show flash to user, if desired
     if not silence_animation:
         from napari._qt.utils import add_flash_animation
         # Here we are actually applying the effect to the `_welcome_widget` and not # the `native` widget because it does
         #  not work on the `native` widget. It's probably because the widget is in a stack with the `QtWelcomeWidget`.
         add_flash_animation(viewer._window._qt_viewer._welcome_widget)
-        
+    return True
+
 def _slice_page_image(viewer, page_mode, blended_image ):
 
-    parent_folder = userInfo.last_image_save_folder 
-    folder = str(QFileDialog.getExistingDirectory(None, "Select Directory", parent_folder))
-    userInfo.last_image_save_folder = os.path.normpath(pathlib.Path(folder).parent)
-    # save_folder_name = datetime.today().strftime(f'{}_%H%M%S.txt')
-
+    try:
+        parent_folder = userInfo.last_image_save_folder 
+        folder = str(QFileDialog.getExistingDirectory(None, "Select Directory", parent_folder))
+        userInfo.last_image_save_folder = os.path.normpath(pathlib.Path(folder).parent)
+        # save_folder_name = datetime.today().strftime(f'{}_%H%M%S.txt')
+    except ValueError as e:
+        # User closed save window?
+        print(f"You just closed the save dialog (maybe?) {e} \n")
+        return False
 
     im_size = userInfo.imageSize + 2
     if page_mode == "Gallery":
         for cell_dict in SESSION.page_cells.values():
             cname = f"{cell_dict['Layer']} {cell_dict['cid']}" if ANNOTATIONS_PRESENT else str(cell_dict['cid'])
+            cname_display = f"{cell_dict['Layer']}- cell {cell_dict['cid']}" if ANNOTATIONS_PRESENT else f"cell {cell_dict['cid']}"
             row, col = list(SESSION.grid_to_ID[page_mode].keys())[list(SESSION.grid_to_ID[page_mode].values()).index(cname)].split(",")
-            row, col = (int(row),int(col))
+            col, row = (int(row),int(col))
             col_start = (col-1)*(im_size)+1
             row_start = (row-1)*(im_size)+1
             blended_cell = blended_image[col_start : col_start + (im_size-2), row_start : row_start + (im_size-2), :]
-            image_path = pathlib.Path(folder).joinpath(datetime.today().strftime(f'{cname}_%H%M%S.png'))
-            _send_image_to_user(viewer, blended_cell, clipboard=False, image_name_override= image_path)
+            ab = "_light" if SESSION.absorption_mode else ''
+            image_path = pathlib.Path(folder).joinpath(f'{cname_display}{ab}.png')
+            _send_image_to_user(viewer, blended_cell, clipboard=False, image_name_override= image_path, silence_animation=True)
 
     elif page_mode == "Multichannel":
         for cell_dict in SESSION.page_cells.values():
             cname = f"{cell_dict['Layer']} {cell_dict['cid']}" if ANNOTATIONS_PRESENT else str(cell_dict['cid'])
+            cname_display = f"{cell_dict['Layer']}- cell {cell_dict['cid']}" if ANNOTATIONS_PRESENT else f"cell {cell_dict['cid']}"
             row, col = list(SESSION.grid_to_ID[page_mode].keys())[list(SESSION.grid_to_ID[page_mode].values()).index(cname)].split(",")
             row, col = (int(row),int(col))
-            col_start = ((row-1)*(im_size))+1
-            blended_cell = blended_image[ col_start : col_start + (im_size-2), :, :]
-            image_path = pathlib.Path(folder).joinpath(datetime.today().strftime(f'{cname}_%H%M%S.png'))
-            _send_image_to_user(viewer, blended_cell, clipboard=False, image_name_override= image_path)
+            col_start = ((row-1)*(im_size))
+            blended_cell = blended_image[ col_start : col_start + im_size, :, :]
+            ab = "_light" if SESSION.absorption_mode else ''
+            image_path = pathlib.Path(folder).joinpath(f'{cname_display}_splitChannel{ab}.png')
+            _send_image_to_user(viewer, blended_cell, clipboard=False, image_name_override= image_path, silence_animation=True)
     else:
         raise ValueError(f"Expected 'Gallery' or Multichannel', got {page_mode}")
+    
+    from napari._qt.utils import add_flash_animation
+    # Here we are actually applying the effect to the `_welcome_widget` and not # the `native` widget because it does
+    #  not work on the `native` widget. It's probably because the widget is in a stack with the `QtWelcomeWidget`.
+    add_flash_animation(viewer._window._qt_viewer._welcome_widget)
     return True
 
+def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : str | None, 
+                            bins:int, include_all:bool, normalize:bool):
+    
+    cells = SESSION.page_cells
+    try:
+        if ANNOTATIONS_PRESENT:
+            singlecell = cells[f"{layer_name} {cell_id}"]
+        else:
+            singlecell = cells[str(cell_id)]
+    except (ValueError, TypeError, IndexError):
+        # Cell doesn't exist
+        if ANNOTATIONS_PRESENT:
+            viewer.status = f"Unable to plot histogram for cell '{layer_name} {cell_id}'. This ID was not found in my table."
+        else:
+            viewer.status = f"Unable to plot histogram for cell '{cell_id}'. This ID was not found in my table."
+        return False
+    
+    # print(singlecell)
+    # print(tuple(range(len(userInfo.channels))))
 
+    # Create array of channel indices in image data. Will use to fetch from the dask array
+    positions = []
+    for fluor in userInfo.channels: # loop through channels
+        if fluor != 'Composite': positions.append(userInfo.channelOrder[fluor]) # channelOrder dict holds mappings of fluors to position in image data
+    # Get data for reference cell
+    xmin = singlecell['XMin'] ; xmax = singlecell['XMax'] 
+    ymin = singlecell['YMin'] ; ymax = singlecell['YMax'] 
+    cname = f"Cell {cell_id}" if not ANNOTATIONS_PRESENT else f"{layer_name} - cell {cell_id}"
+    
+    if RAW_PYRAMID is None:
+        reference_pixels = SESSION.dask_array[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
+   
+
+    plt.close() # Close a plot if it was there already
+    # Will use 
+    new_legend = [mpatches.Patch(color=userInfo.channelColors[fluor], label=fluor) for fluor in userInfo.channels if fluor!='Composite']
+    pal = [userInfo.channelColors[fluor] for fluor in userInfo.channels if fluor!='Composite']
+    mult = "fill" if normalize else 'layer'
+    fill = True if normalize else False
+    e = 'bars' if normalize else 'step'
+    l = 1 if normalize else 3
+    b = 'auto' if bins<2 else bins
+
+
+    kwargs = {'palette':pal,'multiple':mult,'fill':fill,'bins':b,'element':e,'linewidth':l }
+    if include_all: # User wants to plot current cell against all. Fetch pixels
+        
+        # Get data for all cells
+        collected = np.array([])
+        count = 0
+        for _, cell in cells.items():
+            # Get data for single cell
+            xmin = cell['XMin'] ; xmax = cell['XMax'] 
+            ymin = cell['YMin'] ; ymax = cell['YMax'] 
+            
+            if RAW_PYRAMID is None:
+                cell_punchout = SESSION.dask_array[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
+            cflat = [cell_punchout[x,:,:].flatten() for x in tuple(range(len(userInfo.channels)))]
+            collected = np.concatenate((collected,cflat),axis=1) if count !=0 else cflat
+            count +=1
+
+        # Now plot
+        fig, axs = plt.subplots(nrows=2, sharey=True, )
+        fig.suptitle(SESSION.image_display_name, fontsize='20')
+        histplot([reference_pixels[x,:,:].flatten() for x in tuple(range(len(userInfo.channels)))], ax=axs[0], legend=False, **kwargs)
+        
+        if not normalize: 
+            axs[0].set_yscale('log')
+        else:
+            ticks = ticker.FuncFormatter(lambda y, pos: '{0:g}'.format(y*100))
+            axs[0].yaxis.set_major_formatter(ticks)
+            axs[0].set_ylabel("Percentage of counts in bin")
+        axs[0].set_title(f"{cname} pixel intensities")
+
+        histplot(list(collected), ax=axs[1], legend=False, **kwargs)
+        axs[1].set_title(f"Page {SESSION.page} cells combined pixel intensities")
+        axs[1].set_xlabel("Pixel intensity")
+        if normalize: axs[1].set_ylabel("Percentage of counts in bin")
+        
+        fig.legend(handles=new_legend, fontsize = '14')
+    else: # Only plot cell histogram by itself
+
+        p = histplot([reference_pixels[x,:,:].flatten() for x in tuple(range(len(userInfo.channels)))], **kwargs)
+        # plt.gcf().get_axes()[0].set_yscale('log')
+        if not normalize: 
+            p.set_yscale('log')
+        else:
+            ticks = ticker.FuncFormatter(lambda y, _: '{0:g}'.format(y*100))
+            p.yaxis.set_major_formatter(ticks)
+            p.set_ylabel("Percentage of counts in bin")
+        p.set_title(f"{SESSION.image_display_name} | {cname} pixel intensities", fontsize='20')
+        p.set_xlabel("Pixel intensity")
+        plt.legend(handles=new_legend, fontsize='14')
+    # fig.legend(handles=new_legend) 
+    plt.show()
 
 
 #TODO make a button to do this as well?
@@ -2498,7 +2716,8 @@ def main(preprocess_class = None):
                     "napari:toggle_grid", "napari:transpose_axes","napari:roll_axes", "napari:reset_view",
                     "napari:toggle_selected_visibility"]:
         try:
-            print(settings.shortcuts.shortcuts.pop(binding))
+            settings.shortcuts.shortcuts.pop(binding)
+            # print(settings.shortcuts.shortcuts.pop(binding))
         except KeyError as e:
             print(f"Can't find this binding: {e}")
             pass
@@ -2728,6 +2947,10 @@ def main(preprocess_class = None):
         imsave_annotations = QComboBox() ; imsave_annotations.addItems(ANNOTATIONS_PRESENT)
         SESSION.widget_dictionary["image_save_target_annotation"] = imsave_annotations
         imsave_entry_layout.addWidget(imsave_annotations)
+
+    imsave_cell_borders = QComboBox() ; imsave_cell_borders.addItems(["White borders","Black borders","No borders"])
+    SESSION.widget_dictionary['imsave_cell_borders'] = imsave_cell_borders
+    imsave_entry_layout.addWidget(imsave_cell_borders)
     im_save_cell_layout.addLayout(imsave_entry_layout) # Add H layout to main V layout
     
     # Buttons
@@ -2736,12 +2959,13 @@ def main(preprocess_class = None):
     imsave_cell_button_clipboard = QPushButton("Save image to clipboard")
     imsave_cell_button_clipboard.released.connect(lambda: save_cell_image(viewer, 
                 image_save_target_entry.text(), imsave_annotations.currentText() if ANNOTATIONS_PRESENT else None,
-                clipboard=True))
+                clipboard=True, borders=imsave_cell_borders.currentText()))
     # Save to file
     imsave_cell_button_file = QPushButton("Save image to file")
+
     imsave_cell_button_file.released.connect(lambda: save_cell_image(viewer, 
                 image_save_target_entry.text(), imsave_annotations.currentText() if ANNOTATIONS_PRESENT else None,
-                clipboard=False))
+                clipboard=False, borders=imsave_cell_borders.currentText()))
     im_save_cell_buttons_layout.addWidget(imsave_cell_button_clipboard)
     im_save_cell_buttons_layout.addWidget(imsave_cell_button_file)
     im_save_cell_layout.addLayout(im_save_cell_buttons_layout)
@@ -2764,16 +2988,22 @@ def main(preprocess_class = None):
     im_save_separate_files.addItems(["Save full page image", "Save each cell separately"])
     SESSION.widget_dictionary["im_save_separate_files"] = im_save_separate_files
     im_save_page_options_layout.addWidget(im_save_separate_files)
+
+    imsave_page_borders = QComboBox() ; imsave_page_borders.addItems(["White borders","Black borders"])
+    SESSION.widget_dictionary['imsave_page_borders'] = imsave_page_borders
+    im_save_page_options_layout.addWidget(imsave_page_borders)
     
     im_save_page_layout.addLayout(im_save_page_options_layout) # add to v layout
     # Buttons layout
     im_save_page_buttons_layout = QHBoxLayout()
         # Save to clipboard button
     imsave_page_button_clipboard = QPushButton("Save image to clipboard")
-    imsave_page_button_clipboard.released.connect(lambda: save_page_image(viewer, im_save_mode_select.currentText(), clipboard=True))
+    imsave_page_button_clipboard.released.connect(lambda: save_page_image(viewer, im_save_mode_select.currentText(), clipboard=True, borders = imsave_page_borders.currentText()))
+    # Don't allow the user to use the clipboard button if 'Save each cell separately' is selected
+    im_save_separate_files.currentTextChanged.connect(lambda: imsave_page_button_clipboard.setDisabled({0:False, 1:True}[im_save_separate_files.currentIndex()]))
     # Save to file
     imsave_page_button_file = QPushButton("Save image(s) to file")
-    imsave_page_button_file.released.connect(lambda: save_page_image(viewer, im_save_mode_select.currentText(), 
+    imsave_page_button_file.released.connect(lambda: save_page_image(viewer, im_save_mode_select.currentText(), borders = imsave_page_borders.currentText(),
                                                                      clipboard=False, separate=True if 'separately' in im_save_separate_files.currentText() else False))
     im_save_page_buttons_layout.addWidget(imsave_page_button_clipboard)
     im_save_page_buttons_layout.addWidget(imsave_page_button_file)
@@ -2786,8 +3016,70 @@ def main(preprocess_class = None):
     overflow_page_dock_layout.addWidget(im_save_page_group)
 
 
+
+    # Seaborn histplot widgets for cell intensities
+    hist_group = QGroupBox("Intensity Histogram")
+    hist_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+    hist_layout = QVBoxLayout(hist_group)
+    
+    # LineEdit
+    hist_target_entry = QLineEdit()
+    hist_target_entry.setPlaceholderText("ID to plot")
+    SESSION.widget_dictionary["hist_target_entry"] = hist_target_entry
+    
+    # Layout 
+    hist_entry_layout = QHBoxLayout()
+    hist_entry_layout.addWidget(hist_target_entry)
+    # Annotation widget:
+    if ANNOTATIONS_PRESENT:
+        hist_annotations = QComboBox() ; hist_annotations.addItems(ANNOTATIONS_PRESENT)
+        SESSION.widget_dictionary["hist_annotations"] = hist_annotations
+        hist_entry_layout.addWidget(hist_annotations)
+
+    hist_subplots = QComboBox()
+    hist_subplots.addItems(["Plot against page cells","Plot this cell only"])
+    hist_entry_layout.addWidget(hist_subplots)
+    hist_layout.addLayout(hist_entry_layout)
+
+
+    hist_second_row_layout = QHBoxLayout()
+    hist_norm = QComboBox()
+    hist_norm.addItems(["Normalize bins","Plot raw counts"])
+    hist_second_row_layout.addWidget(hist_norm)
+    hist_bins = QSpinBox()
+    hist_bins.setRange(0,255) ; hist_bins.setValue(25)
+    hist_bins_label = QLabel("Bins:")
+    hist_bins_label.setAlignment(Qt.AlignRight)
+    hist_second_row_layout.addWidget(hist_bins_label)
+    hist_second_row_layout.addWidget(hist_bins)
+
+
+    hist_layout.addLayout(hist_second_row_layout)
+    
+
+    hist_button = QPushButton("Generate histogram")
+    hist_button.released.connect(lambda: generate_intensity_hist(viewer,
+                    hist_target_entry.text(), hist_annotations.currentText() if ANNOTATIONS_PRESENT else None,
+                    hist_bins.value(), 
+                    {"Plot against page cells":True,"Plot this cell only":False}[hist_subplots.currentText()],
+                    {"Normalize bins":True,"Plot raw counts":False}[hist_norm.currentText()]))
+    hist_layout.addWidget(hist_button)
+
+
+    experimental_dock_group = QGroupBox()
+    experimental_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    experimental_dock_layout = QVBoxLayout(experimental_dock_group)
+    experimental_dock_layout.addWidget(hist_group)
+
+    # Reset viewsettings button
+    reset_vs = QPushButton("Restore defaults")
+    reset_vs.pressed.connect(reset_viewsettings)
+    reset_vs.setFont(QFont("Calibri", 6, weight=QFont.Normal))
+    SESSION.widget_dictionary["reset_vs_button"] = reset_vs
+    reset_vs.setDisabled(True)
+
     # Create bottom bar widgets
-    viewer.window.add_dock_widget([adjust_gamma_widget,adjust_whitein,adjust_blackin], area = 'bottom')
+    viewer.window.add_dock_widget([reset_vs,adjust_gamma_widget,adjust_whitein,adjust_blackin], area = 'bottom')
 
     # viewer.window.add_dock_widget(QLabel("TEST!"), name ="User tools 2",area="right", tabify = True)
 
@@ -2799,8 +3091,7 @@ def main(preprocess_class = None):
                                     "image cell group":im_save_cell_group, "image page group":im_save_page_group}
     SESSION.radiogroups = {"Status layer group": status_layer_group, "Cell boxes group": nuc_boxes_group}
     
-    preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
-    preprocess_class._append_status_br('Sorting object data...')
+    
     
     # Now process object data and fetch images
     try:
@@ -2842,7 +3133,7 @@ def main(preprocess_class = None):
     #     # preprocess_class.findDataButton.setEnabled(True)
     #     viewer.close()
     #     return False
-    #TODO
+   
     #Enable scale bar
     if SESSION.image_scale:
         viewer.scale_bar.visible = True
@@ -2860,7 +3151,7 @@ def main(preprocess_class = None):
         UPDATED_CHECKBOXES.append(box)
     viewer.window.add_dock_widget(UPDATED_CHECKBOXES,area='bottom')
 
-    #TODO set theme
+    #TODO set custom theme?
     VIEWER.theme = "dark"
 
     # Lazy load full size images as dask array
@@ -2898,14 +3189,16 @@ def main(preprocess_class = None):
     side_dock_group.setAlignment(Qt.AlignHCenter)
     scroll_area.resize(side_dock_group.sizeHint())
     right_dock = viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right", tabify = True)
-    viewer.window.add_dock_widget(overflow_page_dock_group, name ="Experimental",area="right", tabify = True)
+    viewer.window.add_dock_widget(overflow_page_dock_group, name ="Export data",area="right", tabify = True)
+    viewer.window.add_dock_widget(experimental_dock_group, name ="Experimental",area="right", tabify = True)
+
     right_dock.show()
     right_dock.raise_() # Make the user tools dock come up first
 
     # right_dock.resize(side_dock_group.sizeHint())
-    print(side_dock_group.sizeHint())
-    print(scroll_area.sizeHint())
-    print(right_dock.sizeHint())
+    # print(side_dock_group.sizeHint())
+    # print(scroll_area.sizeHint())
+    # print(right_dock.sizeHint())
     
     set_viewer_to_neutral_zoom(viewer, reset_session=True) # Fix zoomed out issue
     napari.run() # Start the event loop
@@ -2913,3 +3206,4 @@ def main(preprocess_class = None):
 # Main Probably doesn't work as is right now. Will need to instantiate a new user class to run everything
 if __name__ == '__main__':
     main()
+# napari.Viewer.tooltip
