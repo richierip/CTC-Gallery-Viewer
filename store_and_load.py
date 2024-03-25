@@ -152,6 +152,7 @@ class userPresets:
                     '% Cell Completeness', '% Completeness']
         self.non_phenotype_fluor_cols_in_data = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
                   'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
+        self.phenotypes = []
         self.fonts = ViewerFonts()
 
 

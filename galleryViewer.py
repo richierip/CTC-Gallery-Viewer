@@ -30,7 +30,7 @@ import os
 import dask.array as da
 # import zarr
 import scipy.spatial as spatial
-from seaborn import histplot
+from seaborn import histplot, violinplot, FacetGrid
 
 # For clipboard
 from io import BytesIO
@@ -1551,7 +1551,8 @@ def attach_functions_to_viewer(viewer):
                 SESSION.widget_dictionary['page cell layer'].setCurrentText(layer)
             SESSION.widget_dictionary['switch mode annotation'].setCurrentText(layer)
             SESSION.widget_dictionary["image_save_target_annotation"].setCurrentText(layer)
-            SESSION.widget_dictionary["hist_annotation"].setCurrentText(layer)
+            SESSION.widget_dictionary["hist_annotations"].setCurrentText(layer)
+            SESSION.widget_dictionary["violin_annotations"].setCurrentText(layer)
         
         SESSION.widget_dictionary["image_save_target_entry"].setText(cid)
         SESSION.widget_dictionary['notes cell entry'].setText(cid)
@@ -1559,6 +1560,7 @@ def attach_functions_to_viewer(viewer):
             SESSION.widget_dictionary['page cell id'].setText(cid)
         SESSION.widget_dictionary['switch mode cell'].setText(cid)
         SESSION.widget_dictionary["hist_target_entry"].setText(cid)
+        SESSION.widget_dictionary["violin_target_entry"].setText(cid)
         
 
 
@@ -2247,10 +2249,8 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
         else:
             viewer.status = f"Unable to plot histogram for cell '{cell_id}'. This ID was not found in my table."
         return False
-    
-    # print(singlecell)
-    # print(tuple(range(len(userInfo.channels))))
 
+    viewer.status = "Analyzing object data..."
     # Create array of channel indices in image data. Will use to fetch from the dask array
     positions = []
     for fluor in userInfo.channels: # loop through channels
@@ -2263,9 +2263,8 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
     if RAW_PYRAMID is None:
         reference_pixels = SESSION.dask_array[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
    
-
     plt.close() # Close a plot if it was there already
-    # Will use 
+    # Assemble kwargs conditionally to pass to plotting function
     new_legend = [mpatches.Patch(color=userInfo.channelColors[fluor], label=fluor) for fluor in userInfo.channels if fluor!='Composite']
     pal = [userInfo.channelColors[fluor] for fluor in userInfo.channels if fluor!='Composite']
     mult = "fill" if normalize else 'layer'
@@ -2273,9 +2272,8 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
     e = 'bars' if normalize else 'step'
     l = 1 if normalize else 3
     b = 'auto' if bins<2 else bins
-
-
     kwargs = {'palette':pal,'multiple':mult,'fill':fill,'bins':b,'element':e,'linewidth':l }
+
     if include_all: # User wants to plot current cell against all. Fetch pixels
         
         # Get data for all cells
@@ -2291,8 +2289,9 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
             cflat = [cell_punchout[x,:,:].flatten() for x in tuple(range(len(userInfo.channels)))]
             collected = np.concatenate((collected,cflat),axis=1) if count !=0 else cflat
             count +=1
-
+        
         # Now plot
+        viewer.status = "Done - displaying plot in live viewer"
         fig, axs = plt.subplots(nrows=2, sharey=True, )
         fig.suptitle(SESSION.image_display_name, fontsize='20')
         histplot([reference_pixels[x,:,:].flatten() for x in tuple(range(len(userInfo.channels)))], ax=axs[0], legend=False, **kwargs)
@@ -2312,19 +2311,110 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
         
         fig.legend(handles=new_legend, fontsize = '14')
     else: # Only plot cell histogram by itself
-
+        viewer.status = "Done - displaying histogram in live viewer"
         p = histplot([reference_pixels[x,:,:].flatten() for x in tuple(range(len(userInfo.channels)))], **kwargs)
         # plt.gcf().get_axes()[0].set_yscale('log')
         if not normalize: 
             p.set_yscale('log')
         else:
+            # Rescale to represent a percentage (0-100) instead of a ratio (0-1)
             ticks = ticker.FuncFormatter(lambda y, _: '{0:g}'.format(y*100))
             p.yaxis.set_major_formatter(ticks)
             p.set_ylabel("Percentage of counts in bin")
         p.set_title(f"{SESSION.image_display_name} | {cname} pixel intensities", fontsize='20')
         p.set_xlabel("Pixel intensity")
         plt.legend(handles=new_legend, fontsize='14')
-    # fig.legend(handles=new_legend) 
+    plt.show()
+
+def generate_intensity_violins(viewer:napari.Viewer, cell_id : str , layer_name : str | None,
+                               col_choice:str='Cell', pheno_choice:str='All custom'):
+
+    df = userInfo.objectDataFrame
+    try:
+        if ANNOTATIONS_PRESENT:
+            singlecell_df = df[(df['Object Id']==int(cell_id)) & (df['Analysis Region']==str(layer_name))]
+        else:
+            singlecell_df = df[df['Object Id']==int(cell_id)]
+    except (ValueError, TypeError, IndexError):
+        # Cell doesn't exist
+        if ANNOTATIONS_PRESENT:
+            viewer.status = f"Unable to plot violins for cell '{layer_name} {cell_id}'. This ID was not found in my table."
+        else:
+            viewer.status = f"Unable to plot violins for cell '{cell_id}'. This ID was not found in my table."
+        return False
+    viewer.status = 'Analyzing object data...'
+    
+    match col_choice: #'Cell' 'Nucleus' 'Cytoplasm' 'All'
+
+        case 'All':      
+            selection = SESSION.intensity_columns
+        case 'Cell':
+            selection = [x for x in SESSION.intensity_columns if 'Cell Intensity' in x]
+        case 'Nucleus':
+            selection = [x for x in SESSION.intensity_columns if 'Nucleus Intensity' in x]
+        case 'Cytoplasm':
+            selection = [x for x in SESSION.intensity_columns if 'Cytoplasm Intensity' in x]
+        case _:
+            viewer.status = 'Issue.'
+            return None
+
+    pal = selection.copy()
+    for chn in userInfo.channels:
+        pal = [userInfo.channelColors[chn] if chn in x else x for x in pal]
+
+    print(f'Palette is {list(zip(selection,pal))}')
+    print(f"Phenotypes are {userInfo.phenotypes}")
+    match pheno_choice:
+        case "All custom":
+            pheno_selection = [x for x in userInfo.phenotypes if not x.startswith("Validation |")]
+        case "All validation":
+            pheno_selection = [x for x in userInfo.phenotypes if x.startswith("Validation |")]
+        case _:
+            pheno_selection = [pheno_choice]
+    print(f"{singlecell_df[pheno_selection]}")
+    # mdf = df.melt(id_vars='Object Id', value_vars=selection)
+    mdf = df.melt(id_vars=['Object Id', *pheno_selection ], value_vars=selection).rename(columns={'variable':'Intensity Type','value':'Intensity Value'})
+    mdf = mdf.melt(id_vars = ['Object Id','Intensity Type','Intensity Value'], 
+                  value_vars= pheno_selection).rename(columns={'variable':'Phenotype'})
+    # Only keep cells positive for the chosen phenotypes. Cells with multiple phenotypes are split into different rows here (this is fine)
+    mdf = mdf.loc[mdf['value'] ==1].drop(columns=['value'])
+    
+
+    # kwargs = {'palette':pal,'multiple':mult,'fill':fill,'bins':b,'element':e,'linewidth':l }
+    viewer.status = "Done - displaying violinplot in live viewer"
+
+
+    g = FacetGrid(mdf, col ='Phenotype', col_wrap=3)
+    g.map_dataframe(violinplot, x='Intensity Type',y='Intensity Value',hue='Intensity Type', palette=pal, cut=0)
+    g.figure.suptitle(f"{SESSION.image_display_name} fluorescent intensity distribution with reference to cell {cell_id}",fontsize='20')
+
+        # p = violinplot(mdf, x = 'variable', y = 'value', palette=pal)
+        # p.set_title("Intensity violins", fontsize = 20)
+        # g.ax.plot()
+        # g.ax.set_title()
+    for ax in g.axes:
+        labs = g.axes[-1].get_xticklabels()
+        ax.set_xticks(ax.get_xticks(),labs, rotation=45, ha='right')
+        current_title = ax.title._text
+        sc_phen = current_title.replace('Phenotype = ','')
+        c = 'black' if sc_phen.replace("Validation | ",'') not in userInfo.statuses_hex.keys() else userInfo.statuses_hex[sc_phen.replace("Validation | ",'')]
+        
+        n = mdf.Phenotype.value_counts()[sc_phen]
+        new_title = current_title+f'\nn = {n}'
+        ax.set_title(new_title, color=c)
+        val = singlecell_df.iloc[0][sc_phen]
+        if val!=1: 
+            # print(f"SKIP {sc_phen} - {val}")
+            continue # Don't plot reference cell location on a phenotype it is not a member of
+        else:
+            # print(f"PLOT {sc_phen} - {val}")
+            pass
+        for tick, lab in enumerate(labs):
+            # print(f"\n{tick} {lab}")
+            y = singlecell_df.iloc[0][lab._text]
+            # ax.plot(tick, y, "wo")
+            ax.text(tick+0.15, y, f"<",fontsize=15,bbox=dict(facecolor='white', alpha=0.8, edgecolor=None, boxstyle='round,pad=0.08'))
+    plt.tight_layout()
     plt.show()
 
 
@@ -3016,8 +3106,8 @@ def main(preprocess_class = None):
     overflow_page_dock_layout.addWidget(im_save_page_group)
 
 
-
-    # Seaborn histplot widgets for cell intensities
+    ###--------- Widgets on 'Plotting' tab
+    ## Seaborn histplot widgets for cell intensities
     hist_group = QGroupBox("Intensity Histogram")
     hist_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
     hist_layout = QVBoxLayout(hist_group)
@@ -3066,10 +3156,55 @@ def main(preprocess_class = None):
     hist_layout.addWidget(hist_button)
 
 
-    experimental_dock_group = QGroupBox()
-    experimental_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
-    experimental_dock_layout = QVBoxLayout(experimental_dock_group)
-    experimental_dock_layout.addWidget(hist_group)
+    # Seaborn Violinplot widgets 
+    violin_group = QGroupBox("Intensity Violins")
+    violin_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+    violin_layout = QVBoxLayout(violin_group)
+
+    # LineEdit
+    violin_target_entry = QLineEdit()
+    violin_target_entry.setPlaceholderText("ID to plot")
+    SESSION.widget_dictionary["violin_target_entry"] = violin_target_entry
+    
+    # Layout 
+    violin_entry_layout = QHBoxLayout()
+    violin_entry_layout.addWidget(violin_target_entry)
+    # Annotation widget:
+    if ANNOTATIONS_PRESENT:
+        violin_annotations = QComboBox() ; violin_annotations.addItems(ANNOTATIONS_PRESENT)
+        SESSION.widget_dictionary["violin_annotations"] = violin_annotations
+        violin_annotations.addWidget(violin_annotations)
+    violin_layout.addLayout(violin_entry_layout)
+
+    violin_second_row_layout = QHBoxLayout()
+    violin_phenotype = QComboBox()
+    violin_phenotype.addItems(["All custom", "All validation", *userInfo.phenotypes])
+    vlabel = QLabel("Phenotype(s)")
+    vlabel.setAlignment(Qt.AlignRight)
+    violin_second_row_layout.addWidget(vlabel)
+    violin_second_row_layout.addWidget(violin_phenotype)
+    violin_intensity = QComboBox()
+    violin_intensity.addItems(["Cell","Nucleus","Cytoplasm","All"])
+    vlabel = QLabel("Intensities")
+    vlabel.setAlignment(Qt.AlignRight)
+    violin_second_row_layout.addWidget(vlabel)
+    violin_second_row_layout.addWidget(violin_intensity)
+    violin_layout.addLayout(violin_second_row_layout)
+
+
+
+    violin_button = QPushButton("Generate violins")
+    violin_button.released.connect(lambda: generate_intensity_violins(viewer,
+                                violin_target_entry.text(), violin_annotations.currentText() if ANNOTATIONS_PRESENT else None,
+                                violin_intensity.currentText(), violin_phenotype.currentText() ))
+    violin_layout.addWidget(violin_button)
+
+
+    plots_dock_group = QGroupBox()
+    plots_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+    plots_dock_layout = QVBoxLayout(plots_dock_group)
+    plots_dock_layout.addWidget(hist_group)
+    plots_dock_layout.addWidget(violin_group)
 
     # Reset viewsettings button
     reset_vs = QPushButton("Restore defaults")
@@ -3190,7 +3325,7 @@ def main(preprocess_class = None):
     scroll_area.resize(side_dock_group.sizeHint())
     right_dock = viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right", tabify = True)
     viewer.window.add_dock_widget(overflow_page_dock_group, name ="Export data",area="right", tabify = True)
-    viewer.window.add_dock_widget(experimental_dock_group, name ="Experimental",area="right", tabify = True)
+    viewer.window.add_dock_widget(plots_dock_group, name ="Plotting",area="right", tabify = True)
 
     right_dock.show()
     right_dock.raise_() # Make the user tools dock come up first

@@ -554,12 +554,9 @@ class ViewerPresets(QDialog):
     
     def _prefillObjectData(self):
         headers = pd.read_csv(self.userInfo.objectDataPath, index_col=False, nrows=0).columns.tolist() 
-        possible_fluors = ['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence']
-        suffixes = ['Positive Classification', 'Positive Nucleus Classification','Positive Cytoplasm Classification',
-                    'Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity', '% Nucleus Completeness', '% Cytoplasm Completeness',
-                    '% Cell Completeness', '% Completeness']
-        exclude = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
-                  'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
+        possible_fluors = self.userInfo.possible_fluors_in_data
+        suffixes = self.userInfo.non_phenotype_fluor_suffixes_in_data
+        exclude = self.userInfo.non_phenotype_fluor_cols_in_data
         
         intens_ = ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity']
 
@@ -572,7 +569,7 @@ class ViewerPresets(QDialog):
             for sf in suffixes:
                 exclude.append(f'{fl} {sf}')
         include = [x for x in headers if ((x not in exclude) and not (any(f in x for f in possible_fluors)))]
-        
+        self.userInfo.phenotypes = include
         self.phenotypeToGrab.setVisible(False) #
         self.phenotypeCombo.setVisible(True) 
         self.phenotypeCombo.addItems(include)
