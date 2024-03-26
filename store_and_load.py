@@ -231,11 +231,12 @@ class userPresets:
         # Create dataframe from stored dictionary and join with original df by assigning them the same kind of index
         calls = [f"Validation | {status}" for status in list(self.statuses.keys())]
         df = pd.DataFrame.from_dict(status_copy, orient = 'index', columns = ["Analysis Region", "Object Id",'Notes', *calls] )
+        
         if self.analysisRegionsInData:
             self.objectDataFrame['new_index'] = self.objectDataFrame['Analysis Region'] +' '+ self.objectDataFrame['Object Id'].astype(str)
         else:
             df = df.drop(columns=['Analysis Region'])
-            self.objectDataFrame['new_index'] = 'All '+ self.objectDataFrame['Object Id'].astype(str)
+            self.objectDataFrame['new_index'] = self.objectDataFrame['Object Id'].astype(str)
         self.objectDataFrame = self.objectDataFrame.set_index('new_index')
         # Drop analysis region if it does not belong
 
