@@ -21,6 +21,8 @@ from matplotlib import cm, ticker # necessary, do not remove
 from matplotlib import colors as mplcolors # Necessary, do not remove
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.lines as lines
+
 import copy
 import time
 import custom_color_functions # Necessary, do not remove
@@ -31,6 +33,7 @@ import dask.array as da
 # import zarr
 import scipy.spatial as spatial
 from seaborn import histplot, violinplot, FacetGrid
+from itertools import chain
 
 # For clipboard
 from io import BytesIO
@@ -74,7 +77,7 @@ userInfo = store_and_load.loadObject('data/presets')
 SESSION = userInfo.session # will store non-persistent global variables that need to be accessible
 
 VIEWER = None
-ADJUSTMENT_SETTINGS={"DAPI gamma": 0.5}; ORIGINAL_ADJUSTMENT_SETTINGS = {}
+ADJUSTMENT_SETTINGS={"DAPI gamma": 0.5}; ORIGINAL_ADJUSTMENT_SETTINGS = {} 
 SAVED_INTENSITIES={}; 
 RAW_PYRAMID=None
 SESSION.widget_dictionary = {}
@@ -117,6 +120,7 @@ def hide_invisible_multichannel_fluors():
 
     # Something is missing. need to remake images
     num_active_channels = len(active_fluors_only)
+    SESSION.cells_per_row['Multichannel'] = num_active_channels + 1
     num_channels = len(all_fluors)
     imsize = userInfo.imageSize+2
     page_shape = (PAGE_SIZE*(userInfo.imageSize+2),(userInfo.imageSize+2) * (num_active_channels+1)) 
@@ -464,15 +468,14 @@ def toggle_session_mode(target_mode, from_mouse: bool):
 
         if from_mouse:
             _, (mX,mY), _ = SESSION.find_mouse_func(VIEWER.cursor.position, scope="local")
-
             # Change cursor value
             sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary.
             class dummyCursor:
                 def __init__(self, y, x) -> None:
                     self.position = (y,x)
-            SESSION.display_intensity_func(VIEWER, dummyCursor((target_cell_info["center_y"]+mY-(userInfo.imageSize+2)/2)*sc,(target_cell_info["center_x"]+mX-(userInfo.imageSize+2)/2)*sc))
-
-        
+            p = dummyCursor((target_cell_info["center_y"]+mY-(userInfo.imageSize+2)/2)*sc,(target_cell_info["center_x"]+mX-(userInfo.imageSize+2)/2)*sc)
+            # Used to have the following line to try to show pixel val right away
+            #SESSION.display_intensity_func(VIEWER, p)
         # finally, set mode
         SESSION.mode = target_mode
 
@@ -487,6 +490,10 @@ def toggle_session_mode(target_mode, from_mouse: bool):
 
         # Turn on / off the correct layers
         restore_viewsettings_from_cache(arrange_multichannel=True if target_mode=="Multichannel" else False)
+
+        if from_mouse: # Go get pixel values now that proper image layers are visible.
+            # Not working right now but it's a minor issue #TODO
+            SESSION.display_intensity_func(VIEWER,p)
 
         VIEWER.window._qt_viewer.setFocus() # return focus
         # Done. Leave function, no need to save cells
@@ -714,21 +721,26 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
             cid = cell["Object Id"]
             layer = cell["Analysis Region"] if ANNOTATIONS_PRESENT else None
             ckey = f'{layer} {cid}' if ANNOTATIONS_PRESENT else str(cid)
+            page = cell['Page']
             x1 = int(cell["XMin"]); x2 = int(cell["XMax"])
             y1 = int(cell["YMin"]); y2 = int(cell["YMax"])
             nuclei_box_coords.append([[y1,x1] , [y2,x2]])
             cids.append(str(cell["Object Id"]))
             vals = cell[SESSION.validation_columns]
             try:
-                validation_call = SESSION.status_list[ckey]
+
+                validation_call = SESSION.current_cells[ckey]['validation_call']
             except KeyError:
                 try:
                     validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation | ", "")
                 except IndexError:
                     # row has no validation call (all zeroes). Assign to Unseen
                     validation_call = "Unseen"
-                SESSION.status_list[ckey] = validation_call #TODO this causes issues
+                SESSION.current_cells[ckey] = {'Layer':layer,"cid": cid,"center_x": (x1+x2)//2,'center_y': (y1+y2)//2,
+                                'validation_call': validation_call, 'XMax' : x2,'XMin':x1,
+                                'YMax' : y2,'YMin':y1, "Page":page}
                 SESSION.saved_notes[ckey] = "-"
+                record_notes_and_intensities(cell, SESSION.intensity_columns)
             validation_colors_hex.append(userInfo.statuses_hex[validation_call])
             SESSION.context_nuclei_boxes_map_to_ind[ckey] = count
             count+=1
@@ -854,7 +866,7 @@ def set_cell_description_label(ID, display_text_override = None):
         note = str(SESSION.saved_notes[ID])
     except KeyError: # in case the name was off
         return False
-    status = SESSION.status_list[str(ID)]
+    status = SESSION.current_cells[str(ID)]['validation_call']
     if STATUSES_TO_HEX[status] != "#ffffff":
         prefix = f'Page {SESSION.current_cells[ID]["Page"]}<br><font color="{STATUSES_TO_HEX[status]}">{cell_name}</font>'
     else:
@@ -862,6 +874,7 @@ def set_cell_description_label(ID, display_text_override = None):
 
     # Add intensities
     intensity_series = SAVED_INTENSITIES[ID]
+    # intensity_series = SESSION.session_cells[ID]['intensities']
     names = list(intensity_series.index)
     intensity_str = ''
     for fluor in userInfo.channels:
@@ -933,14 +946,14 @@ def retrieve_status(cell_id, status, new_page):
             status = "Unseen"
         # Save to dict to make next retrieval faster
         # If there are annotations, need to track a separate list for each one
-        SESSION.status_list[str(cell_id)] = status
+        SESSION.current_cells[str(cell_id)]['validation_call'] = status
         return status
     else:
         # Just grab it because it's there already
         try:
-            return SESSION.status_list[str(cell_id)]
+            return SESSION.current_cells[str(cell_id)]['validation_call']
         except:
-            raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {SESSION.status_list}")
+            raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {SESSION.current_cells.keys()}")
 
 
 def black_background(color_space, mult, CPR):
@@ -1265,8 +1278,8 @@ def attach_functions_to_viewer(viewer):
         cell_bbox = [[cell["YMin"],cell["XMin"]] , [cell["YMax"],cell["XMax"]] ]
 
         sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-        # print(SESSION.status_list)
-        nb_color_hex = userInfo.statuses_hex[SESSION.status_list[cname]] #'#000000' if SESSION.absorption_mode else '#ffffff'
+        
+        nb_color_hex = userInfo.statuses_hex[SESSION.current_cells[cname]['validation_call']] #'#000000' if SESSION.absorption_mode else '#ffffff'
         nb_text = {'string':'{cid_feat}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_hex}
         SESSION.context_closest_cell_text_object = nb_text
         if layer_present:
@@ -1317,14 +1330,9 @@ def attach_functions_to_viewer(viewer):
             coords = kw_res["coords"]
             vals = kw_res["vals"]
 
-            # import pickle
-            # with open("cell_tup.pkl","wb") as f:
-            #     pickle.dump(cell_tup,f)
-            # exit()
-            # print(kw_res)
             if (vals is None) or (next(iter(vals.values())) is None):
                 # Don't do anything else - the cursor is out of bounds of the image
-                VIEWER.status = 'Out of bounds'
+                VIEWER.status = 'Out of bounds context'
                 SESSION.cell_under_mouse = None
                 return False 
             
@@ -1336,7 +1344,6 @@ def attach_functions_to_viewer(viewer):
                     cell_dict = SESSION.current_cells[ckey]
                     if cell_dict != SESSION.cell_under_mouse: SESSION.cell_under_mouse_changed = True
                 except KeyError:
-                    fetch_notes(cell, SESSION.intensity_columns)
                     center_x = int((cell['XMax']+cell['XMin'])/2)
                     center_y = int((cell['YMax']+cell['YMin'])/2)
                     vcs = cell[SESSION.validation_columns]
@@ -1347,9 +1354,8 @@ def attach_functions_to_viewer(viewer):
                                             'YMax' : cell['YMax'],'YMin':cell['YMin'], 'Page':cell["Page"]}
                     
                     SESSION.current_cells[ckey] = cell_dict
-                    SESSION.status_list[ckey] = validation_call
-                    fetch_notes(cell, SESSION.intensity_columns)
-                    SESSION.cell_under_mouse_changed = True # If we haven't seen this cell before, it has definitely changed.
+                    record_notes_and_intensities(cell, SESSION.intensity_columns)
+                    SESSION.cell_under_mouse_changed = True # If we haven' seen this cell before, it has definitely changed.
                 # Now that we have the cell dict, proceed to display
                 SESSION.cell_under_mouse =  cell_dict # save info
                 set_cell_description_label(ckey)
@@ -1378,7 +1384,7 @@ def attach_functions_to_viewer(viewer):
             else:
                 cname = f'Cell {cid}' if cell is not None else "Context Mode" # default display name is the mouse is not under a cell
             
-            sc = STATUSES_TO_HEX[SESSION.status_list[str(ckey)]] if cell is not None else '' # 
+            sc = STATUSES_TO_HEX[SESSION.current_cells[str(ckey)]['validation_call']] if cell is not None else '' # 
             if not sc == "#ffffff":
                 VIEWER.status = f'<font color="{sc}">{cname}</font> pixel intensities at {coords}: {output_str}'
             else:
@@ -1393,7 +1399,7 @@ def attach_functions_to_viewer(viewer):
             
             if vals is None:
                 # Don't do anything else
-                VIEWER.status = 'Out of bounds'
+                VIEWER.status = 'Out of bounds gallery / multichannel'
                 SESSION.cell_under_mouse = None
                 return True
             
@@ -1412,7 +1418,7 @@ def attach_functions_to_viewer(viewer):
                 if val != "-": val = int(val)
                 output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">    {val}   </font>'
         
-            sc = STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]]
+            sc = STATUSES_TO_HEX[SESSION.current_cells[str(cell_name)]['validation_call']]
             if sc != "#ffffff":
                 VIEWER.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
             else:
@@ -1439,7 +1445,12 @@ def attach_functions_to_viewer(viewer):
         next_color_txt = userInfo.statuses_rgba[next_status]
         next_color_txt = list(x/255 if next_color_txt.index(x)!=3 else 1 for x in next_color_txt)
 
-        SESSION.status_list[str(cell_name)] = next_status
+        SESSION.current_cells[str(cell_name)]['validation_call'] = next_status
+        try:
+            SESSION.page_cells[str(cell_name)]['validation_call'] = next_status
+        except (KeyError, ValueError) as e:
+            pass # Cell not in page. Should still be marked in SESSION.current_cells list
+
         set_cell_description_label(str(cell_name)) 
         # Change gallery mode status layer
         try:
@@ -1478,8 +1489,12 @@ def attach_functions_to_viewer(viewer):
         next_color_txt = list(x/255 if next_color_txt.index(x)!=3 else 1 for x in next_color_txt)
 
         # set all cells to status
-        for coords, cell_id in SESSION.grid_to_ID[SESSION.mode].items():
-            SESSION.status_list[str(cell_id)] = next_status
+        for coords, cname in SESSION.grid_to_ID[SESSION.mode].items():
+            SESSION.current_cells[str(cname)]['validation_call'] = next_status
+            try:
+                SESSION.page_cells[str(cname)]['validation_call'] = next_status
+            except (KeyError, ValueError) as e:
+                pass # Cell not in page. Should still be marked in SESSION.current_cells list
         # Change gallery mode status layer
         try:
             x = viewer.layers["Gallery Status Squares"].face_color
@@ -1517,7 +1532,7 @@ def attach_functions_to_viewer(viewer):
 
             
 
-        cur_status = SESSION.status_list[str(cell_name)]
+        cur_status = SESSION.current_cells[str(cell_name)]['validation_call']
         cur_index = list(status_colors.keys()).index(cur_status)
         next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
 
@@ -1533,7 +1548,7 @@ def attach_functions_to_viewer(viewer):
         set_scoring_label(SESSION.widget_dictionary["scoring label"])
         # change color of viewer status
         vstatus_list = copy.copy(VIEWER.status).split('>')
-        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
+        vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.current_cells[str(cell_name)]['validation_call']], vstatus_list[0])
         VIEWER.status = ">".join(vstatus_list)
 
     @viewer.mouse_drag_callbacks.append
@@ -1586,7 +1601,7 @@ def attach_functions_to_viewer(viewer):
                 viewer.layers["Context Closest Cell Box"].text = SESSION.context_closest_cell_text_object
             
             # Update scoring tally BEFORE changing status 
-            update_scoring_tally(SESSION.status_list[str(cell_name)], scoring_decision, cell_name in SESSION.page_cells.keys())
+            update_scoring_tally(SESSION.current_cells[str(cell_name)]['validation_call'], scoring_decision, cell_name in SESSION.page_cells.keys())
             set_scoring_label(SESSION.widget_dictionary["scoring label"])
 
             change_status_display(cell_name, scoring_decision)
@@ -1594,7 +1609,7 @@ def attach_functions_to_viewer(viewer):
 
             # change color of viewer status
             vstatus_list = copy.copy(VIEWER.status).split('>')
-            vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
+            vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.current_cells[str(cell_name)]['validation_call']], vstatus_list[0])
             VIEWER.status = ">".join(vstatus_list)
 
         @viewer.bind_key(f'Control-{keybind}')
@@ -1621,7 +1636,7 @@ def attach_functions_to_viewer(viewer):
                 return None
             set_cell_description_label(str(cell_name))
             vstatus_list = copy.copy(VIEWER.status).split('>')
-            vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.status_list[str(cell_name)]], vstatus_list[0])
+            vstatus_list[0] = sub(r'#.{6}',STATUSES_TO_HEX[SESSION.current_cells[str(cell_name)]['validation_call']], vstatus_list[0])
             VIEWER.status = ">".join(vstatus_list)
         return set_score, set_scoring_all
 
@@ -1895,6 +1910,7 @@ def attach_functions_to_viewer(viewer):
 
 ######------------------------- Misc + Viewer keybindings ---------------------######
 
+@catch_exceptions_to_log_file("runtime_save-page-image")
 def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard :bool = True, separate = False, borders="Black borders"):
 
     restore_viewsettings_from_cache(arrange_multichannel=True if mode_choice == 'Multichannel' else False) # Resets visible layers
@@ -1958,6 +1974,7 @@ def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard
     viewer.window._qt_viewer.setFocus() # restore focus
     # Done!
 
+@catch_exceptions_to_log_file("runtime_save-cell-image")
 def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, clipboard :bool = True, borders = 'No borders' ):
 
     # Silence all layers
@@ -1981,7 +1998,6 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
     # print(f"Trying to take screenshot for the following frame: {singlecell_df}")
     cell_x = singlecell_df.iloc[0]["center_x"]
     cell_y = singlecell_df.iloc[0]["center_y"]
-    offset = userInfo.imageSize // 2
     # Get images from dask in chosen channels
 
     # if RAW_PYRAMID is None:
@@ -2004,25 +2020,27 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
         fluor_contrast = [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]]
         position = userInfo.channelOrder[fluor]
         if SESSION.mode in ("Gallery","Context"):
+            offset = userInfo.imageSize // 2
             cell_image = SESSION.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
             imsize = userInfo.imageSize
         elif SESSION.mode == "Multichannel":
             if borders != "No borders":
-                imsize = userInfo.imageSize
+                imsize = userInfo.imageSize + 2
             else:
-                imsize = userInfo.imageSize+2
+                imsize = userInfo.imageSize
+            offset = imsize // 2
             cell_image = np.zeros((imsize, imsize*(num_channels+1)))
             cell_punchout = SESSION.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute()
-            if borders != "No borders":
-                start = pos * userInfo.imageSize
-                end = (pos+1) * userInfo.imageSize
-                cell_image[0:userInfo.imageSize, start:end] = cell_punchout
-                cell_image[-userInfo.imageSize:,-userInfo.imageSize:] = cell_punchout
-            else:
-                start = (pos * imsize)+1
-                end = ((pos+1) * imsize) -1
-                cell_image[1:imsize-1, start:end] = cell_punchout
-                cell_image[-(imsize-1):-1,-(imsize-1):-1] = cell_punchout
+            # if borders != "No borders":
+            start = pos * imsize
+            end = (pos+1) * imsize
+            cell_image[0:imsize, start:end] = cell_punchout
+            cell_image[-imsize:,-imsize:] = cell_punchout
+            # else:
+            #     start = (pos * imsize)+1
+            #     end = ((pos+1) * imsize) -1
+            #     cell_image[1:imsize-1, start:end] = cell_punchout
+            #     cell_image[-(imsize-1):-1,-(imsize-1):-1] = cell_punchout
             pos +=1
         else:
             viewer.status = "Ran into a problem: unexpected viewer mode"
@@ -2233,6 +2251,7 @@ def _slice_page_image(viewer, page_mode, blended_image ):
     add_flash_animation(viewer._window._qt_viewer._welcome_widget)
     return True
 
+@catch_exceptions_to_log_file("runtime_plot-histogram")
 def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : str | None, 
                             bins:int, include_all:bool, normalize:bool):
     
@@ -2282,7 +2301,7 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
         for _, cell in cells.items():
             # Get data for single cell
             xmin = cell['XMin'] ; xmax = cell['XMax'] 
-            ymin = cell['YMin'] ; ymax = cell['YMax'] 
+            ymin = cell['YMin'] ; ymax = cell['YMax']
             
             if RAW_PYRAMID is None:
                 cell_punchout = SESSION.dask_array[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
@@ -2326,22 +2345,39 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
         plt.legend(handles=new_legend, fontsize='14')
     plt.show()
 
-def generate_intensity_violins(viewer:napari.Viewer, cell_id : str , layer_name : str | None,
+@catch_exceptions_to_log_file("runtime_plot-violins")
+def generate_intensity_violins(viewer:napari.Viewer, cell_id : str|None, layer_name : str|None, refdataset:str="Full dataset",
                                col_choice:str='Cell', pheno_choice:str='All custom'):
+    
+    match refdataset:
+        case "Full dataset":
+            df = userInfo.objectDataFrame
+        case "All pages in session":
+            df = SESSION.session_cells
 
-    df = userInfo.objectDataFrame
-    try:
-        if ANNOTATIONS_PRESENT:
-            singlecell_df = df[(df['Object Id']==int(cell_id)) & (df['Analysis Region']==str(layer_name))]
-        else:
-            singlecell_df = df[df['Object Id']==int(cell_id)]
-    except (ValueError, TypeError, IndexError):
-        # Cell doesn't exist
-        if ANNOTATIONS_PRESENT:
-            viewer.status = f"Unable to plot violins for cell '{layer_name} {cell_id}'. This ID was not found in my table."
-        else:
-            viewer.status = f"Unable to plot violins for cell '{cell_id}'. This ID was not found in my table."
-        return False
+            print(df.columns)
+            print(userInfo.objectDataFrame.columns)
+            print('------------------------')
+            # exit()
+        case "This page only":
+            df = SESSION.session_cells
+            df = df[df["Page"] == SESSION.page]
+
+    # If the user has passed a value here, they want to show the position of a reference cell
+    cell_id = None if cell_id == '' else cell_id # Let's consider passing a blank as wanting to NOT plot a reference cell, so let's continue
+    if cell_id is not None:
+        try:
+            if ANNOTATIONS_PRESENT:
+                singlecell_df = df[(df['Object Id']==int(cell_id)) & (df['Analysis Region']==str(layer_name))]
+            else:
+                singlecell_df = df[df['Object Id']==int(cell_id)]
+        except (ValueError, TypeError, IndexError):
+            # Cell doesn't exist
+            if ANNOTATIONS_PRESENT:
+                viewer.status = f"Unable to plot reference cell '{layer_name} {cell_id}'. This ID was not found in my table."
+            else:
+                viewer.status = f"Unable to plot reference cell '{cell_id}'. This ID was not found in my table."
+            return False
     viewer.status = 'Analyzing object data...'
     
     match col_choice: #'Cell' 'Nucleus' 'Cytoplasm' 'All'
@@ -2366,54 +2402,104 @@ def generate_intensity_violins(viewer:napari.Viewer, cell_id : str , layer_name 
     print(f"Phenotypes are {userInfo.phenotypes}")
     match pheno_choice:
         case "All custom":
-            pheno_selection = [x for x in userInfo.phenotypes if not x.startswith("Validation |")]
+            pheno_selection = [x for x in userInfo.phenotypes if (not x.startswith("Validation |")) and x in list(df.columns)]
         case "All validation":
-            pheno_selection = [x for x in userInfo.phenotypes if x.startswith("Validation |")]
+            pheno_selection = [x for x in userInfo.phenotypes if x.startswith("Validation |") and x in list(df.columns)]
         case _:
             pheno_selection = [pheno_choice]
-    print(f"{singlecell_df[pheno_selection]}")
-    # mdf = df.melt(id_vars='Object Id', value_vars=selection)
+    df.to_csv('mdf.csv',index=False)
+    print(selection)
+    print(pheno_selection)
     mdf = df.melt(id_vars=['Object Id', *pheno_selection ], value_vars=selection).rename(columns={'variable':'Intensity Type','value':'Intensity Value'})
     mdf = mdf.melt(id_vars = ['Object Id','Intensity Type','Intensity Value'], 
                   value_vars= pheno_selection).rename(columns={'variable':'Phenotype'})
     # Only keep cells positive for the chosen phenotypes. Cells with multiple phenotypes are split into different rows here (this is fine)
     mdf = mdf.loc[mdf['value'] ==1].drop(columns=['value'])
-    
-
+    print("\nmelted data here\n")
+    print(mdf)
     # kwargs = {'palette':pal,'multiple':mult,'fill':fill,'bins':b,'element':e,'linewidth':l }
     viewer.status = "Done - displaying violinplot in live viewer"
 
-
-    g = FacetGrid(mdf, col ='Phenotype', col_wrap=3)
-    g.map_dataframe(violinplot, x='Intensity Type',y='Intensity Value',hue='Intensity Type', palette=pal, cut=0)
-    g.figure.suptitle(f"{SESSION.image_display_name} fluorescent intensity distribution with reference to cell {cell_id}",fontsize='20')
-
-        # p = violinplot(mdf, x = 'variable', y = 'value', palette=pal)
-        # p.set_title("Intensity violins", fontsize = 20)
-        # g.ax.plot()
-        # g.ax.set_title()
-    for ax in g.axes:
-        labs = g.axes[-1].get_xticklabels()
+    if pheno_choice not in ("All custom", "All validation"):
+    # Just one phenotype, no need to facet
+        p = violinplot(mdf, x='Intensity Type',y='Intensity Value',hue='Intensity Type', palette=pal,cut=0.1)
+        
+        p.set_title(f"{SESSION.image_display_name} fluorescent intensity distribution with reference to cell {cell_id}",fontsize='20')
+        
+        ax = plt.gca()
+        labs = ax.get_xticklabels()
         ax.set_xticks(ax.get_xticks(),labs, rotation=45, ha='right')
         current_title = ax.title._text
         sc_phen = current_title.replace('Phenotype = ','')
         c = 'black' if sc_phen.replace("Validation | ",'') not in userInfo.statuses_hex.keys() else userInfo.statuses_hex[sc_phen.replace("Validation | ",'')]
         
-        n = mdf.Phenotype.value_counts()[sc_phen]
-        new_title = current_title+f'\nn = {n}'
-        ax.set_title(new_title, color=c)
-        val = singlecell_df.iloc[0][sc_phen]
-        if val!=1: 
-            # print(f"SKIP {sc_phen} - {val}")
-            continue # Don't plot reference cell location on a phenotype it is not a member of
-        else:
-            # print(f"PLOT {sc_phen} - {val}")
-            pass
-        for tick, lab in enumerate(labs):
-            # print(f"\n{tick} {lab}")
-            y = singlecell_df.iloc[0][lab._text]
-            # ax.plot(tick, y, "wo")
-            ax.text(tick+0.15, y, f"<",fontsize=15,bbox=dict(facecolor='white', alpha=0.8, edgecolor=None, boxstyle='round,pad=0.08'))
+        # Only do the following if the user wants to plot the position of a single reference cell on a violin
+        if cell_id is not None:
+            for tick, lab in enumerate(labs):
+                y = singlecell_df.iloc[0][lab._text]
+                ax.add_line(lines.Line2D([tick-.46, tick+.46], [y, y],lw=2, color='white'))
+                ax.add_line(lines.Line2D([tick-.46, tick+.46], [y, y],lw=2, color='black', ls= (0,(5,5)) ))
+                # ax.axhline(y=y,xmin=tick-(1/len(pal)),xmax=tick+(1/len(pal)), linewidth=2, color='white')
+                # ax.axhline(y=y,xmin=tick-(1/len(pal)),xmax=tick+(1/len(pal)), linewidth=2, color='black', ls=":")
+                
+            # for tick, lab in enumerate(labs):
+            #     y = singlecell_df.iloc[0][lab._text]
+                # ax.text(tick-0.45, y-2, f">", fontsize=18,horizontalalignment='center',verticalalignment='center')
+                ax.text(tick+0.4, y+1, f"{round(y,1)}", fontsize=12,horizontalalignment='left')
+                                #bbox=dict(facecolor='white', alpha=0.8, edgecolor=None, boxstyle='round,pad=0.08'))
+
+    else: 
+        # Need to facet on multiple phenotypes
+        g = FacetGrid(mdf, col ='Phenotype', col_wrap=3)
+        g.map_dataframe(violinplot, x='Intensity Type',y='Intensity Value',hue='Intensity Type',palette=pal, cut=0.1)
+        g.figure.suptitle(f"{SESSION.image_display_name} fluorescent intensity distribution with reference to cell {cell_id}",fontsize='20')
+
+        for ax in g.axes:
+            # For each subplot, want to adjust title color / add n, and optionally plot a reference line
+            labs = g.axes[-1].get_xticklabels() # Get labels and rotate for visibility
+            ax.set_xticks(ax.get_xticks(),labs, rotation=45, ha='right')
+            # Redo title to include n and color with validation call color if plotting a validation phenotype
+            current_title = ax.title._text
+            sc_phen = current_title.replace('Phenotype = ','')
+            c = 'black' if sc_phen.replace("Validation | ",'') not in userInfo.statuses_hex.keys() else userInfo.statuses_hex[sc_phen.replace("Validation | ",'')]
+            n = mdf.Phenotype.value_counts()[sc_phen] // len(labs)
+            new_title = current_title+f'\nn = {n}'
+            ax.set_title(new_title, color=c)
+
+            # Only do the following if the user wants to plot the position of a single reference cell on a violin
+            if cell_id is not None:
+                cname = f'{singlecell_df.iloc[0]["Analysis Region"]} {singlecell_df.iloc[0]["Object Id"]}' if ANNOTATIONS_PRESENT else str(singlecell_df.iloc[0]["Object Id"])
+                if cname in SESSION.current_cells.keys():
+                    print(SESSION.current_cells[cname])
+                    print(sc_phen)
+                    try:
+                        if pheno_choice == 'All validation':
+                            val = SESSION.current_cells[cname]['validation_call']
+                            facet = sc_phen.replace("Validation | ",'')
+                            on_phenotype_facet = True if val == facet else False
+                        elif pheno_choice =='All custom':
+                            on_phenotype_facet = bool(singlecell_df.iloc[0][sc_phen])
+                        else: #Unreachable case? Should'nt be faceting if user chose single column
+                            raise Exception("Executing faceted violinplot code even though user requested a single column")
+                    except KeyError: # Probably triggered
+                        on_phenotype_facet = False
+                    print(f"on_phenotype_facet = {on_phenotype_facet}")
+                else:
+                    on_phenotype_facet = bool(singlecell_df.iloc[0][sc_phen])
+                    print(f"Not in current cells. on_phenotype_facet = {on_phenotype_facet}")
+                for tick, lab in enumerate(labs):
+                    y = singlecell_df.iloc[0][lab._text]
+
+                    ax.add_line(lines.Line2D([tick-.46, tick+.46], [y, y],lw=2, color='white'))
+                    ax.add_line(lines.Line2D([tick-.46, tick+.46], [y, y],lw=2, color='black', ls= (0,(5,5)) ))
+                    ax.text(tick+0.4, y+1, f"{round(y,1)}", fontsize=12,horizontalalignment='left')
+                    # Add a visual indicator of the reference cell's expression for a given marker
+                    # if not on_phenotype_facet:
+                    #     ax.text(tick+0.15, y, f"<", fontsize=12,horizontalalignment='center',verticalalignment='center',
+                    #             bbox=dict(facecolor='white', alpha=0.8, edgecolor=None, boxstyle='round,pad=0.08'))
+                    # else:
+                    #     ax.text(tick+0.15, y, f"<",color='white',fontsize=16,horizontalalignment='center',verticalalignment='center',
+                    #             bbox=dict(facecolor=c , alpha=1, edgecolor=None, boxstyle='round,pad=0.08'))
     plt.tight_layout()
     plt.show()
 
@@ -2467,7 +2553,7 @@ def set_initial_adjustment_parameters(viewsettings):
 
     return True
 
-def fetch_notes(cell_row, intensity_col_names):
+def record_notes_and_intensities(cell_row, intensity_col_names):
     '''Grab notes and intensities for each cell in the list and save to global dicts'''
     if ANNOTATIONS_PRESENT:
         ID = str(cell_row['Analysis Region']) + ' ' + str(cell_row['Object Id'])
@@ -2478,7 +2564,7 @@ def fetch_notes(cell_row, intensity_col_names):
     present_intensities = sorted(list(set(list(cell_row.index)).intersection(set(intensity_col_names))))
     cell_row = cell_row.loc[present_intensities]
     SAVED_INTENSITIES[ID] = cell_row
-    # print(f'dumping dict {SESSION.saved_notes}')
+    # SESSION.session_cells[ID]["intensities"] = cell_row
 
 '''Get object data from csv and parse.''' 
 def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None, page_number = 1, 
@@ -2520,7 +2606,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     # Get relevant columns for intensity sorting
     # TODO make this conditional, and in a try except format
     headers = pd.read_csv(OBJECT_DATA_PATH, index_col=False, nrows=0).columns.tolist() 
-    possible_fluors = ['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence']
+    possible_fluors = userInfo.possible_fluors_in_data
     suffixes = ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity']
     all_possible_intensities = [x for x in headers if (any(s in x for s in suffixes) and (any(f in x for f in possible_fluors)))]
     SESSION.intensity_columns = all_possible_intensities
@@ -2668,13 +2754,13 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
                 cell_set = cell_set.sort_values(by = ["Analysis Region",'Object Id'], ascending = False, kind = 'mergesort')
             else:
                 cell_set = cell_set.sort_values(by = 'Object Id', ascending = False, kind = 'mergesort')
-    tumor_cell_XYs = {}
+    cell_information = {}
 
     for index,row in cell_set.iterrows():
         cid = row["Object Id"]
         layer = row["Analysis Region"] if ANNOTATIONS_PRESENT else None
         ckey = f'{layer} {cid}' if ANNOTATIONS_PRESENT else str(cid)
-        fetch_notes(row, all_possible_intensities)
+        record_notes_and_intensities(row, all_possible_intensities)
         center_x = row['center_x']
         center_y = row['center_y']
         vals = row[validation_cols]
@@ -2684,14 +2770,14 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
             # row has no validation call (all zeroes). Assign to Unseen
             validation_call = "Unseen"
 
-        tumor_cell_XYs[ckey] = {'Layer':layer,"cid": cid,"center_x": center_x,'center_y': center_y,
+        cell_information[ckey] = {'Layer':layer,"cid": cid,"center_x": center_x,'center_y': center_y,
                                 'validation_call': validation_call, 'XMax' : row['XMax'],'XMin':row['XMin'],
                                 'YMax' : row['YMax'],'YMin':row['YMin'], 'Page':row["Page"]}
 
-    SESSION.current_cells = copy.copy(tumor_cell_XYs)
-    SESSION.page_cells = copy.copy(tumor_cell_XYs)
-    SESSION.cell_under_mouse = next(iter(tumor_cell_XYs.values())) # Set first cell in list as "current" to avoid exceptions
-    return tumor_cell_XYs
+    SESSION.current_cells = copy.copy(cell_information)
+    SESSION.page_cells = copy.copy(cell_information)
+    SESSION.cell_under_mouse = next(iter(cell_information.values())) # Set first cell in list as "current" to avoid exceptions
+    return cell_information
 
 def replace_note(cell_widget, note_widget):
     cellID = cell_widget.text(); note = note_widget.text()
@@ -3161,41 +3247,76 @@ def main(preprocess_class = None):
     violin_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
     violin_layout = QVBoxLayout(violin_group)
 
+    # Layout 
+    violin_entry_layout = QHBoxLayout()
+
+    # Ref cell toggle:
+    violin_use_refcell = QPushButton("Plot a reference cell")
+    violin_use_refcell.setFont(userInfo.fonts.button_small)
+    violin_entry_layout.addWidget(violin_use_refcell)
+
     # LineEdit
     violin_target_entry = QLineEdit()
     violin_target_entry.setPlaceholderText("ID to plot")
     SESSION.widget_dictionary["violin_target_entry"] = violin_target_entry
-    
-    # Layout 
-    violin_entry_layout = QHBoxLayout()
+
+
     violin_entry_layout.addWidget(violin_target_entry)
     # Annotation widget:
     if ANNOTATIONS_PRESENT:
         violin_annotations = QComboBox() ; violin_annotations.addItems(ANNOTATIONS_PRESENT)
         SESSION.widget_dictionary["violin_annotations"] = violin_annotations
-        violin_annotations.addWidget(violin_annotations)
+        violin_entry_layout.addWidget(violin_annotations)
     violin_layout.addLayout(violin_entry_layout)
 
+    def _change_reference_settings(button, entry, annot):
+        if button.text() == "Plot a reference cell":
+            button.setText("No reference")
+            entry.setDisabled(True)
+            if annot is not None:
+                annot.setDisabled(True)
+
+        elif button.text() == "No reference":
+            button.setText("Plot a reference cell")
+            entry.setEnabled(True)
+            if annot is not None:
+                annot.setEnabled(True)
+
+    violin_use_refcell.released.connect(lambda: _change_reference_settings(violin_use_refcell,violin_target_entry, None if not ANNOTATIONS_PRESENT else violin_annotations))
+
+    
     violin_second_row_layout = QHBoxLayout()
+    vlabel = QLabel("Reference data")
+    vlabel.setAlignment(Qt.AlignRight)
+    violin_second_row_layout.addWidget(vlabel)
+    violin_referencedata = QComboBox()
+    violin_referencedata.addItems(["Full dataset","All pages in session","This page only"])
+    violin_second_row_layout.addWidget(violin_referencedata)
+    violin_layout.addLayout(violin_second_row_layout)
+
+
+    violin_third_row_layout = QHBoxLayout()
     violin_phenotype = QComboBox()
     violin_phenotype.addItems(["All custom", "All validation", *userInfo.phenotypes])
     vlabel = QLabel("Phenotype(s)")
     vlabel.setAlignment(Qt.AlignRight)
-    violin_second_row_layout.addWidget(vlabel)
-    violin_second_row_layout.addWidget(violin_phenotype)
+    violin_third_row_layout.addWidget(vlabel)
+    violin_third_row_layout.addWidget(violin_phenotype)
     violin_intensity = QComboBox()
     violin_intensity.addItems(["Cell","Nucleus","Cytoplasm","All"])
     vlabel = QLabel("Intensities")
     vlabel.setAlignment(Qt.AlignRight)
-    violin_second_row_layout.addWidget(vlabel)
-    violin_second_row_layout.addWidget(violin_intensity)
-    violin_layout.addLayout(violin_second_row_layout)
+    violin_third_row_layout.addWidget(vlabel)
+    violin_third_row_layout.addWidget(violin_intensity)
+    violin_layout.addLayout(violin_third_row_layout)
 
 
 
     violin_button = QPushButton("Generate violins")
     violin_button.released.connect(lambda: generate_intensity_violins(viewer,
-                                violin_target_entry.text(), violin_annotations.currentText() if ANNOTATIONS_PRESENT else None,
+                                violin_target_entry.text() if violin_target_entry.isEnabled() else None, 
+                                violin_annotations.currentText() if ANNOTATIONS_PRESENT and violin_annotations.isEnabled() else None,
+                                violin_referencedata.currentText(),
                                 violin_intensity.currentText(), violin_phenotype.currentText() ))
     violin_layout.addWidget(violin_button)
 
@@ -3223,14 +3344,15 @@ def main(preprocess_class = None):
     # print(f'\n {dir()}') # prints out the namespace variables 
     SESSION.side_dock_groupboxes = {"notes":notes_all_group, "page":page_group, "mode":mode_group, "hide": show_hide_group, 
                                     "scoring":scoring_group, "cell description":cell_description_group, 
-                                    "image cell group":im_save_cell_group, "image page group":im_save_page_group}
+                                    "image cell group":im_save_cell_group, "image page group":im_save_page_group,
+                                    "histogram":hist_group,"violin":violin_group}
     SESSION.radiogroups = {"Status layer group": status_layer_group, "Cell boxes group": nuc_boxes_group}
     
     
     
     # Now process object data and fetch images
     try:
-        tumor_cell_XYs = extract_phenotype_xldata(specific_cell=SPECIFIC_CELL, sort_by_intensity=local_sort)
+        cell_information = extract_phenotype_xldata(specific_cell=SPECIFIC_CELL, sort_by_intensity=local_sort)
     except KeyError as e:
         print(e)
         # If the user has given bad input, the function will raise a KeyError. Fail gracefully and inform the user
@@ -3262,7 +3384,7 @@ def main(preprocess_class = None):
     set_scoring_label(SESSION.widget_dictionary["scoring label"])
 
     # try:
-    add_layers(viewer,pyramid,tumor_cell_XYs, int(userInfo.imageSize/2))
+    add_layers(viewer,pyramid,cell_information, int(userInfo.imageSize/2))
     # except IndexError as e:
     #     preprocess_class._append_status('<font color="#f5551a">  Failed.<br>A requested image channel does not exist in the data!</font>')
     #     # preprocess_class.findDataButton.setEnabled(True)

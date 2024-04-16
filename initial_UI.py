@@ -556,7 +556,7 @@ class ViewerPresets(QDialog):
         headers = pd.read_csv(self.userInfo.objectDataPath, index_col=False, nrows=0).columns.tolist() 
         possible_fluors = self.userInfo.possible_fluors_in_data
         suffixes = self.userInfo.non_phenotype_fluor_suffixes_in_data
-        exclude = self.userInfo.non_phenotype_fluor_cols_in_data
+        exclude = self.userInfo.other_cols_in_data
         
         intens_ = ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity']
 

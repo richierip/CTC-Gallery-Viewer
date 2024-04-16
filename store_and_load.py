@@ -51,7 +51,6 @@ class sessionVariables:
     def __init__(self) -> None:
         self.viewer = None # napari.Viewer()
         self.saving_required = False
-        self.status_list = {} # mapping for cell names to statuses for the current page, eg {"Cell 2" : "Unseen"} 
         self.saved_notes = {} # mapping for cell names to notes for the current page, eg {"Cell 2" : "note"} 
         self.image_display_name = "" # Name of image file to display in the viewer banner
         self.image_scale = None # None, or float representing pixels per micron
@@ -68,7 +67,7 @@ class sessionVariables:
         self.cell_under_mouse = {} # Will update with 'current cells' info for one cell
         self.cell_under_mouse_changed = False # Stores a flag to signal this event
         self.context_target = {} # Saves information for the cell of interest in Context Mode
-        self.current_cells =  {'Layer':str,"cid": int,"center_x": int,'center_y': int,
+        self.current_cells =  {'Layer':str|None,"cid": int,"center_x": int,'center_y': int,
                                 'validation_call': str, 'XMax' : float,'XMin':float,
                                 'YMax' : float,'YMin':float} # Holds dict of dict for the cells that are loaded on the current page in the viewer
         self.cells_per_row = {"Gallery" : 8, "Multichannel" : 4} # replaced with real numbers
@@ -150,7 +149,7 @@ class userPresets:
         self.non_phenotype_fluor_suffixes_in_data = ['Positive Classification', 'Positive Nucleus Classification','Positive Cytoplasm Classification',
                     'Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity', '% Nucleus Completeness', '% Cytoplasm Completeness',
                     '% Cell Completeness', '% Completeness']
-        self.non_phenotype_fluor_cols_in_data = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
+        self.other_cols_in_data = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
                   'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
         self.phenotypes = []
         self.fonts = ViewerFonts()
@@ -222,20 +221,22 @@ class userPresets:
             self.objectDataFrame.insert(8,"Notes","-")
             self.objectDataFrame.fillna("")
         
-        status_copy = copy.copy(self.session.status_list)
-        for key, status in status_copy.items():
-            cid = key.split()[-1]
+        updated_cells = copy.copy(self.session.current_cells)
+        for key, cdict in updated_cells.items():
+            cid = cdict['cid']
+            ann = cdict['Layer']
+            status = cdict['validation_call']
             vals = [1 if x == status else 0 for x in list(self.statuses.keys())]
-            status_copy[key] = [key.replace(f' {cid}',''), int(cid),self.session.saved_notes[key], *vals]
+            updated_cells[key] = [ann, int(cid),self.session.saved_notes[key], *vals]
 
         # Create dataframe from stored dictionary and join with original df by assigning them the same kind of index
         calls = [f"Validation | {status}" for status in list(self.statuses.keys())]
-        df = pd.DataFrame.from_dict(status_copy, orient = 'index', columns = ["Analysis Region", "Object Id",'Notes', *calls] )
-        
+        df = pd.DataFrame.from_dict(updated_cells, orient = 'index', columns = ["Analysis Region", "Object Id",'Notes', *calls] )
+
         if self.analysisRegionsInData:
             self.objectDataFrame['new_index'] = self.objectDataFrame['Analysis Region'] +' '+ self.objectDataFrame['Object Id'].astype(str)
         else:
-            df = df.drop(columns=['Analysis Region'])
+            df.drop(columns=['Analysis Region'], inplace=True)
             self.objectDataFrame['new_index'] = self.objectDataFrame['Object Id'].astype(str)
         self.objectDataFrame = self.objectDataFrame.set_index('new_index')
         # Drop analysis region if it does not belong
