@@ -2620,11 +2620,17 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     cols_to_keep = halo_export.columns.intersection(cols_to_keep)
     halo_export = halo_export.loc[:, cols_to_keep]
 
+    #TODO Need to generalize this better. Should do the work to place candidate values in the dropdown menu in the user GUI
+    #   Then, user can pick and we don't have to consider anything else here since we know that the sort column passed is valid and the user
+    #   wants it.
     global GLOBAL_SORT
     global_sort_status = True
     if GLOBAL_SORT is not None:
         try:
-            GLOBAL_SORT = [x for x in all_possible_intensities if all(y in x for y in GLOBAL_SORT.replace("Cell Intensity",""))][0]
+            # Doing this temporarily to handle cases where there is a custom fluor name passed. Fluor needs to still contain the 'Opal'
+            #   Label somewhere in the name.
+            GLOBAL_SORT = [x for x in all_possible_intensities if all(y in x for y in GLOBAL_SORT.replace("Cell Intensity",""))]
+            GLOBAL_SORT = [x for x in GLOBAL_SORT if "Cell Intensity" in x][0]
             halo_export = halo_export.sort_values(by = GLOBAL_SORT, ascending = False, kind = 'mergesort')
         except:
             print('Global sort failed. Will sort by Cell Id instead.')
@@ -2636,7 +2642,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     else:
         if annotations:
             halo_export = halo_export.sort_values(by = ["Analysis Region","Object Id"], ascending = True, kind = 'mergesort')
-    
+
     # Helper to construct query string that will subset dataframe down to cells that 
     #   are positive for a phenotype in the list, or a member of an annotation layer in the list
     def _create_anno_pheno_query(anno_list, pheno_list):
@@ -2713,7 +2719,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     SESSION.saved_notes['page'] = combobox_widget.currentText()
     
     
-    
+
     # Save cells that form ALL pages for this session. They could appear in Context Mode.
     SESSION.session_cells = phen_only_df
     SESSION.session_cells["center_x"] = ((SESSION.session_cells['XMax']+SESSION.session_cells['XMin'])/2).astype(int)
@@ -2756,6 +2762,8 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
                 cell_set = cell_set.sort_values(by = 'Object Id', ascending = False, kind = 'mergesort')
     cell_information = {}
 
+    # Iterate over rows to create dictionary entries for each cell.
+    #TODO just keep the information in a pandas DataFrame. It will be faster and easier to work with than doing this.
     for index,row in cell_set.iterrows():
         cid = row["Object Id"]
         layer = row["Analysis Region"] if ANNOTATIONS_PRESENT else None
