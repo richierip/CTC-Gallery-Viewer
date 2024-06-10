@@ -26,6 +26,7 @@ import xml.etree.ElementTree as ET
 import webbrowser # for opening github
 import warnings
 warnings.catch_warnings
+
 from custom_qt_classes import ScoringDialog, ChannelDialog, StatusCombo
 
 VERSION_NUMBER = '1.3'
@@ -42,7 +43,7 @@ WIDGET_SELECTED = None
 class ViewerPresets(QDialog):
     def __init__(self, app, parent=None):
         super(ViewerPresets, self).__init__(parent)
-
+        
         self.app = app
         # Arrange title bar buttons
         self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
@@ -214,7 +215,6 @@ class ViewerPresets(QDialog):
             self.saveViewSettings()
         self.clearFocus()
 
-    
 
     def change_scoring_decisions(self):
         scoring = ScoringDialog(self.app, self.userInfo, {"pheno_widget":self.phenotypeStatuses,"anno_widget": self.annotationStatuses})
@@ -743,17 +743,16 @@ class ViewerPresets(QDialog):
         self.saveChannel()
         # self.saveColors()
         return 'passed'
-
-            
-    def createTopLeftGroupBox(self, layout = QGridLayout(), groupbox = QGroupBox("Channels and Colors") ):
-        self.topLeftGroupBox = groupbox
+    
+    def createTopLeftGroupBox(self, layout: None|QGridLayout = None, groupbox: None|QGroupBox = None ):
+        self.topLeftGroupBox = groupbox if groupbox is not None else QGroupBox("Channels and Colors")
         
         self.mycheckbuttons = []
         for chn, pos in self.userInfo.channelOrder.items():
             check = QCheckBox(chn)
             check.setObjectName(chn.replace(" ","_"))
             self.mycheckbuttons.append(check)
-        self.topLeftGroupLayout = layout
+        self.topLeftGroupLayout = layout if layout is not None else QGridLayout()
         
         def create_func(colorWidget):
             def set_color_index(index):
@@ -837,7 +836,7 @@ class ViewerPresets(QDialog):
             exec(f'{colorComboName}.activated.connect(self.saveColors)')
             
             self.topLeftGroupLayout.addWidget(button, row//4,col%4)
-            exec(f'layout.addWidget({colorComboName},{row//4}, {(col%4)+1})')
+            exec(f'self.topLeftGroupLayout.addWidget({colorComboName},{row//4}, {(col%4)+1})')
             row+=2; col+=2
 
             
@@ -1164,6 +1163,7 @@ class ViewerPresets(QDialog):
         self.status_label.setText(current + status)
         self.app.processEvents()
 
+    
     def loadGallery(self):
         # self.status_label.setVisible(True)
         # self.app.processEvents()
@@ -1219,7 +1219,7 @@ class ViewerPresets(QDialog):
         except Exception as e:
             # self.userInfo.session.zarr_store.close() # close zarr file??
             self._log_problem(e, error_type="runtime-crash")
-        
+
 class ThreadSave(QThread):
     def __init__(self, gallery:ViewerPresets, target=None) -> None:
         super().__init__()
@@ -1229,10 +1229,11 @@ class ThreadSave(QThread):
         if self.target:
             self.target(self.gallery)
 
-def ensure_saving(gallery : ViewerPresets, app, window = QDialog(), 
-                  notice = QLabel(),button = QPushButton()) -> None:
+def ensure_saving(gallery : ViewerPresets, app) -> None:
     app.exec()
-
+    window = QDialog()
+    notice = QLabel()
+    button = QPushButton()
     # gallery.userInfo.session.zarr_store.close() # close zarr file??
     # old app has exited now
     if gallery.userInfo.session.saving_required:
@@ -1302,7 +1303,7 @@ if __name__ == '__main__':
     ''' This file is run directly to start the GUI. The main method here needs to initialize
     the QApplication
     '''
-
+    
     # This gets python to tell Windows it is merely hosting another app
     # Therefore, the icon I've attached to the app before is displayed in the taskbar, instead of the python default icon. 
     myappid = 'MGH.CellGalleryViewer.v'+VERSION_NUMBER # arbitrary string
@@ -1319,7 +1320,9 @@ if __name__ == '__main__':
     customStyle += f"QComboBox{{font-size: {FONT_SIZE}pt;}}"
     app.setStyleSheet(customStyle)
     app.setStyle('Fusion')
+    print("Launching UI")
     gallery = ViewerPresets(app)
+
     gallery.show()
     sys.exit(ensure_saving(gallery,app))
     print("\nI should never see this.")

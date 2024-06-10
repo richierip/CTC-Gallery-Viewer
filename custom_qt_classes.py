@@ -1,10 +1,11 @@
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QIcon, QColor
-from PyQt5.QtWidgets import (QApplication, QComboBox, QDialog, QGridLayout, QLayout,
+from qtpy.QtCore import Qt, QTimer
+from qtpy.QtGui import QIcon, QColor, QLinearGradient
+from qtpy.QtWidgets import (QApplication, QComboBox, QDialog, QGridLayout, QLayout, QSlider, QDoubleSpinBox,
                             QRadioButton, QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QHBoxLayout)
 
-import store_and_load
+from store_and_load import sessionVariables, userPresets
+from napari import Viewer
 import os
 # import warnings
 # warnings.filterwarnings("ignore")
@@ -15,8 +16,9 @@ import custom_color_functions
 # Used in fetching and processing metadata
 from random import choice
 from typing import Callable
+from itertools import product
 
-VERSION_NUMBER = '1.2.1'
+VERSION_NUMBER = '1.3'
 FONT_SIZE = 12
 
 COLOR_TO_RGB = {'gray': '(170,170,170, 255)', 'purple':'(160,32,240, 255)', 'blue':'(100,100,255, 255)',
@@ -78,7 +80,7 @@ class StatusCombo(QComboBox):
 ''' A QDialog that the user can interact with to select scoring decision names, color values,
     and keybindings. Loads with defaults initialized in the user data class'''
 class ChannelDialog(QDialog):
-    def __init__(self, app: QApplication, user_data: store_and_load.userPresets, 
+    def __init__(self, app: QApplication, user_data: userPresets, 
                  check_layout : QGridLayout, check_group : QGroupBox, check_group_create: Callable):
         super(ChannelDialog, self).__init__()
         self.app = app
@@ -233,7 +235,7 @@ class ChannelDialog(QDialog):
 ''' A QDialog that the user can interact with to select scoring decision names, color values,
     and keybindings. Loads with defaults initialized in the user data class'''
 class ScoringDialog(QDialog):
-    def __init__(self, app: QApplication, user_data: store_and_load.userPresets, widget_dict: dict[str:QComboBox]):
+    def __init__(self, app: QApplication, user_data: userPresets, widget_dict: dict[str:QComboBox]):
         super(ScoringDialog, self).__init__()
         self.app = app
         self.user_data = user_data
@@ -321,7 +323,7 @@ class ScoringDialog(QDialog):
             except KeyError:
                 pass
             try:
-                new_color = '#%02x%02x%02x' % new_color
+                new_color = '#%02x%02x%02x' % new_color # Hex conversion
                 if not custom_color_functions.isColor(new_color):
                     raise TypeError
             except TypeError:
@@ -360,3 +362,262 @@ class ScoringDialog(QDialog):
         self.pheno_widget.reset_items()
         self.anno_widget.reset_items()
         self.close()
+
+'''
+    https://stackoverflow.com/questions/42820380/use-float-for-qslider
+'''
+class DoubleSlider(QSlider):
+
+    def __init__(self, smin=0, smax = 255, *args, **kargs):
+        super(DoubleSlider, self).__init__( *args, **kargs)
+        self._min = smin
+        self._max = smax
+        self.interval = 0.01
+        self._range_adjusted()
+
+    def setValue(self, value):
+        index = round((value - self._min) / self.interval)
+        return super(DoubleSlider, self).setValue(index)
+
+    def value(self):
+        return self.index * self.interval + self._min
+
+    @property
+    def index(self):
+        return super(DoubleSlider, self).value()
+
+    def setIndex(self, index):
+        return super(DoubleSlider, self).setValue(index)
+
+    def setMinimum(self, value):
+        self._min = value
+        self._range_adjusted()
+
+    def setMaximum(self, value):
+        self._max = value
+        self._range_adjusted()
+
+    def setInterval(self, value):
+        # To avoid division by zero
+        if not value:
+            raise ValueError('Interval of zero specified')
+        self.interval = value
+        self._range_adjusted()
+
+    def _range_adjusted(self):
+        number_of_steps = int((self._max - self._min) / self.interval)
+        super(DoubleSlider, self).setMaximum(number_of_steps)
+
+''' A QDialog that the user can interact with to adjust the Napari view settings while running the app.'''
+class ViewSettingsDialog(QDialog):
+    def __init__(self, user_data: userPresets, viewer: Viewer , vs: dict, adjustment_function = Callable):
+        super(ViewSettingsDialog, self).__init__()
+        self.user_data = user_data
+        self.session = user_data.session # 
+        self.viewer = viewer
+        self.viewsettings = vs # Dictionary of viewsettings. E.g., for each chn,  '[chn] gamma' : 0.5, '[chn] whitein':255, '[chn] blackin':0
+        self.original_viewsettings = copy.deepcopy(vs)
+        self.adjustment_function = adjustment_function
+        self.last_adjustment = None
+        self.target_override = False # Used in restore function to one by one trigger the appropriate fluors to re-adjust
+        self.sliders = {}
+        self.spin_boxes = {}
+
+        # Arrange title bar buttons
+        self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowTitleHint,False)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint,False)
+        self.setWindowTitle('Edit view settings')
+        self.setWindowIcon(QIcon('data/mghiconwhite.png')) 
+
+
+        # Create gamma and contrast sliders for each fluor in the user data
+        #TODO Consider importing a custom double-slider to get two values at once. Would make this much easier.
+        # Not built in though, but there's a class posted somewhere on StackOverflow. I forget why I didn't try to do this already
+        self.vsBox = QGroupBox()
+        self.vsLayout = QGridLayout()
+        row = -1 ; col=0
+        for fluor, setting in product(user_data.channels, ("gamma","black-in", "white-in")):
+            d = QDoubleSpinBox(self) 
+            match setting:
+                case "gamma":
+                    s = DoubleSlider(0.01,1)
+                    d.setRange(0.01,1)
+                    d.setSingleStep(0.01)
+                    row+=1
+                    col=0
+                    l = QLabel(fluor)
+                    l.setFont(user_data.fonts.medium)
+                    l.setAlignment(Qt.AlignRight)
+                    l.setStyleSheet(f"QLabel{{ background-color : white; \
+                                              font-size: 18pt; \
+                                              color: {self.user_data.channelColors[fluor]} ; \
+                                              }}")
+                    self.vsLayout.addWidget(l, row, col)
+                    col+=1
+                case "black-in" | "white-in":
+                    s = DoubleSlider(0,255)
+                    d.setRange(0,255)
+            sname = f'{fluor} {setting}'
+            
+            self.spin_boxes[sname] = d
+            d.setValue(self.viewsettings[sname])
+            d.setObjectName(sname)
+            d.valueChanged.connect(self.spin_edited)
+            self.sliders[sname] = s
+            s.setValue(self.viewsettings[sname])
+            s.setObjectName(sname)
+            s.valueChanged.connect(self.slider_moved)
+            s.setOrientation(Qt.Horizontal)
+            s.setStyleSheet(
+                f"QSlider::groove:horizontal {{background-color : {self.user_data.channelColors[fluor]};\
+                                                border: 1px solid #999999 ; \
+                                                height: 20px; \
+                                                margin: 0px;}}\
+                QSlider::handle:horizontal{{background-color: white; \
+                                            border: 2px solid black; \
+                                            border-radius: 4px; \
+                                            border-color: black; \
+                                            height:20px; \
+                                            width: 14px }}")
+            # QSlider().set
+            self.vsLayout.addWidget(QLabel(setting.title()), row, col)
+            self.vsLayout.addWidget(s, row, col+1) 
+            self.vsLayout.addWidget(d, row, col+2) 
+            col+=3
+        
+        # Create buttons and layout
+        self.buttonBox = QGroupBox()
+        self.change_vs_btn = QPushButton("Change view settings")
+        self.restore_button = QPushButton("Undo changes")
+        self.change_vs_btn.pressed.connect(self.change_viewsettings)
+        self.restore_button.pressed.connect(lambda: self.wipe_viewsettings('Restore'))
+
+            # Reset viewsettings button
+        self.reset_button = QPushButton("Reload defaults")
+        self.reset_button.pressed.connect(lambda: self.wipe_viewsettings('Reset'))
+        # self.reset_vs.setFont(self.user_data.fonts.button_small)
+
+        self.buttonLayout = QGridLayout()
+        self.buttonLayout.addWidget(self.change_vs_btn, 0,0)
+        self.buttonLayout.addWidget(self.restore_button, 0,1)
+        self.buttonLayout.addWidget(self.reset_button, 1,1)
+
+
+        # Set Group layouts and main layout
+        self.vsBox.setLayout(self.vsLayout)
+        self.buttonBox.setLayout(self.buttonLayout)
+        self.layout = QGridLayout()
+        self.layout.addWidget(self.vsBox, 0,0)
+        self.layout.addWidget(self.buttonBox, 0,1)
+        self.layout.setSizeConstraint(QLayout.SetFixedSize) # Allows window to resize to shrink when widgets are removed
+        self.setLayout(self.layout)    
+        # Display and finish up
+        self.show()
+    
+    '''Called upon widget value change. Couldn't get it to update just the value changed, so this just overwrites every value.
+        There will never be more than 8 fluors so this is not a concern, just bad design.'''
+    def update_settings(self, source_widgets, target_widgets):
+
+        # If there is a value here, the restore button was clicked. Calling function wants to trigger a specific dial to move back
+        if self.target_override:
+            self.change_viewsettings(self.target_override)
+            return None
+        for setting, w in source_widgets.items():
+            spl = setting.split()
+            fluor, key_type = " ".join(spl[:-1]), spl[-1]
+            new, old = w.value(), self.viewsettings[setting]
+            if new != old:
+                target_widgets[setting].setValue(new)
+                self.last_adjustment = setting
+                self.viewsettings[setting] = new
+        self.change_viewsettings(self.last_adjustment)
+        return None
+
+    '''Helper that passes on signal to update function with proper params'''
+    def slider_moved(self):
+        self.update_needed = "Spin"
+        self.update_settings(self.sliders, self.spin_boxes)
+        self.update_needed = False
+
+    '''Helper that passes on signal to update function with proper params'''
+    def spin_edited(self):
+        self.update_needed = "Slider"
+        self.update_settings(self.spin_boxes, self.sliders)
+        self.update_needed = False
+        
+
+    ''' Run function to make visual changes in Napari given user-selected viewsettings'''
+    def change_viewsettings(self, caller_setting = False):
+        self.session.view_settings = self.viewsettings
+        self.adjustment_function(arrange_multichannel = False, viewer = self.viewer, session=self.session, single_setting_change = caller_setting)
+
+    ''' Bring viewsettings back to a previous state. Either original (what was loaded at the start) or
+            to the settings from when the Dialog opened.'''
+    def wipe_viewsettings(self, mode = 'Restore'):
+        template = {'Reset':self.user_data.view_settings, 'Restore':self.original_viewsettings}[mode]
+        self.viewsettings = copy.deepcopy(template)
+        self.session.view_settings = copy.deepcopy(template)
+        for setting, w in self.sliders.items():
+            self.target_override = setting
+            w.setValue(template[setting])
+            self.spin_boxes[setting].setValue(template[setting])
+        self.target_override = False
+
+''' Adjust the style of clickable QPushButtons that change the active channels of the image. These buttons act
+    as on/off toggles for these channels and also allow for an easy way for the user to see which are enabled.'''
+def make_fluor_toggleButton_stylesheet(clr: str = "gray" , toggled: bool = False, absorption = False):
+    def _clamp(val, minimum=0, maximum=255):
+        if val < minimum:
+            return minimum
+        if val > maximum:
+            return maximum
+        return int(val)
+
+    def _colorscale(hexstr, scalefactor):
+        ''' https://thadeusb.com/weblog/2010/10/10/python_scale_hex_color/
+        Scales a hex string by ``scalefactor``. Returns scaled hex string.
+
+        To darken the color, use a float value between 0 and 1.
+        To brighten the color, use a float value greater than 1.
+        '''
+
+        hexstr = hexstr.strip('#')
+
+        if scalefactor < 0 or len(hexstr) != 6:
+            return hexstr
+
+        r, g, b = int(hexstr[:2], 16), int(hexstr[2:4], 16), int(hexstr[4:], 16)
+
+        r = _clamp(r * scalefactor)
+        g = _clamp(g * scalefactor)
+        b = _clamp(b * scalefactor)
+        return "#%02x%02x%02x" % (r, g, b)
+    
+    clr = custom_color_functions.colormap[clr] if clr !="None" else '#b6b6b6'
+    dark_clr = _colorscale(clr, 0.6)
+
+    darkgray = "#333333"
+    if toggled: # Button is 'off'. Should be muted and indicate that the fluor is not being displayed
+        style = f"QPushButton {{background-color: {'white' if absorption else darkgray}; \
+                            border-style: inset; \
+                            border-width: 2px; \
+                            border-radius: 10px; \
+                            border-color: {clr}; \
+                            min-width: 5em; \
+                            padding: 2px;  }} \
+            QPushButton:pressed{{background-color: {clr}; \
+                                border-style: outset; }}"
+    else: # Button is 'on'. should be colored and indicate that the fluor is active
+        style = f"QPushButton {{background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 {clr},stop: 0.4 {clr},  stop: 1 {dark_clr}); \
+                            border-style: outset; \
+                            border-width: 2px; \
+                            border-radius: 10px; \
+                            border-color: {darkgray if absorption else 'white'}; \
+                            min-width: 5em; \
+                            padding: 2px;  }} \
+            QPushButton:pressed{{background-color: {'white' if absorption else darkgray}; \
+                                border-style: inset; }}"
+    return style
+

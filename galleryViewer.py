@@ -44,7 +44,7 @@ from datetime import datetime
 
 # These files were created as part of the GalleryViewer Project
 import store_and_load
-from custom_qt_classes import StatusCombo
+from custom_qt_classes import StatusCombo, ViewSettingsDialog, make_fluor_toggleButton_stylesheet
 # from initial_UI import VERSION_NUMBER
 
 
@@ -77,7 +77,6 @@ userInfo = store_and_load.loadObject('data/presets')
 SESSION = userInfo.session # will store non-persistent global variables that need to be accessible
 
 VIEWER = None
-ADJUSTMENT_SETTINGS={"DAPI gamma": 0.5}; ORIGINAL_ADJUSTMENT_SETTINGS = {} 
 SAVED_INTENSITIES={}; 
 RAW_PYRAMID=None
 SESSION.widget_dictionary = {}
@@ -161,109 +160,126 @@ def hide_invisible_multichannel_fluors():
     mbc = [ [[x[0][0], x[0][1]-hdist], [x[1][0], x[1][1]-hdist]]  for x in mbc]
     VIEWER.layers[f"Multichannel Nuclei Boxes"].data = mbc
 
-def restore_viewsettings_from_cache(arrange_multichannel = False):
-
+def restore_viewsettings_from_cache(arrange_multichannel = False, viewer = VIEWER, session=SESSION, single_setting_change = False):
+    vs = SESSION.view_settings
+    '''Change settings for all modes, whether or not they are displayed right now.'''
+    def _modify_images_in_modes(f, setting = "both"):
+        for mode in ("Gallery ", "Multichannel ", "Context "):
+            match setting:
+                case "both":
+                    adjust_composite_gamma(viewer.layers[mode+f],vs[f+" gamma"])
+                    adjust_composite_limits(viewer.layers[mode+f], (vs[f+" black-in"],vs[f+" white-in"]))
+                case "gamma":
+                    adjust_composite_gamma(viewer.layers[mode+f],vs[f+" gamma"])
+                case "white-in" | "black-in":
+                    adjust_composite_limits(viewer.layers[mode+f], (vs[f+" black-in"],vs[f+" white-in"]))
+                case _:
+                    raise ValueError("Bad input to restore_viewsettings_from_cache - _modify_images_in_modes")
+               
+    if single_setting_change:
+        spl = single_setting_change.split()
+        caller_fluor, s = " ".join(spl[:-1]), spl[-1]
+        _modify_images_in_modes(caller_fluor,s)
+        return True
     # Cut out the multichannel fluors that are not visible
     if arrange_multichannel:
         hide_invisible_multichannel_fluors()
 
     # Make everything silent
-    for layer in VIEWER.layers:
+    for layer in viewer.layers:
         layer.visible = False
+    # Toggle back on overlays if applicable
+    if session.mode != "Context":
+        # viewer.layers[f"{session.mode} Status Edges"].visible = session.status_layer_vis
+        viewer.layers[f"{session.mode} Status Squares"].visible = session.status_layer_vis
+        viewer.layers[f"{session.mode} Status Numbers"].visible = session.status_layer_vis
+        # viewer.layers[f"{session.mode} Absorption"].visible = session.absorption_mode
+    try:
+        if session.mode == "Context":
+            show_boxes = True if session.nuclei_boxes_vis["Context"] =="Show" else False
+        else:
+            show_boxes = session.nuclei_boxes_vis["Gallery/Multichannel"]
+        viewer.layers[f"{session.mode} Nuclei Boxes"].visible = show_boxes
+    except KeyError:
+        pass
+
+
+    print(f"Mode is {session.mode} and active fluors are {userInfo.active_channels}")
+    # Loop through channels and adjust
     for fluor in userInfo.channels:
         if fluor == 'Composite':
             continue
         # Turn on appropriate layers. Turn on all if "Composite" button is checked
         if "Composite" in userInfo.active_channels or fluor in userInfo.active_channels: 
-            VIEWER.layers[f"{SESSION.mode} {fluor}"].visible = True
-        # Now change settings for both, whether or not they are displayed right now.
-        adjust_composite_gamma(VIEWER.layers["Gallery "+fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
-        adjust_composite_gamma(VIEWER.layers["Multichannel "+fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
-        adjust_composite_gamma(VIEWER.layers["Context "+fluor],ADJUSTMENT_SETTINGS[fluor+" gamma"])
-        # fix white in / black in
-        adjust_composite_limits(VIEWER.layers["Gallery "+fluor],
-                (ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]))
-        adjust_composite_limits(VIEWER.layers["Multichannel "+fluor],
-                (ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]))
-        adjust_composite_limits(VIEWER.layers["Context "+fluor],
-                (ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]))
+            viewer.layers[f"{session.mode} {fluor}"].visible = True
+        # call worker func
+        _modify_images_in_modes(fluor)
 
-    if SESSION.mode != "Context":
-        # VIEWER.layers[f"{SESSION.mode} Status Edges"].visible = SESSION.status_layer_vis
-        VIEWER.layers[f"{SESSION.mode} Status Squares"].visible = SESSION.status_layer_vis
-        VIEWER.layers[f"{SESSION.mode} Status Numbers"].visible = SESSION.status_layer_vis
-
-
-        # VIEWER.layers[f"{SESSION.mode} Absorption"].visible = SESSION.absorption_mode
-    try:
-        if SESSION.mode == "Context":
-            show_boxes = True if SESSION.nuclei_boxes_vis["Context"] =="Show" else False
-        else:
-            show_boxes = SESSION.nuclei_boxes_vis["Gallery/Multichannel"]
-        VIEWER.layers[f"{SESSION.mode} Nuclei Boxes"].visible = show_boxes
-    except KeyError:
-        pass
     
 ## --- Bottom bar functions and GUI elements 
 
-@magicgui(auto_call=True,
-        Gamma={"widget_type": "FloatSlider", "max":1.0, "min":0.01},
-        layout = 'horizontal')
-def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData: 
-    def _update_dictionary(name, val):
-        global ADJUSTMENT_SETTINGS
-        ADJUSTMENT_SETTINGS[name+' gamma'] = val
-    for fluor in userInfo.active_channels:
-        if fluor == 'Composite':
-            continue
-        _update_dictionary(fluor,Gamma)
-        for m in ["Gallery", "Multichannel", "Context"]:
-            # VIEWER.layers[f"{m} "+fluor].visible = True
-            adjust_composite_gamma(VIEWER.layers[f"{m} "+fluor],Gamma)
-            # if ("Composite" not in userInfo.active_channels or fluor not in userInfo.active_channels) or SESSION.mode !=m: 
-            #     VIEWER.layers[f"{m} "+fluor].visible = False
-    VIEWER.window._qt_viewer.setFocus()
-    SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
+''' DEPRECATED -- replaced by a button that summons a ViewSettingsDialog'''
+# @magicgui(auto_call=True,
+#         Gamma={"widget_type": "FloatSlider", "max":1.0, "min":0.01},
+#         layout = 'horizontal')
+# def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData: 
+#     def _update_dictionary(name, val):
+#         SESSION.view_settings[name+' gamma'] = val
+#     for fluor in userInfo.active_channels:
+#         if fluor == 'Composite':
+#             continue
+#         _update_dictionary(fluor,Gamma)
+#         for m in ["Gallery", "Multichannel", "Context"]:
+#             # VIEWER.layers[f"{m} "+fluor].visible = True
+#             adjust_composite_gamma(VIEWER.layers[f"{m} "+fluor],Gamma)
+#             # if ("Composite" not in userInfo.active_channels or fluor not in userInfo.active_channels) or SESSION.mode !=m: 
+#             #     VIEWER.layers[f"{m} "+fluor].visible = False
+#     VIEWER.window._qt_viewer.setFocus()
+#     SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
 
-@magicgui(auto_call=True,
-        white_in={"widget_type": "FloatSlider", "max":255,"min":1.0, "label": "White-in"},
-        layout = 'horizontal')
-def adjust_whitein(white_in: float = 255) -> ImageData:
-    def _update_dictionary(name, val):
-        global ADJUSTMENT_SETTINGS
-        ADJUSTMENT_SETTINGS[name+' white-in'] = val
-    for fluor in userInfo.active_channels:
-        if fluor == 'Composite':
-            continue
-        _update_dictionary(fluor,white_in)
-        for m in ["Gallery", "Multichannel", "Context"]:
-            adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [ADJUSTMENT_SETTINGS[fluor+" black-in"],white_in])
-    VIEWER.window._qt_viewer.setFocus()
-    SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
+''' DEPRECATED -- replaced by a button that summons a ViewSettingsDialog'''
+# # @magicgui(auto_call=True,
+# #         white_in={"widget_type": "FloatSlider", "max":255,"min":1.0, "label": "White-in"},
+# #         layout = 'horizontal')
+# def adjust_whitein(white_in: float = 255) -> ImageData:
+#     def _update_dictionary(name, val):
+#         SESSION.view_settings[name+' white-in'] = val
+#     for fluor in userInfo.active_channels:
+#         if fluor == 'Composite':
+#             continue
+#         _update_dictionary(fluor,white_in)
+#         for m in ["Gallery", "Multichannel", "Context"]:
+#             adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [SESSION.view_settings[fluor+" black-in"],white_in])
+#     VIEWER.window._qt_viewer.setFocus()
+#     SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
 
-
-@magicgui(auto_call=True,
-        black_in={"widget_type": "FloatSlider", "max":255, "label":"Black-in"},
-        layout = 'horizontal')
-def adjust_blackin(black_in: float = 0) -> ImageData:
-    def _update_dictionary(name, val):
-        global ADJUSTMENT_SETTINGS
-        ADJUSTMENT_SETTINGS[name+' black-in'] = val
+''' DEPRECATED -- replaced by a button that summons a ViewSettingsDialog'''
+# @magicgui(auto_call=True,
+#         black_in={"widget_type": "FloatSlider", "max":255, "label":"Black-in"},
+#         layout = 'horizontal')
+# def adjust_blackin(black_in: float = 0) -> ImageData:
+#     def _update_dictionary(name, val):
+#         SESSION.view_settings[name+' black-in'] = val
     
-    for fluor in userInfo.active_channels:
-        if fluor == 'Composite':
-            continue
-        _update_dictionary(fluor,black_in)
-        for m in ["Gallery", "Multichannel", "Context"]:
-            adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [black_in,ADJUSTMENT_SETTINGS[fluor+" white-in"]])
-    VIEWER.window._qt_viewer.setFocus()
-    SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
+#     for fluor in userInfo.active_channels:
+#         if fluor == 'Composite':
+#             continue
+#         _update_dictionary(fluor,black_in)
+#         for m in ["Gallery", "Multichannel", "Context"]:
+#             adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [black_in,SESSION.view_settings[fluor+" white-in"]])
+#     VIEWER.window._qt_viewer.setFocus()
+#     SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
 
-def reset_viewsettings():
-    global ADJUSTMENT_SETTINGS
-    ADJUSTMENT_SETTINGS = copy.copy(ORIGINAL_ADJUSTMENT_SETTINGS)
-    restore_viewsettings_from_cache(arrange_multichannel=True if SESSION.mode == 'Multichannel' else False)
-    SESSION.widget_dictionary["reset_vs_button"].setDisabled(True)
+def open_vs_popup():
+    if SESSION.VSDialog is None:
+        vs = ViewSettingsDialog(userInfo, VIEWER, SESSION.view_settings, restore_viewsettings_from_cache) # TODO make a function here that works
+        SESSION.VSDialog = vs
+        vs.exec()
+        SESSION.VSDialog = None
+    else:
+        SESSION.VSDialog.setWindowState(SESSION.VSDialog.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)
+        # this will activate the window
+        SESSION.VSDialog.activateWindow()
 
 def toggle_absorption():
     #TODO make absorption work for context more?
@@ -315,25 +331,30 @@ def toggle_absorption():
         pass
         # change_statuslayer_color(copy.copy(SESSION.current_cells))
     
-    # Change colors
+    # Change colors and widget styles
+    for toggle in UPDATED_CHECKBOXES:
+        toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[str(toggle.objectName())], toggle.isChecked(), SESSION.absorption_mode))
+        
     newmode = "light" if SESSION.absorption_mode else "dark"
     oldmode = "dark" if SESSION.absorption_mode else "light"
     for name, bg in SESSION.side_dock_groupboxes.items():
         bg.setStyleSheet(open(f"data/docked_group_box_border_{oldmode}.css").read())
     VIEWER.theme = newmode
 
-def tally_checked_widgets():
+def fluor_button_toggled():
     # keep track of visible channels in global list and then toggle layer visibility
     userInfo.active_channels = []
-    for checkbox in UPDATED_CHECKBOXES:
-        check = checkbox.isChecked()
-        checkbox_name = checkbox.objectName()
+    for toggle in UPDATED_CHECKBOXES:
+        print(f"{toggle.objectName()}  is checked? {toggle.isChecked()}")
     # print(f"{checkbox_name} has been clicked and will try to remove from {userInfo.active_channels}")
-        if check:
-            userInfo.active_channels.append(str(checkbox_name))
-
+        if not toggle.isChecked():
+            userInfo.active_channels.append(str(toggle.objectName()))
+        toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[str(toggle.objectName())], toggle.isChecked(), SESSION.absorption_mode))
+        
+        
+    print(userInfo.active_channels)
     # Make visible all channels according to rules
-    restore_viewsettings_from_cache(arrange_multichannel=True if SESSION.mode == "Multichannel" else False)
+    restore_viewsettings_from_cache(arrange_multichannel=True if SESSION.mode == "Multichannel" else False, viewer = VIEWER, session=SESSION,)
     # for fluor in userInfo.channels:
     #     # Different set of layers if we are in context mode
     #     lname = f'{SESSION.mode} {fluor}'
@@ -349,12 +370,12 @@ def tally_checked_widgets():
 def check_creator2(list_of_names):
     all_boxes = []
     for name in list_of_names:
-        cb = QCheckBox(name); cb.setObjectName(name)
-        cb.setChecked(True)
-        # cb.setStyleSheet("QCheckBox { color: blue }")
-        all_boxes.append(cb)
+        tb = QPushButton(name); tb.setObjectName(name)
+        tb.setCheckable(True)
+        tb.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name]) )
+        all_boxes.append(tb)
         # f = dynamic_checkbox_creator()
-        cb.toggled.connect(tally_checked_widgets)
+        tb.clicked.connect(fluor_button_toggled)
     return all_boxes
 
 # all_boxes = check_creator2(userInfo.channels)
@@ -488,8 +509,9 @@ def toggle_session_mode(target_mode, from_mouse: bool):
         toggle_nuclei_boxes(radio, True, 
             [target_cell_info["center_x"],target_cell_info["center_y"]])
 
+        print(f"target mode is {target_mode} but actual mode is {SESSION.mode}")
         # Turn on / off the correct layers
-        restore_viewsettings_from_cache(arrange_multichannel=True if target_mode=="Multichannel" else False)
+        restore_viewsettings_from_cache(arrange_multichannel=True if target_mode=="Multichannel" else False, viewer = VIEWER, session=SESSION,)
 
         if from_mouse: # Go get pixel values now that proper image layers are visible.
             # Not working right now but it's a minor issue #TODO
@@ -560,7 +582,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
 
         SESSION.mode = target_mode
         # Change visibilities of the correct layers
-        restore_viewsettings_from_cache(arrange_multichannel=True if target_mode =="Multichannel" else False)
+        restore_viewsettings_from_cache(arrange_multichannel=True if target_mode =="Multichannel" else False, viewer = VIEWER, session=SESSION,)
         VIEWER.window._qt_viewer.setFocus()
         return True
 
@@ -628,7 +650,7 @@ def show_next_cell_group():
     # Perform adjustments before exiting function
     #TODO
     # Only checked fluors will be visible
-    restore_viewsettings_from_cache(arrange_multichannel= True if SESSION.mode == "Multichannel" else False) 
+    restore_viewsettings_from_cache(arrange_multichannel= True if SESSION.mode == "Multichannel" else False, viewer = VIEWER, session=SESSION,) 
     set_viewer_to_neutral_zoom(VIEWER, reset_session=True) # Fix zoomed out issue
     VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
     VIEWER.window._qt_viewer.setFocus()
@@ -1071,8 +1093,8 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
         # Passing gamma is currently bugged. Suggested change is to remove the validation in the _on_gamma_change 
         #   (now located at napari/_vispy/layers/image.py
         # See https://github.com/napari/napari/issues/1866
-        fluor_gamma = ADJUSTMENT_SETTINGS[fluor+" gamma"]
-        fluor_contrast = [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]]
+        fluor_gamma = SESSION.view_settings[fluor+" gamma"]
+        fluor_contrast = [SESSION.view_settings[fluor+" black-in"],SESSION.view_settings[fluor+" white-in"]]
         print(f"Adding layers now. fluor is {fluor}, view settings are gamma {fluor_gamma}, contrast {fluor_contrast}")
         if fluor == 'Composite':
             continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
@@ -1872,11 +1894,6 @@ def attach_functions_to_viewer(viewer):
     @catch_exceptions_to_log_file("runtime_toggle-absorption")
     def trigger_absorption(viewer):
         toggle_absorption()
-    
-    @viewer.bind_key('r')
-    @catch_exceptions_to_log_file("runtime_reset-viewsettings")
-    def call_reset_viewsettings(viewer):
-        reset_viewsettings()
 
     @viewer.bind_key('i')
     @catch_exceptions_to_log_file("runtime_switch-interpolation")
@@ -1913,7 +1930,7 @@ def attach_functions_to_viewer(viewer):
 @catch_exceptions_to_log_file("runtime_save-page-image")
 def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard :bool = True, separate = False, borders="Black borders"):
 
-    restore_viewsettings_from_cache(arrange_multichannel=True if mode_choice == 'Multichannel' else False) # Resets visible layers
+    restore_viewsettings_from_cache(arrange_multichannel=True if mode_choice == 'Multichannel' else False, viewer = VIEWER, session=SESSION,) # Resets visible layers
     # Set only chosen mode's layers visible so they will be processed by the blending function
     page_shape = None
     for layer in viewer.layers:
@@ -1970,7 +1987,7 @@ def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard
         _slice_page_image(viewer, mode_choice, blended)
     else:
         _send_image_to_user(viewer, blended, clipboard)
-    restore_viewsettings_from_cache()
+    restore_viewsettings_from_cache(viewer = VIEWER, session=SESSION,)
     viewer.window._qt_viewer.setFocus() # restore focus
     # Done!
 
@@ -2016,8 +2033,8 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
             continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
         
 
-        fluor_gamma = 2-(2*ADJUSTMENT_SETTINGS[fluor+" gamma"]) + 0.001
-        fluor_contrast = [ADJUSTMENT_SETTINGS[fluor+" black-in"],ADJUSTMENT_SETTINGS[fluor+" white-in"]]
+        fluor_gamma = 2-(2*SESSION.view_settings[fluor+" gamma"]) + 0.001
+        fluor_contrast = [SESSION.view_settings[fluor+" black-in"],SESSION.view_settings[fluor+" white-in"]]
         position = userInfo.channelOrder[fluor]
         if SESSION.mode in ("Gallery","Context"):
             offset = userInfo.imageSize // 2
@@ -2087,7 +2104,7 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
     viewer.layers.remove_selected()
     viewer.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
     # Resets visible layers 
-    restore_viewsettings_from_cache()
+    restore_viewsettings_from_cache(viewer = VIEWER, session=SESSION,)
     _send_image_to_user(viewer, blended, clipboard)
     viewer.window._qt_viewer.setFocus() # restore focus
     # Done!
@@ -2536,6 +2553,7 @@ def chn_key_wrapper(viewer):
                 widget_obj.setChecked(False)
             else:
                 widget_obj.setChecked(True)
+            fluor_button_toggled() 
             viewer.window._qt_viewer.setFocus()
         return toggle_channel_visibility
 
@@ -2547,10 +2565,7 @@ def chn_key_wrapper(viewer):
 def set_initial_adjustment_parameters(viewsettings):
     for key in list(viewsettings.keys()):
         # print(f'\n key is {key}')
-        ADJUSTMENT_SETTINGS[key] = viewsettings[key]
-    global ORIGINAL_ADJUSTMENT_SETTINGS
-    ORIGINAL_ADJUSTMENT_SETTINGS = copy.copy(ADJUSTMENT_SETTINGS) # save a snapshot in case things get messed up
-
+        SESSION.view_settings[key] = viewsettings[key]
     return True
 
 def record_notes_and_intensities(cell_row, intensity_col_names):
@@ -2811,9 +2826,10 @@ def replace_note(cell_widget, note_widget):
 
 ''' Reset globals and proceed to main '''
 def GUI_execute(preprocess_class):
+    
     global userInfo, qptiff, PAGE_SIZE, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
     global  OBJECT_DATA_PATH, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
-    global ANNOTATIONS_PRESENT, ORIGINAL_ADJUSTMENT_SETTINGS, SESSION
+    global ANNOTATIONS_PRESENT, SESSION
     userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
     SESSION = userInfo.session
 
@@ -3335,18 +3351,18 @@ def main(preprocess_class = None):
     plots_dock_layout.addWidget(hist_group)
     plots_dock_layout.addWidget(violin_group)
 
-    # Reset viewsettings button
-    reset_vs = QPushButton("Restore defaults")
-    reset_vs.pressed.connect(reset_viewsettings)
-    reset_vs.setFont(QFont("Calibri", 6, weight=QFont.Normal))
-    SESSION.widget_dictionary["reset_vs_button"] = reset_vs
-    reset_vs.setDisabled(True)
+
+
+    # Open viewsettings popout
+    open_vs = QPushButton("Change view settings")
+    open_vs.pressed.connect(open_vs_popup)
+    open_vs.setFont(QFont("Calibri", 6, weight=QFont.Normal))
+    SESSION.widget_dictionary["open_vs_button"] = open_vs
 
     # Create bottom bar widgets
-    viewer.window.add_dock_widget([reset_vs,adjust_gamma_widget,adjust_whitein,adjust_blackin], area = 'bottom')
-
-    # viewer.window.add_dock_widget(QLabel("TEST!"), name ="User tools 2",area="right", tabify = True)
-
+    for box in check_creator2(userInfo.active_channels):
+        UPDATED_CHECKBOXES.append(box)
+    viewer.window.add_dock_widget(UPDATED_CHECKBOXES + [open_vs],area='bottom')
     # right_dock.adjustSize()
 
     # print(f'\n {dir()}') # prints out the namespace variables 
@@ -3408,13 +3424,7 @@ def main(preprocess_class = None):
     # print("My active channels are\n")
     # print(userInfo.active_channels)
     # all_boxes = check_creator2(userInfo.active_channels)
-        
     
-
-    for box in check_creator2(userInfo.active_channels):
-        box.setStyleSheet(f"QCheckBox {{ color: {userInfo.channelColors[box.objectName()].replace('blue','#0462d4')} }}")
-        UPDATED_CHECKBOXES.append(box)
-    viewer.window.add_dock_widget(UPDATED_CHECKBOXES,area='bottom')
 
     #TODO set custom theme?
     VIEWER.theme = "dark"
@@ -3440,7 +3450,7 @@ def main(preprocess_class = None):
     chn_key_wrapper(viewer)
     if preprocess_class is not None: preprocess_class.close() # close other window
     # Set adjustment settings to their default now that all images are loaded
-    restore_viewsettings_from_cache()
+    restore_viewsettings_from_cache(False, viewer, userInfo.session)
     viewer.layers.selection.active = viewer.layers[f"Gallery {userInfo.channels[0]}"]  
 
 
@@ -3471,4 +3481,3 @@ def main(preprocess_class = None):
 # Main Probably doesn't work as is right now. Will need to instantiate a new user class to run everything
 if __name__ == '__main__':
     main()
-# napari.Viewer.tooltip

@@ -99,11 +99,14 @@ class sessionVariables:
         self.multichannel_page_images = {} # {"DAPI" : np.Array ...}
         self.multichannel_nuclei_box_coords = None
         self.page = 1
+        self.view_settings = {}
+        self.VSDialog = None
 
 @dataclass
 class ViewerFonts:
     """Hold various fonts to be used in the GUI and Viewer sidebar widget area"""
     small :QFont = QFont("Verdana", 6, weight=QFont.Normal)
+    medium :QFont = QFont("Calibri", 15, weight=QFont.Normal)
     button_small = QFont("Calibri", 6, weight=QFont.Normal)
 
 
@@ -135,7 +138,7 @@ class userPresets:
         self.statuses_hex = copy.copy(STATUSES_HEX) # Dict of statuses and HEX codes of color mappings, e.g. {'status A':'#ff0000'}
         self.statuses_rgba = {key: ImageColor.getcolor(val, "RGBA") for key,val in self.statuses_hex.items()} # Dict of statuses and RGBA tuples color mappings, e.g. {'status A':(255,0,0,255)}
         self.available_statuses_keybinds = ["q","w","e","t","y","u","o","p","d","f","g","j","l","z","x",",",".","/","[","]",";","'"]
-        self.view_settings = self.remake_viewsettings(pass_value=True) # Dict of view settings. Can change after reading from file. ex: {fluor A gamma: 0.5}
+        self.view_settings = self.remake_viewsettings(pass_value=True) # Dict of view settings. Will NOT change after reading from file. ex: {fluor A gamma: 0.5}
         self.view_settings_path = '' # Path to .viewsettings file. The file is a type of HALO export and will use XML formatting
         self.phenotype_mappings = {} # Dict of user selected phenotypes and their status mappings. Cells in the data of these phenotypes will be kept for viewing and assigned the given status 
         self.phenotype_mappings_label = '<u>Phenotypes</u><br>All' # String representation of the above info for displaying in a QLabel
