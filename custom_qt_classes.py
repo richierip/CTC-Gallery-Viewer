@@ -1,12 +1,13 @@
 
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QIcon, QColor, QLinearGradient
-from qtpy.QtWidgets import (QApplication, QComboBox, QDialog, QGridLayout, QLayout, QSlider, QDoubleSpinBox,
+from qtpy.QtWidgets import (QApplication, QComboBox, QDialog, QGridLayout, QLayout, QSlider, QDoubleSpinBox, QFileDialog,
                             QRadioButton, QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QHBoxLayout)
 
 from store_and_load import sessionVariables, userPresets
 from napari import Viewer
 import os
+import pandas as pd
 # import warnings
 # warnings.filterwarnings("ignore")
 # warnings.catch_warnings
@@ -18,7 +19,7 @@ from random import choice
 from typing import Callable
 from itertools import product
 
-VERSION_NUMBER = '1.3'
+VERSION_NUMBER = '1.3.5'
 FONT_SIZE = 12
 
 COLOR_TO_RGB = {'gray': '(170,170,170, 255)', 'purple':'(160,32,240, 255)', 'blue':'(100,100,255, 255)',
@@ -489,9 +490,7 @@ class ViewSettingsDialog(QDialog):
         
         # Create buttons and layout
         self.buttonBox = QGroupBox()
-        self.change_vs_btn = QPushButton("Change view settings")
         self.restore_button = QPushButton("Undo changes")
-        self.change_vs_btn.pressed.connect(self.change_viewsettings)
         self.restore_button.pressed.connect(lambda: self.wipe_viewsettings('Restore'))
 
             # Reset viewsettings button
@@ -499,11 +498,21 @@ class ViewSettingsDialog(QDialog):
         self.reset_button.pressed.connect(lambda: self.wipe_viewsettings('Reset'))
         # self.reset_vs.setFont(self.user_data.fonts.button_small)
 
-        self.buttonLayout = QGridLayout()
-        self.buttonLayout.addWidget(self.change_vs_btn, 0,0)
-        self.buttonLayout.addWidget(self.restore_button, 0,1)
-        self.buttonLayout.addWidget(self.reset_button, 1,1)
+        self.export_button = QPushButton("Export viewsettings")
+        self.export_button.pressed.connect(lambda: self.export_viewsettings())
 
+        self.import_button = QPushButton("Import viewsettings")
+        self.import_button.pressed.connect(lambda: self.import_viewsettings())
+
+        self.buttonLayout = QGridLayout()
+        self.buttonLayout.addWidget(self.restore_button, 0,0)
+        self.buttonLayout.addWidget(self.reset_button, 0,1)
+        self.buttonLayout.addWidget(self.import_button, 1,0)
+        self.buttonLayout.addWidget(self.export_button, 1,1)
+
+        self.status_label = QLabel()
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setFont(self.user_data.fonts.medium)
 
         # Set Group layouts and main layout
         self.vsBox.setLayout(self.vsLayout)
@@ -511,6 +520,7 @@ class ViewSettingsDialog(QDialog):
         self.layout = QGridLayout()
         self.layout.addWidget(self.vsBox, 0,0)
         self.layout.addWidget(self.buttonBox, 0,1)
+        self.layout.addWidget(self.status_label,1,0,1,2)
         self.layout.setSizeConstraint(QLayout.SetFixedSize) # Allows window to resize to shrink when widgets are removed
         self.setLayout(self.layout)    
         # Display and finish up
@@ -547,7 +557,6 @@ class ViewSettingsDialog(QDialog):
         self.update_settings(self.spin_boxes, self.sliders)
         self.update_needed = False
         
-
     ''' Run function to make visual changes in Napari given user-selected viewsettings'''
     def change_viewsettings(self, caller_setting = False):
         self.session.view_settings = self.viewsettings
@@ -564,6 +573,148 @@ class ViewSettingsDialog(QDialog):
             w.setValue(template[setting])
             self.spin_boxes[setting].setValue(template[setting])
         self.target_override = False
+    
+    ''' Write a HALO-compatible viewsettings file to disk. Calls a worker function in the user class'''
+    def export_viewsettings(self):
+        parent_folder = self.user_data.last_image_save_folder 
+        file_name, _ = QFileDialog.getSaveFileName(None,"Export viewsettings",parent_folder,"VIEWSETTINGS file (*.viewsettings)")
+        self.user_data.write_view_settings(file_name)
+        self.status_label.setText('<font color="#4c9b8f">Export successful</font>')
+    
+    def import_viewsettings(self):
+        import lxml
+        try:
+            parent_folder = self.user_data.last_image_save_folder
+            file_name, _ = QFileDialog.getOpenFileName(None,"Import viewsettings",parent_folder,"VIEWSETTINGS file (*.viewsettings)")
+            df = pd.read_xml(file_name)
+            self.user_data.transfer_view_settings(df)
+            self.user_data.imported_view_settings = df
+            self.wipe_viewsettings(mode="Reset")
+            self.change_viewsettings()
+            self.status_label.setText('<font color="#4c9b8f">Import successful</font>')
+
+        except lxml.etree.XMLSyntaxError as e:
+                print("xml")
+                # self._append_status_br('<font color="#ffa000"> Unable to read .viewsettings file, will use defaults instead</font>')  
+                # self._log_problem(e, error_type= 'viewsettings-parse-issue')
+                # self.setWidgetColorBackground(self.viewSettingsEntry, "#4c9b8f")
+                # QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.viewSettingsEntry, "#ffffff"))
+                self.status_label.setText('<font color="#bd4545">Import error: bad XML syntax in viewsettings file</font>')
+        except Exception as e:
+                print("other")
+                # self._append_status_br('<font color="#ffa000"> Unable to read .viewsettings file, will use defaults instead</font>')  
+                # self._log_problem(e, error_type= 'unspecified-viewsettings-issue')
+                # self.setWidgetColorBackground(self.viewSettingsEntry, "#4c9b8f")
+                # QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.viewSettingsEntry, "#ffffff"))
+                self.status_label.setText('<font color ="#bd4545">Import error: unknown</font>')
+        
+
+#TODO
+'''Used to prompt the user for a selection of a color. Should hold every color in a reference dictionary, 
+    but only show maybe 10-15 at a time. Some CSS needed to make it feel more responsive. '''
+class ColorfulComboBox(QComboBox):
+    def __init__(self, parent, color_dict: dict, selection:str = 'Gray'):
+        super(QComboBox, self).__init__(parent)
+        self.color_dict = color_dict
+        self.selection = selection # Which color will be on top
+    
+    def create_func(colorWidget):
+        def set_color_index(index):
+            # return None
+            # for colorWidget in self.myColors:
+            if index ==0: # gray
+                colorWidget.setStyleSheet(f"selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif index ==1: # purple
+                colorWidget.setStyleSheet(f"selection-background-color: rgba(160,32,240, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif index ==2: # blue
+                colorWidget.setStyleSheet(f"selection-background-color: rgba(100,100,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif index ==3: # green
+                colorWidget.setStyleSheet(f"selection-background-color: rgba(60,179,113, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif index ==4: # orange
+                colorWidget.setStyleSheet(f"selection-background-color: rgba(255,127,80, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif index ==5: # red
+                colorWidget.setStyleSheet(f"selection-background-color: rgba(215,40,40, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif index ==6: # yellow
+                colorWidget.setStyleSheet(f"selection-background-color: rgba(255,215,0, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif index ==7: # cyan
+                colorWidget.setStyleSheet(f"selection-background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            elif index ==8: # pink
+                colorWidget.setStyleSheet(f"selection-background-color: rgba(255,105,180, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+            
+            # colorWidget.setStyleSheet(f"color: {colorWidget.currentText()}; font-size: {FONT_SIZE}pt;")
+        return set_color_index 
+        # Space / time saving way to create 16 widgets and change their parameters
+    
+    
+    row = 0 ; col = 0
+
+    # combo = None
+    # combo.setStyleSheet("combobox-popup: 0;");
+    # combo.setMaxVisibleItems(10)
+    # for pos,button in enumerate(self.mycheckbuttons):
+    #     colorComboName = button.objectName() + "_colors"
+    #     exec(f'{colorComboName} = QComboBox()')
+    #     colored_items = [f'<font color="{item}">{item}</font>' for item in store_and_load.CELL_COLORS]
+    #     exec(f'{colorComboName}.addItems(store_and_load.CELL_COLORS)')
+    #     exec(f'{colorComboName}.setCurrentText("{self.userInfo.channelColors[button.objectName().replace("_"," ")]}")')
+
+    #     # exec(f'{colorComboName}.setItemData(0,QColor("red"),Qt.ForegroundRole)')
+    #     # test = QComboBox()
+    #     # test.setItemData(0,value=QColor('red'))
+
+    #     # colorWidget.setItemData(0,QColor("red"),Qt.BackgroundRole)
+
+    #     exec(f'{colorComboName}.setItemData(1,QColor(100,100,100,0),Qt.BackgroundRole)') # gray
+    #     exec(f'{colorComboName}.setItemData(1,QColor(0,0,0,255),Qt.ForegroundRole)')
+    #     exec(f'{colorComboName}.setItemData(1,QColor(160,32,240,0),Qt.BackgroundRole)') # purple
+    #     exec(f'{colorComboName}.setItemData(1,QColor(0,0,0,255),Qt.ForegroundRole)')
+    #     exec(f'{colorComboName}.setItemData(2,QColor(20,20,255,0),Qt.BackgroundRole)') # blue
+    #     exec(f'{colorComboName}.setItemData(2,QColor(0,0,0,255),Qt.ForegroundRole)')
+    #     exec(f'{colorComboName}.setItemData(3,QColor(0,255,0,0),Qt.BackgroundRole)') # green
+    #     exec(f'{colorComboName}.setItemData(3,QColor(0,0,0,255),Qt.ForegroundRole)')
+    #     exec(f'{colorComboName}.setItemData(4,QColor(255,0,0,0),Qt.BackgroundRole)') # red
+    #     exec(f'{colorComboName}.setItemData(4,QColor(0,0,0,255),Qt.ForegroundRole)') 
+    #     exec(f'{colorComboName}.setItemData(5,QColor(255,165,0,0),Qt.BackgroundRole)') # orange
+    #     exec(f'{colorComboName}.setItemData(5,QColor(0,0,0,255),Qt.ForegroundRole)')
+    #     exec(f'{colorComboName}.setItemData(6,QColor(255,255,0,0),Qt.BackgroundRole)')# yellow
+    #     exec(f'{colorComboName}.setItemData(6,QColor(0,0,0,255),Qt.ForegroundRole)')
+    #     exec(f'{colorComboName}.setItemData(7,QColor(0,255,255,0),Qt.BackgroundRole)') # cyan
+    #     exec(f'{colorComboName}.setItemData(7,QColor(0,0,0,255),Qt.ForegroundRole)')
+    #     exec(f'{colorComboName}.setItemData(8,QColor(255,0,255,0),Qt.BackgroundRole)') # pink
+    #     exec(f'{colorComboName}.setItemData(8,QColor(0,0,0,255),Qt.ForegroundRole)')
+
+        
+    #     # exec(f'{colorComboName}.setStyleSheet("background-color: rgb(0,0,0); selection-background-color: rgba(255,255,255,1);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")')
+    #     # exec(f'{colorComboName}.setStyleSheet("selection-background-color: rgba(255,0,0,255);selection-color: rgb(255,255,255); font-size:{FONT_SIZE}pt;")')
+    #     # exec(f'{colorComboName}.setStyleSheet("color:{self.userInfo.UI_color_display[pos]};font-size:{FONT_SIZE}pt;")')
+
+    #     # create function that will be attached to this ComboBox only
+    #     exec(f'combo_highlighted = create_func({colorComboName})')
+        
+    #     exec(f'{colorComboName}.highlighted[int].connect(combo_highlighted)')
+    #     # exec(f'{colorComboName}.highlighted[int].connect(helper_exec)')
+    #     # src = f'{colorComboName}.highlighted[int].connect(lambda x: print(dir()) )'
+            
+    #     # exec(f'{colorComboName}.highlighted.connect(change_color)')
+    #     exec(f'{colorComboName}.setObjectName("{button.objectName()}")')
+    #     if button.objectName().replace("_"," ") in self.userInfo.channels:
+    #         button.setChecked(True)
+    #     else:
+    #         button.setChecked(False)
+    #     button.toggled.connect(self.saveChannel) #IMPORTANT that this comes after setting check values
+    #     exec(f'self.myColors.append({colorComboName})')
+    #     exec(f'{colorComboName}.activated.connect(self.saveColors)')
+        
+    #     self.topLeftGroupLayout.addWidget(button, row//4,col%4)
+    #     exec(f'self.topLeftGroupLayout.addWidget({colorComboName},{row//4}, {(col%4)+1})')
+    #     row+=2; col+=2
+
+            
+    #     for colorWidget in self.myColors:
+    #         # Set each the color of each QSpin
+    #         colorWidget.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[colorWidget.currentText()]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+
+
 
 ''' Adjust the style of clickable QPushButtons that change the active channels of the image. These buttons act
     as on/off toggles for these channels and also allow for an easy way for the user to see which are enabled.'''

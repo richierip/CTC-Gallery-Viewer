@@ -40,7 +40,7 @@ from os.path import abspath, join, dirname, pardir
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT, BUNDLE
 from PyInstaller.utils.hooks import collect_data_files
 import napari
-VERSION_NUMBER = "1.3"
+VERSION_NUMBER = "1.3.5"
 
 sys.modules['FixTk'] = None
 
@@ -51,7 +51,7 @@ BUNDLE_ROOT = r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\3.11ctc-g
 
 
 def get_icon():
-    return r"C:\Users\prich\Desktop\Projects\MGH\gallery_app\mghiconwhite.ico"
+    return r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\mghiconwhite.ico"
     logo_file = 'logo.ico' if sys.platform.startswith('win') else 'logo.icns'
     return join(BUNDLE_ROOT, logo_file)
 
@@ -151,7 +151,7 @@ a = Analysis(
                  'imagecodecs._shared', 'imagecodecs._imcd', 'magicgui'],
     pathex=[BUNDLE_ROOT],
     datas=DATA_FILES + [(r'C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\*.PNG', 'data' ),
-            (r"C:\Users\prich\Desktop\Projects\MGH\gallery_app\mghiconwhite.ico", 'data'),
+            (r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\mghiconwhite.ico", 'data'),
             (r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\*.pdf", 'data'),
             (r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\*.css", 'data')],
     hookspath=[HOOKSPATH],

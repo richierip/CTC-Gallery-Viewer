@@ -29,7 +29,7 @@ warnings.catch_warnings
 
 from custom_qt_classes import ScoringDialog, ChannelDialog, StatusCombo
 
-VERSION_NUMBER = '1.3'
+VERSION_NUMBER = '1.3.5'
 FONT_SIZE = 12
 
 COLOR_TO_RGB = {'gray': '(170,170,170, 255)', 'purple':'(160,32,240, 255)', 'blue':'(100,100,255, 255)',
@@ -151,13 +151,17 @@ class ViewerPresets(QDialog):
         pref = self.menubar.addMenu('Preferences')
         scoring = QAction("Modify scoring decisions and colors", self)
         scoring.setShortcut("Ctrl+P")
+        import_gvs = QAction("Import configuration file", self)
+        import_gvs.setShortcut("Shift+S")
+        export_gvs = QAction("Export configuration file", self)
+        export_gvs.setShortcut("Ctrl+S")
         reset = QAction("Reset GUI to defaults", self)
         reset.setShortcut("Ctrl+R")
         channels = QAction("Select image channels", self)
         channels.setShortcut("Ctrl+i")
         
 
-        pref.addActions((scoring,channels,reset))
+        pref.addActions((scoring,import_gvs, export_gvs, channels,reset))
         pref.triggered[QAction].connect(self.process_menu_action)
 
         about = self.menubar.addMenu('About')
@@ -225,39 +229,50 @@ class ViewerPresets(QDialog):
         channels.exec()
 
     def process_menu_action(self,q):
-        if "scoring decisions" in q.text().lower():
-            self.change_scoring_decisions()
-        elif "channels" in q.text().lower():
-            self.change_channels()
-        elif 'manual' in q.text().lower():
-            try:
-                # print(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
-                os.startfile(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
-            except FileNotFoundError:
+        class partialMatch(str):
+            def __eq__(self, other):
+                return self.__contains__(other)
+        match partialMatch(q.text().lower()):
+
+            case "scoring decisions":
+                self.change_scoring_decisions()
+            case "channels":
+                self.change_channels()
+            case 'manual':
+                try:
+                    # print(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
+                    os.startfile(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
+                except FileNotFoundError:
+                    self.status_label.setVisible(True)
+                    status ='<font color="#ffa000">Can\'t find a guide for this version!</font><br>Check for old versions in the server\'s Imagers/ImageProcessing/GalleryViewer/ folder.'
+                    self.status_label.setText(status)
+            case 'reset':
+                try:
+                    os.remove(os.path.normpath(r'./data/presets'))
+                    self.status_label.setVisible(True)
+                    status ='<font color="#ffa000">Cleared all saved metadata!</font> Close this window to allow the changes to take effect'
+                    self.status_label.setText(status)
+                except FileNotFoundError:
+                    self.status_label.setVisible(True)
+                    status ='<font color="#ffa000">I haven\'t saved any data yet.</font>'
+                    self.status_label.setText(status)
+            case 'source code':
+                webbrowser.open("https://github.com/richierip/CTC-Gallery-Viewer", new = 2)
+            case "error logs":
+                os.startfile(os.path.normpath(r"./runtime logs"))
+                errors = 0
+                for root, cur, files in os.walk(os.path.normpath(r"./runtime logs")):
+                    errors += len(files)
                 self.status_label.setVisible(True)
-                status ='<font color="#ffa000">Can\'t find a guide for this version!</font><br>Check for old versions in the server\'s Imagers/ImageProcessing/GalleryViewer/ folder.'
+                status =f'Found {errors} error logs! If you are having trouble, try resetting the viewer\'s saved preferences (ctrl+R) and restarting the program.<br> '
+                status += 'Double check that your image and object data file contents match what is listed in Preferences.<br> If problems persist, share the latest log with Peter at prichieri@mgh.harvard.edu.'
                 self.status_label.setText(status)
-        elif 'reset' in q.text().lower():
-            try:
-                os.remove(os.path.normpath(r'./data/presets'))
-                self.status_label.setVisible(True)
-                status ='<font color="#ffa000">Cleared all saved metadata!</font> Close this window to allow the changes to take effect'
-                self.status_label.setText(status)
-            except FileNotFoundError:
-                self.status_label.setVisible(True)
-                status ='<font color="#ffa000">I haven\'t saved any data yet.</font>'
-                self.status_label.setText(status)
-        elif 'source code' in q.text().lower():
-            webbrowser.open("https://github.com/richierip/CTC-Gallery-Viewer", new = 2)
-        elif "error logs" in q.text().lower():
-            os.startfile(os.path.normpath(r"./runtime logs"))
-            errors = 0
-            for root, cur, files in os.walk(os.path.normpath(r"./runtime logs")):
-                errors += len(files)
-            self.status_label.setVisible(True)
-            status =f'Found {errors} error logs! If you are having trouble, try resetting the viewer\'s saved preferences (ctrl+R) and restarting the program.<br> '
-            status += 'Double check that your image and object data file contents match what is listed in Preferences.<br> If problems persist, share the latest log with Peter at prichieri@mgh.harvard.edu.'
-            self.status_label.setText(status)
+            case "import configuration":
+                self.status_label.setText("Coming soon")
+            case "export configuration":
+                self.status_label.setText("Coming soon")
+            case _:
+                raise ValueError("Bad input to process_menu_action")
 
 
     def saveQptiff(self):
@@ -285,8 +300,7 @@ class ViewerPresets(QDialog):
             df = pd.read_xml(self.userInfo.view_settings_path)
             self.userInfo.transfer_view_settings(df)
             self._append_status_br('<font color="#4c9b8f">Successfully imported .viewsettings file!</font>')
-                
-                
+            self.userInfo.imported_view_settings = df
             self.setWidgetColorBackground(self.viewSettingsEntry, "#55ff55")
             QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.viewSettingsEntry, "#ffffff"))
 

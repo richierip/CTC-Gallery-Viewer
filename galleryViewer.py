@@ -9,11 +9,10 @@ import tifffile
 import napari
 from napari.types import ImageData
 from napari.settings import get_settings
-from magicgui import magicgui #, magic_factory
 from qtpy.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, QFileDialog, QSpinBox,
                         QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton, QScrollArea, QDockWidget, QToolTip)
 from qtpy.QtCore import Qt,QPoint, QRect
-from qtpy.QtGui import QFont, QImage, QGuiApplication, QPixmap
+from qtpy.QtGui import QFont #, QImage, QGuiApplication, QPixmap
 import numpy as np
 import pandas as pd
 # import openpyxl # necessary, do not remove
@@ -49,7 +48,7 @@ from custom_qt_classes import StatusCombo, ViewSettingsDialog, make_fluor_toggle
 
 
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
-VERSION_NUMBER = '1.3'
+VERSION_NUMBER = '1.3.5'
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
 cell_colors = store_and_load.CELL_COLORS
 print('\n--------------- adding custom cmaps\n')
@@ -177,6 +176,7 @@ def restore_viewsettings_from_cache(arrange_multichannel = False, viewer = VIEWE
                     raise ValueError("Bad input to restore_viewsettings_from_cache - _modify_images_in_modes")
                
     if single_setting_change:
+        print(f'\nSingle setting change - will exit function')
         spl = single_setting_change.split()
         caller_fluor, s = " ".join(spl[:-1]), spl[-1]
         _modify_images_in_modes(caller_fluor,s)
@@ -337,6 +337,8 @@ def toggle_absorption():
         
     newmode = "light" if SESSION.absorption_mode else "dark"
     oldmode = "dark" if SESSION.absorption_mode else "light"
+    aw = SESSION.widget_dictionary["absorption_widget"]
+    aw.setText("Apsorption on") if SESSION.absorption_mode else aw.setText("Apsorption off")
     for name, bg in SESSION.side_dock_groupboxes.items():
         bg.setStyleSheet(open(f"data/docked_group_box_border_{oldmode}.css").read())
     VIEWER.theme = newmode
@@ -372,7 +374,7 @@ def check_creator2(list_of_names):
     for name in list_of_names:
         tb = QPushButton(name); tb.setObjectName(name)
         tb.setCheckable(True)
-        tb.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name]) )
+        tb.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name] if name != "Composite" else "None") )
         all_boxes.append(tb)
         # f = dynamic_checkbox_creator()
         tb.clicked.connect(fluor_button_toggled)
@@ -2843,7 +2845,7 @@ def GUI_execute(preprocess_class):
     OBJECT_DATA_PATH = userInfo.objectDataPath
     CELLS_PER_ROW = userInfo.cells_per_row
     
-    if "Composite" not in list(userInfo.channelColors.keys()): userInfo.channelColors['Composite'] = 'None'
+    # if "Composite" not in list(userInfo.channelColors.keys()): userInfo.channelColors['Composite'] = 'None'
     
 
     userInfo.active_channels = copy.copy(userInfo.channels)
@@ -2990,6 +2992,8 @@ def main(preprocess_class = None):
 
     # Change page widgets
     page_combobox = QComboBox()
+    page_combobox.setStyleSheet("combobox-popup: 0;");
+    page_combobox.setMaxVisibleItems(10)
     page_cell_entry = QLineEdit(); 
     page_cell_entry.setPlaceholderText("Cell Id (optional)")#; page_cell_entry.setFixedWidth(200)
     intensity_sort_box = QComboBox()
@@ -3106,11 +3110,6 @@ def main(preprocess_class = None):
     SESSION.widget_dictionary['mouse boxes']=nuc_boxes_context
     show_hide_layout.addLayout(nuc_boxes_layout)
 
-
-
-    absorption_widget = QPushButton("Absorption")
-    absorption_widget.pressed.connect(toggle_absorption)
-
     
 
     # Create main group in a vertical stack, and add to side box
@@ -3125,7 +3124,6 @@ def main(preprocess_class = None):
     side_dock_layout.addWidget(page_group)
     side_dock_layout.addWidget(mode_group)
     side_dock_layout.addWidget(show_hide_group)
-    side_dock_layout.addWidget(absorption_widget)
     # side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
 
 
@@ -3354,15 +3352,21 @@ def main(preprocess_class = None):
 
 
     # Open viewsettings popout
-    open_vs = QPushButton("Change view settings")
+    open_vs = QPushButton("Modify view settings")
     open_vs.pressed.connect(open_vs_popup)
     open_vs.setFont(QFont("Calibri", 6, weight=QFont.Normal))
     SESSION.widget_dictionary["open_vs_button"] = open_vs
 
+
+    absorption_widget = QPushButton("Absorption off")
+    absorption_widget.pressed.connect(toggle_absorption)
+    SESSION.widget_dictionary["absorption_widget"] = absorption_widget
+
+
     # Create bottom bar widgets
     for box in check_creator2(userInfo.active_channels):
         UPDATED_CHECKBOXES.append(box)
-    viewer.window.add_dock_widget(UPDATED_CHECKBOXES + [open_vs],area='bottom')
+    viewer.window.add_dock_widget(UPDATED_CHECKBOXES + [absorption_widget, open_vs],area='bottom')
     # right_dock.adjustSize()
 
     # print(f'\n {dir()}') # prints out the namespace variables 

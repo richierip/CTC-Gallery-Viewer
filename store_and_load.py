@@ -12,6 +12,7 @@ Ting Lab
 import pickle
 import copy
 import pandas as pd
+import numpy as np
 from typing import Callable
 from PIL import ImageColor
 from itertools import product
@@ -21,6 +22,7 @@ import logging
 import os
 from datetime import datetime
 from qtpy.QtWidgets import QToolTip
+from custom_color_functions import colormap
 
 CELL_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'cyan', 'pink'] # List of colors available to use as colormaps
 CHANNELS_STR = ["DAPI", "Opal 570", "Opal 690", "Opal 480","Opal 620","Opal 780", "Opal 520", "AF"] # List of String names for fluors the user wants to display  
@@ -140,6 +142,7 @@ class userPresets:
         self.available_statuses_keybinds = ["q","w","e","t","y","u","o","p","d","f","g","j","l","z","x",",",".","/","[","]",";","'"]
         self.view_settings = self.remake_viewsettings(pass_value=True) # Dict of view settings. Will NOT change after reading from file. ex: {fluor A gamma: 0.5}
         self.view_settings_path = '' # Path to .viewsettings file. The file is a type of HALO export and will use XML formatting
+        self.imported_view_settings = None
         self.phenotype_mappings = {} # Dict of user selected phenotypes and their status mappings. Cells in the data of these phenotypes will be kept for viewing and assigned the given status 
         self.phenotype_mappings_label = '<u>Phenotypes</u><br>All' # String representation of the above info for displaying in a QLabel
         self.annotation_mappings = {} # Dict of user selected annotations and their status mappings. Cells in the data of these annotations will be kept for viewing and assigned the given status 
@@ -147,7 +150,6 @@ class userPresets:
         self.analysisRegionsInData = False # Bool that tracks whether the object data has an 'Analysis Region' field with multiple annotations. Useful later
         self.filters = []
         self.filters_label = '<u>Filters</u><br>None'
-        self.session = sessionVariables()
         self.possible_fluors_in_data = ['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence']
         self.non_phenotype_fluor_suffixes_in_data = ['Positive Classification', 'Positive Nucleus Classification','Positive Cytoplasm Classification',
                     'Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity', '% Nucleus Completeness', '% Cytoplasm Completeness',
@@ -156,6 +158,7 @@ class userPresets:
                   'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
         self.phenotypes = []
         self.fonts = ViewerFonts()
+        self.session = sessionVariables()
 
 
     ''' Restore viewsettings to [chn] gamma : 0.5, [chn] whitein:255, [chn] blackin:0
@@ -186,6 +189,48 @@ class userPresets:
             self.view_settings[f'{fluor} black-in'] = vs_table.iloc[pos]['BlackInAbsolute']
             self.view_settings[f'{fluor} white-in'] = vs_table.iloc[pos]['WhiteInAbsolute']
         return True
+    
+    ''' Create a .viewsettings file compatible with HALO from the current view settings
+        If the user imported a view settings file at the start, we will work from that. '''
+    def write_view_settings(self, destination_path):
+        print(self.channelColors)
+        user_colors_hex = {fluor : colormap[clr] for fluor, clr in self.channelColors.items()}
+        print(user_colors_hex)
+
+        if self.imported_view_settings is not None:
+            # User import view settings. Modify this table in place and write somewhere
+            df = self.imported_view_settings
+            # Set color codes, 
+            for i, (fluor, color_hex) in enumerate(user_colors_hex.items()):
+                color_dec = int(color_hex.strip('#'), 16)
+                df.loc[df["Id"] == i, "ColorCode"] = color_dec
+                df.loc[df["Id"] == i, "BlackInAbsolute"] = self.session.view_settings[f'{fluor} black-in']
+                df.loc[df["Id"] == i, "BlackIn"] = self.session.view_settings[f'{fluor} black-in'] / 255
+                df.loc[df["Id"] == i, "WhiteInAbsolute"] = self.session.view_settings[f'{fluor} white-in']
+                df.loc[df["Id"] == i, "WhiteIn"] = self.session.view_settings[f'{fluor} white-in'] / 255
+                df.loc[df["Id"] == i, "Gamma"] = self.session.view_settings[f'{fluor} gamma'] 
+                df.loc[df["Id"] == i, "Visible"] = True if fluor in self.active_channels else False
+                df.loc[df["Id"] == i, "Absorption"] = 1 if self.session.absorption_mode else 0
+        else: 
+            # Make table from scratch
+            vscols = ['Id', 'ColorCode', 'Brightness', 'Contrast', 'Gamma', 'Absorption',
+                    'BlackIn', 'WhiteIn', 'Visible', 'BlackInAbsolute', 'WhiteInAbsolute'] # No need to add any CustomName tags
+            df = pd.DataFrame([], columns = vscols)
+            for i, (fluor, color_hex) in enumerate(user_colors_hex.items()):
+                row = { 'Id' : i, 
+                        'ColorCode': [ int(color_hex.strip('#'), 16) ], 
+                        'Brightness': [1], 'Contrast':[1], 
+                        'Gamma':[ self.session.view_settings[f'{fluor} gamma'] ], 
+                        'Absorption': [1 if self.session.absorption_mode else 0],
+                        'BlackIn': [self.session.view_settings[f'{fluor} black-in'] / 255], 
+                        'WhiteIn': [self.session.view_settings[f'{fluor} white-in'] / 255], 
+                        'Visible': [True if fluor in self.active_channels else False], 
+                        'BlackInAbsolute': [self.session.view_settings[f'{fluor} black-in']], 
+                        'WhiteInAbsolute':[self.session.view_settings[f'{fluor} white-in']]}
+                df = pd.concat([df, pd.DataFrame.from_dict(row)])
+
+        #TODO Check if the unpaired </CustomName> tags don't actually work on import with HALO
+        df.reset_index(drop=True).to_xml(destination_path, index=False, root_name="ViewSettings", row_name="Channel", xml_declaration=False)
 
 
     def attempt_channel_add(self, channelName):

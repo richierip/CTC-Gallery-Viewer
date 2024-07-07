@@ -6,6 +6,9 @@ import matplotlib
 import re
 # from PIL import Image
 
+def convert_decimal_color(code):
+    return f"{code:#0{8}x}".replace('0x','#')
+
 def create_red_lut(inverse = False):
     # numpy will interpolate between these endpoint values to create 
     # all 256 rows of the LUT
@@ -360,6 +363,15 @@ colormap = {
     # X11 colour table from https://drafts.csswg.org/css-color-4/, with
     # gray/grey spelling issues fixed.  This is a superset of HTML 4.0
     # colour names used in CSS 1.
+    "gray": "#808080",
+    "purple": "#800080",
+    "blue": "#0000ff",
+    "green": "#008000",
+    "orange": "#ffa500",
+    "red": "#ff0000",
+    "yellow": "#ffff00",
+    "cyan": "#00ffff",
+    "pink": "#ffc0cb",
     "aliceblue": "#f0f8ff",
     "antiquewhite": "#faebd7",
     "aqua": "#00ffff",
@@ -369,7 +381,6 @@ colormap = {
     "bisque": "#ffe4c4",
     "black": "#000000",
     "blanchedalmond": "#ffebcd",
-    "blue": "#0000ff",
     "blueviolet": "#8a2be2",
     "brown": "#a52a2a",
     "burlywood": "#deb887",
@@ -380,7 +391,6 @@ colormap = {
     "cornflowerblue": "#6495ed",
     "cornsilk": "#fff8dc",
     "crimson": "#dc143c",
-    "cyan": "#00ffff",
     "darkblue": "#00008b",
     "darkcyan": "#008b8b",
     "darkgoldenrod": "#b8860b",
@@ -413,9 +423,7 @@ colormap = {
     "ghostwhite": "#f8f8ff",
     "gold": "#ffd700",
     "goldenrod": "#daa520",
-    "gray": "#808080",
     "grey": "#808080",
-    "green": "#008000",
     "greenyellow": "#adff2f",
     "honeydew": "#f0fff0",
     "hotpink": "#ff69b4",
@@ -465,7 +473,6 @@ colormap = {
     "oldlace": "#fdf5e6",
     "olive": "#808000",
     "olivedrab": "#6b8e23",
-    "orange": "#ffa500",
     "orangered": "#ff4500",
     "orchid": "#da70d6",
     "palegoldenrod": "#eee8aa",
@@ -475,12 +482,9 @@ colormap = {
     "papayawhip": "#ffefd5",
     "peachpuff": "#ffdab9",
     "peru": "#cd853f",
-    "pink": "#ffc0cb",
     "plum": "#dda0dd",
     "powderblue": "#b0e0e6",
-    "purple": "#800080",
     "rebeccapurple": "#663399",
-    "red": "#ff0000",
     "rosybrown": "#bc8f8f",
     "royalblue": "#4169e1",
     "saddlebrown": "#8b4513",
@@ -506,10 +510,9 @@ colormap = {
     "wheat": "#f5deb3",
     "white": "#ffffff",
     "whitesmoke": "#f5f5f5",
-    "yellow": "#ffff00",
     "yellowgreen": "#9acd32",
 }
-colormap["blue"] = "#0000ff"
+colormap["blue"] = "#0000ff" # Why?
 
 
 def getmodebase(mode):
