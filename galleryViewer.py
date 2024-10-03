@@ -333,7 +333,8 @@ def toggle_absorption():
     
     # Change colors and widget styles
     for toggle in UPDATED_CHECKBOXES:
-        toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[str(toggle.objectName())], toggle.isChecked(), SESSION.absorption_mode))
+        name = str(toggle.objectName())
+        toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
         
     newmode = "light" if SESSION.absorption_mode else "dark"
     oldmode = "dark" if SESSION.absorption_mode else "light"
@@ -347,11 +348,13 @@ def fluor_button_toggled():
     # keep track of visible channels in global list and then toggle layer visibility
     userInfo.active_channels = []
     for toggle in UPDATED_CHECKBOXES:
-        print(f"{toggle.objectName()}  is checked? {toggle.isChecked()}")
+        name = str(toggle.objectName())
+        print(f"{name}  is checked? {toggle.isChecked()}")
     # print(f"{checkbox_name} has been clicked and will try to remove from {userInfo.active_channels}")
         if not toggle.isChecked():
-            userInfo.active_channels.append(str(toggle.objectName()))
-        toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[str(toggle.objectName())], toggle.isChecked(), SESSION.absorption_mode))
+            userInfo.active_channels.append(name)
+        
+        toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
         
         
     print(userInfo.active_channels)
@@ -1888,8 +1891,6 @@ def attach_functions_to_viewer(viewer):
         # # (step_size-1) + (1-step_size)
         # display_intensity(viewer, dummyCursor((curY - (y*(step_size-1))) / (2-step_size), (curX - (x*(step_size-1))) / (2-step_size) ))
         viewer.camera.zoom /= step_size  
-        
-
     
     @viewer.bind_key('a', overwrite=True)
     @viewer.bind_key('Ctrl-a', overwrite=True)
@@ -1920,12 +1921,10 @@ def attach_functions_to_viewer(viewer):
         s = {True:"enabled",False:"disabled"}[not current]
         viewer.status = f"Tooltip {s}!"
         
-
     @viewer.bind_key('Alt-m')
     @catch_exceptions_to_log_file("runtime_open-manual")
     def open_guide(viewer):
         os.startfile(os.path.normpath(os.curdir+ r"/data/GalleryViewer v{x} User Guide.pdf".format(x=VERSION_NUMBER)))
-
 
 ######------------------------- Misc + Viewer keybindings ---------------------######
 

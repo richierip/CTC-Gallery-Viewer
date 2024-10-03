@@ -3,7 +3,7 @@ from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QIcon, QColor, QLinearGradient
 from qtpy.QtWidgets import (QApplication, QComboBox, QDialog, QGridLayout, QLayout, QSlider, QDoubleSpinBox, QFileDialog,
                             QRadioButton, QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QHBoxLayout)
-
+from qtpy import QtGui, QtCore
 from store_and_load import sessionVariables, userPresets
 from napari import Viewer
 import os
@@ -18,6 +18,8 @@ import custom_color_functions
 from random import choice
 from typing import Callable
 from itertools import product
+from custom_color_functions import colormap as rgbcd
+
 
 VERSION_NUMBER = '1.3.5'
 FONT_SIZE = 12
@@ -612,107 +614,85 @@ class ViewSettingsDialog(QDialog):
 #TODO
 '''Used to prompt the user for a selection of a color. Should hold every color in a reference dictionary, 
     but only show maybe 10-15 at a time. Some CSS needed to make it feel more responsive. '''
+
 class ColorfulComboBox(QComboBox):
     def __init__(self, parent, color_dict: dict, selection:str = 'Gray'):
-        super(QComboBox, self).__init__(parent)
+        super(ColorfulComboBox, self).__init__(parent)
         self.color_dict = color_dict
-        self.selection = selection # Which color will be on top
-    
-    def create_func(colorWidget):
-        def set_color_index(index):
-            # return None
-            # for colorWidget in self.myColors:
-            if index ==0: # gray
-                colorWidget.setStyleSheet(f"selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif index ==1: # purple
-                colorWidget.setStyleSheet(f"selection-background-color: rgba(160,32,240, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif index ==2: # blue
-                colorWidget.setStyleSheet(f"selection-background-color: rgba(100,100,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif index ==3: # green
-                colorWidget.setStyleSheet(f"selection-background-color: rgba(60,179,113, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif index ==4: # orange
-                colorWidget.setStyleSheet(f"selection-background-color: rgba(255,127,80, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif index ==5: # red
-                colorWidget.setStyleSheet(f"selection-background-color: rgba(215,40,40, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif index ==6: # yellow
-                colorWidget.setStyleSheet(f"selection-background-color: rgba(255,215,0, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif index ==7: # cyan
-                colorWidget.setStyleSheet(f"selection-background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            elif index ==8: # pink
-                colorWidget.setStyleSheet(f"selection-background-color: rgba(255,105,180, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            
-            # colorWidget.setStyleSheet(f"color: {colorWidget.currentText()}; font-size: {FONT_SIZE}pt;")
-        return set_color_index 
-        # Space / time saving way to create 16 widgets and change their parameters
-    
-    
-    row = 0 ; col = 0
+        self.init_color_backgrounds()
+        self.currentIndexChanged.connect(self.change_active_item_color)
+        self.highlighted[int].connect(self.item_highlighted)
+        self.setStyleSheet(f"""
+            QComboBox::drop-down {{ background: none; }}
+            """)
+        self.setCurrentText(selection) # Start with chosen color
 
-    # combo = None
-    # combo.setStyleSheet("combobox-popup: 0;");
-    # combo.setMaxVisibleItems(10)
-    # for pos,button in enumerate(self.mycheckbuttons):
-    #     colorComboName = button.objectName() + "_colors"
-    #     exec(f'{colorComboName} = QComboBox()')
-    #     colored_items = [f'<font color="{item}">{item}</font>' for item in store_and_load.CELL_COLORS]
-    #     exec(f'{colorComboName}.addItems(store_and_load.CELL_COLORS)')
-    #     exec(f'{colorComboName}.setCurrentText("{self.userInfo.channelColors[button.objectName().replace("_"," ")]}")')
+    def lighten_color(self,color):
+        factor = 1.3
+        r, g, b, a = color.getRgb()
+        r = min(int(r * factor), 255)
+        g = min(int(g * factor), 255)
+        b = min(int(b * factor), 255)
+        return QtGui.QColor(r, g, b, a).toRgb()
+                        
+    def is_dark_color(self, color):
+        if not color.isValid():
+            return False
+        r, g, b, _ = color.getRgb()
+        luminance = 0.299 * r + 0.587 * g + 0.114 * b
+        return luminance < 128
 
-    #     # exec(f'{colorComboName}.setItemData(0,QColor("red"),Qt.ForegroundRole)')
-    #     # test = QComboBox()
-    #     # test.setItemData(0,value=QColor('red'))
+    def init_color_backgrounds(self):
+        model = self.model()
+        for row, (color_name, color_value) in enumerate(self.color_dict.items()):
+            self.addItem(color_name.title())
+            color = QtGui.QColor(color_value)
+            model.setData(model.index(row, 0), color, QtCore.Qt.BackgroundRole)
+            text_color = QtGui.QColor('white') if self.is_dark_color(color) else QtGui.QColor('black')
+            model.setData(model.index(row, 0), text_color, QtCore.Qt.ForegroundRole)
 
-    #     # colorWidget.setItemData(0,QColor("red"),Qt.BackgroundRole)
+    def item_highlighted(self, pos):
+        print(pos)
+        print(self.itemText(pos))
+        highlight_color_value = self.color_dict[self.itemText(pos).lower()]
+        lightened_highlight = self.lighten_color(QtGui.QColor(highlight_color_value))
+        print(lightened_highlight.name())
 
-    #     exec(f'{colorComboName}.setItemData(1,QColor(100,100,100,0),Qt.BackgroundRole)') # gray
-    #     exec(f'{colorComboName}.setItemData(1,QColor(0,0,0,255),Qt.ForegroundRole)')
-    #     exec(f'{colorComboName}.setItemData(1,QColor(160,32,240,0),Qt.BackgroundRole)') # purple
-    #     exec(f'{colorComboName}.setItemData(1,QColor(0,0,0,255),Qt.ForegroundRole)')
-    #     exec(f'{colorComboName}.setItemData(2,QColor(20,20,255,0),Qt.BackgroundRole)') # blue
-    #     exec(f'{colorComboName}.setItemData(2,QColor(0,0,0,255),Qt.ForegroundRole)')
-    #     exec(f'{colorComboName}.setItemData(3,QColor(0,255,0,0),Qt.BackgroundRole)') # green
-    #     exec(f'{colorComboName}.setItemData(3,QColor(0,0,0,255),Qt.ForegroundRole)')
-    #     exec(f'{colorComboName}.setItemData(4,QColor(255,0,0,0),Qt.BackgroundRole)') # red
-    #     exec(f'{colorComboName}.setItemData(4,QColor(0,0,0,255),Qt.ForegroundRole)') 
-    #     exec(f'{colorComboName}.setItemData(5,QColor(255,165,0,0),Qt.BackgroundRole)') # orange
-    #     exec(f'{colorComboName}.setItemData(5,QColor(0,0,0,255),Qt.ForegroundRole)')
-    #     exec(f'{colorComboName}.setItemData(6,QColor(255,255,0,0),Qt.BackgroundRole)')# yellow
-    #     exec(f'{colorComboName}.setItemData(6,QColor(0,0,0,255),Qt.ForegroundRole)')
-    #     exec(f'{colorComboName}.setItemData(7,QColor(0,255,255,0),Qt.BackgroundRole)') # cyan
-    #     exec(f'{colorComboName}.setItemData(7,QColor(0,0,0,255),Qt.ForegroundRole)')
-    #     exec(f'{colorComboName}.setItemData(8,QColor(255,0,255,0),Qt.BackgroundRole)') # pink
-    #     exec(f'{colorComboName}.setItemData(8,QColor(0,0,0,255),Qt.ForegroundRole)')
+        highlight_color = 'white' if self.is_dark_color(QtGui.QColor(lightened_highlight.name())) else "black"
 
-        
-    #     # exec(f'{colorComboName}.setStyleSheet("background-color: rgb(0,0,0); selection-background-color: rgba(255,255,255,1);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")')
-    #     # exec(f'{colorComboName}.setStyleSheet("selection-background-color: rgba(255,0,0,255);selection-color: rgb(255,255,255); font-size:{FONT_SIZE}pt;")')
-    #     # exec(f'{colorComboName}.setStyleSheet("color:{self.userInfo.UI_color_display[pos]};font-size:{FONT_SIZE}pt;")')
 
-    #     # create function that will be attached to this ComboBox only
-    #     exec(f'combo_highlighted = create_func({colorComboName})')
-        
-    #     exec(f'{colorComboName}.highlighted[int].connect(combo_highlighted)')
-    #     # exec(f'{colorComboName}.highlighted[int].connect(helper_exec)')
-    #     # src = f'{colorComboName}.highlighted[int].connect(lambda x: print(dir()) )'
-            
-    #     # exec(f'{colorComboName}.highlighted.connect(change_color)')
-    #     exec(f'{colorComboName}.setObjectName("{button.objectName()}")')
-    #     if button.objectName().replace("_"," ") in self.userInfo.channels:
-    #         button.setChecked(True)
-    #     else:
-    #         button.setChecked(False)
-    #     button.toggled.connect(self.saveChannel) #IMPORTANT that this comes after setting check values
-    #     exec(f'self.myColors.append({colorComboName})')
-    #     exec(f'{colorComboName}.activated.connect(self.saveColors)')
-        
-    #     self.topLeftGroupLayout.addWidget(button, row//4,col%4)
-    #     exec(f'self.topLeftGroupLayout.addWidget({colorComboName},{row//4}, {(col%4)+1})')
-    #     row+=2; col+=2
+        active_bg_color = self.color_dict[self.currentText().lower()]       
+        active_text_color = 'white'if self.is_dark_color(QtGui.QColor(active_bg_color)) else "black"
 
-            
-    #     for colorWidget in self.myColors:
-    #         # Set each the color of each QSpin
-    #         colorWidget.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[colorWidget.currentText()]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
+        self.setStyleSheet(f"""
+            QWidget {{ 
+                        selection-background-color:{lightened_highlight.name()}; 
+                        selection-color: {highlight_color};
+                    }}
+            QComboBox {{
+                color: {active_text_color};           
+                background-color: {active_bg_color};
+                border: 1px solid gray;
+            }}
+            QComboBox::drop-down {{ background: none; }}
+            """)
+
+    def change_active_item_color(self):
+        print("Change active item color")
+        current_color_value = self.color_dict[self.currentText().lower()]
+                    
+        text_color = 'white' if self.is_dark_color(QtGui.QColor(current_color_value)) else text_color = 'black'
+        self.setStyleSheet(f"""
+            QComboBox {{
+                color: {text_color};           
+                background-color: {current_color_value};
+                border: 1px solid gray;
+            }}
+
+            QComboBox::drop-down {{
+                background: none;
+            }}
+        """)
 
 
 

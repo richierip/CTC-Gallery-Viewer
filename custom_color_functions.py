@@ -6,6 +6,7 @@ import matplotlib
 import re
 # from PIL import Image
 
+''' Accepts a decimal number and returns a hex value'''
 def convert_decimal_color(code):
     return f"{code:#0{8}x}".replace('0x','#')
 
@@ -477,14 +478,14 @@ colormap = {
     "orchid": "#da70d6",
     "palegoldenrod": "#eee8aa",
     "palegreen": "#98fb98",
-    "paleturquoise": "#afeeee",
+    # "paleturquoise": "#afeeee", # Not in skimage rgb2color
     "palevioletred": "#db7093",
     "papayawhip": "#ffefd5",
     "peachpuff": "#ffdab9",
     "peru": "#cd853f",
     "plum": "#dda0dd",
     "powderblue": "#b0e0e6",
-    "rebeccapurple": "#663399",
+    # "rebeccapurple": "#663399", # Not in skimage rgb2color
     "rosybrown": "#bc8f8f",
     "royalblue": "#4169e1",
     "saddlebrown": "#8b4513",
