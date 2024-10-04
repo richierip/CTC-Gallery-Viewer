@@ -53,13 +53,16 @@ QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loa
 cell_colors = store_and_load.CELL_COLORS
 print('\n--------------- adding custom cmaps\n')
 
-for colormap in cell_colors:
-    # print(f'cmap: {colormap}')
-    if colormap == 'gray': continue
-    if colormap == 'pink': colormap = 'Pink'
-    exec(f'my_map = custom_color_functions.create_{colormap}_lut()')
-    exec(f'custom = mplcolors.LinearSegmentedColormap.from_list("{colormap}", my_map)')
-    exec(f'cm.register_cmap(name = "{colormap}", cmap = custom)')
+for colormap in custom_color_functions.rgb_color_dict.keys():
+    # print(f'registering cmap: {colormap}')
+    if colormap in cm.__dict__.keys(): continue
+    current_map = custom_color_functions.create_dynamic_lut(colormap)
+    custom = mplcolors.LinearSegmentedColormap.from_list(colormap, current_map)
+    cm.register_cmap(name = colormap, cmap = custom)
+    # Add inverse 
+    imap = custom_color_functions.create_dynamic_lut(colormap, inverse = True)
+    icustom = mplcolors.LinearSegmentedColormap.from_list(colormap+ " inverse", imap)
+    cm.register_cmap(name = colormap+ " inverse", cmap = icustom)
 # print(f'\n---------My colormaps are now {plt.colormaps()}--------\n')
 
 # cell_colors = ['blue', 'purple' , 'red', 'green', 'orange','red', 'green', 'Pink', 'cyan'] # for local execution
@@ -215,7 +218,12 @@ def restore_viewsettings_from_cache(arrange_multichannel = False, viewer = VIEWE
         # call worker func
         _modify_images_in_modes(fluor)
 
-    
+def set_layer_colors():
+    for mode in ("Gallery ", "Multichannel ", "Context "):
+        for fluor, color in userInfo.channelColors.items():
+            if fluor not in userInfo.active_channels: continue
+            cm_name = color if not SESSION.absorption_mode else color+' inverse'
+            VIEWER.layers[mode+fluor].colormap = custom_color_functions.retrieve_cm(cm_name)
 ## --- Bottom bar functions and GUI elements 
 
 ''' DEPRECATED -- replaced by a button that summons a ViewSettingsDialog'''
@@ -272,7 +280,7 @@ def restore_viewsettings_from_cache(arrange_multichannel = False, viewer = VIEWE
 
 def open_vs_popup():
     if SESSION.VSDialog is None:
-        vs = ViewSettingsDialog(userInfo, VIEWER, SESSION.view_settings, restore_viewsettings_from_cache) # TODO make a function here that works
+        vs = ViewSettingsDialog(userInfo, VIEWER, SESSION.view_settings, restore_viewsettings_from_cache, set_layer_colors) # TODO make a function here that works
         SESSION.VSDialog = vs
         vs.exec()
         SESSION.VSDialog = None
@@ -909,7 +917,7 @@ def set_cell_description_label(ID, display_text_override = None):
             continue
         # fluor = str(cell).replace(" Cell Intensity","")
         fluor = str(fluor)
-        intensity_str += f'<br><font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">{fluor}</font>'
+        intensity_str += f'<br><font color="{userInfo.channelColors[fluor].replace("blue","blue")}">{fluor}</font>'
         def add_values(intensity_str, fluor, intensity_lookup):
             flag = True
             name = intensity_lookup + ': No data'
@@ -917,7 +925,7 @@ def set_cell_description_label(ID, display_text_override = None):
                 cyto = intensity_lookup
                 cyto = [x for x in names if (cyto in x and 'Cytoplasm Intensity' in x)][0]
                 val = round(float(intensity_series[cyto]),1)
-                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}"> cyto: {val}</font>'
+                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","blue")}"> cyto: {val}</font>'
                 flag = False
                 name = cyto.replace(' Cytoplasm Intensity','')
             except (KeyError, IndexError): pass
@@ -925,7 +933,7 @@ def set_cell_description_label(ID, display_text_override = None):
                 nuc = intensity_lookup
                 nuc = [x for x in names if (nuc in x and 'Nucleus Intensity' in x)][0]
                 val = round(float(intensity_series[nuc]),1)
-                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}"> nuc: {val}</font>'
+                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","blue")}"> nuc: {val}</font>'
                 flag = False
                 name = nuc.replace(' Nucleus Intensity','')
             except (KeyError, IndexError): pass
@@ -933,7 +941,7 @@ def set_cell_description_label(ID, display_text_override = None):
                 cell = intensity_lookup
                 cell = [x for x in names if (cell in x and 'Cell Intensity' in x)][0]
                 val = round(float(intensity_series[cell]),1)
-                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}"> cell: {val}</font>'
+                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","blue")}"> cell: {val}</font>'
                 flag = False
                 name = cell.replace(' Cell Intensity','')
             except (KeyError, IndexError): pass
@@ -1404,7 +1412,7 @@ def attach_functions_to_viewer(viewer):
             output_str = ''
             for fluor, val in vals.items():
                 if val != "-": val = int(val)
-                output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">    {val}   </font>'
+                output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","blue")}">    {val}   </font>' # "#0462d4"
             
             if ANNOTATIONS_PRESENT:
                 cname = f'Cell {cid} from {layer}' if cell is not None else "Context Mode" # default display name is the mouse is not under a cell
@@ -1443,7 +1451,7 @@ def attach_functions_to_viewer(viewer):
 
             for fluor, val in vals.items():
                 if val != "-": val = int(val)
-                output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","#0462d4")}">    {val}   </font>'
+                output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","blue")}">    {val}   </font>'
         
             sc = STATUSES_TO_HEX[SESSION.current_cells[str(cell_name)]['validation_call']]
             if sc != "#ffffff":
@@ -2991,7 +2999,7 @@ def main(preprocess_class = None):
 
     # Change page widgets
     page_combobox = QComboBox()
-    page_combobox.setStyleSheet("combobox-popup: 0;");
+    page_combobox.setStyleSheet("combobox-popup: 0;")
     page_combobox.setMaxVisibleItems(10)
     page_cell_entry = QLineEdit(); 
     page_cell_entry.setPlaceholderText("Cell Id (optional)")#; page_cell_entry.setFixedWidth(200)

@@ -18,7 +18,7 @@ import custom_color_functions
 from random import choice
 from typing import Callable
 from itertools import product
-from custom_color_functions import colormap as rgbcd
+from custom_color_functions import colormap_titled as hexcd
 
 
 VERSION_NUMBER = '1.3.5'
@@ -413,7 +413,7 @@ class DoubleSlider(QSlider):
 
 ''' A QDialog that the user can interact with to adjust the Napari view settings while running the app.'''
 class ViewSettingsDialog(QDialog):
-    def __init__(self, user_data: userPresets, viewer: Viewer , vs: dict, adjustment_function = Callable):
+    def __init__(self, user_data: userPresets, viewer: Viewer , vs: dict, adjustment_function : Callable, color_function : Callable):
         super(ViewSettingsDialog, self).__init__()
         self.user_data = user_data
         self.session = user_data.session # 
@@ -421,10 +421,13 @@ class ViewSettingsDialog(QDialog):
         self.viewsettings = vs # Dictionary of viewsettings. E.g., for each chn,  '[chn] gamma' : 0.5, '[chn] whitein':255, '[chn] blackin':0
         self.original_viewsettings = copy.deepcopy(vs)
         self.adjustment_function = adjustment_function
+        self.color_function = color_function
         self.last_adjustment = None
         self.target_override = False # Used in restore function to one by one trigger the appropriate fluors to re-adjust
         self.sliders = {}
         self.spin_boxes = {}
+        self.labels = {}
+        self.create_color_combos()
 
         # Arrange title bar buttons
         self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
@@ -442,6 +445,7 @@ class ViewSettingsDialog(QDialog):
         self.vsLayout = QGridLayout()
         row = -1 ; col=0
         for fluor, setting in product(user_data.channels, ("gamma","black-in", "white-in")):
+            
             d = QDoubleSpinBox(self) 
             match setting:
                 case "gamma":
@@ -453,12 +457,14 @@ class ViewSettingsDialog(QDialog):
                     l = QLabel(fluor)
                     l.setFont(user_data.fonts.medium)
                     l.setAlignment(Qt.AlignRight)
-                    l.setStyleSheet(f"QLabel{{ background-color : white; \
+                    l.setStyleSheet(f"QLabel{{ color : {self.ccbs[fluor].text_color}; \
                                               font-size: 18pt; \
-                                              color: {self.user_data.channelColors[fluor]} ; \
+                                              background-color: {self.user_data.channelColors[fluor]} ; \
                                               }}")
+                    self.labels[fluor] = l
                     self.vsLayout.addWidget(l, row, col)
-                    col+=1
+                    self.vsLayout.addWidget(self.ccbs[fluor], row, col+1)
+                    col+=2
                 case "black-in" | "white-in":
                     s = DoubleSlider(0,255)
                     d.setRange(0,255)
@@ -474,16 +480,16 @@ class ViewSettingsDialog(QDialog):
             s.valueChanged.connect(self.slider_moved)
             s.setOrientation(Qt.Horizontal)
             s.setStyleSheet(
-                f"QSlider::groove:horizontal {{background-color : {self.user_data.channelColors[fluor]};\
-                                                border: 1px solid #999999 ; \
-                                                height: 20px; \
-                                                margin: 0px;}}\
-                QSlider::handle:horizontal{{background-color: white; \
-                                            border: 2px solid black; \
-                                            border-radius: 4px; \
-                                            border-color: black; \
-                                            height:20px; \
-                                            width: 14px }}")
+                f"""QSlider::groove:horizontal {{background-color : {self.user_data.channelColors[fluor]};\
+                                                border: 1px solid #999999 ; 
+                                                height: 20px; 
+                                                margin: 0px;}}
+                QSlider::handle:horizontal{{background-color: white; 
+                                            border: 2px solid black; 
+                                            border-radius: 4px; 
+                                            border-color: black; 
+                                            height:20px; 
+                                            width: 14px }}""")
             # QSlider().set
             self.vsLayout.addWidget(QLabel(setting.title()), row, col)
             self.vsLayout.addWidget(s, row, col+1) 
@@ -528,10 +534,36 @@ class ViewSettingsDialog(QDialog):
         # Display and finish up
         self.show()
     
+    def create_color_combos(self):
+        self.ccbs = {}
+        for fluor in self.user_data.channels:
+            ccb = ColorfulComboBox(self, color_dict=hexcd, selection = self.user_data.channelColors[fluor].capitalize())
+            ccb.currentIndexChanged.connect(self.update_colors)
+            self.ccbs[fluor] = ccb
+
+    def update_widget_colors(self):
+        for fluor, setting in product(self.user_data.channels, ("label", "gamma","black-in", "white-in")):
+            c = self.ccbs[fluor].color_name
+            tc = self.ccbs[fluor].text_color
+            if setting == "label":
+                self.labels[fluor].setStyleSheet(f"""QLabel{{ color : {tc}; font-size: 18pt; background-color: {c}; }}""")
+            else:
+                slider = self.sliders[f'{fluor} {setting}']
+                slider.setStyleSheet(f"""QSlider::groove:horizontal {{background-color : {c};
+                                            border: 1px solid #999999 ; height: 20px; margin: 0px;}}
+                                    QSlider::handle:horizontal{{background-color: white; 
+                                            border: 2px solid black; border-radius: 4px; 
+                                            border-color: black; height:20px; width: 14px }}""")
+
+    def update_colors(self):
+        for fluor, ccb in self.ccbs.items():
+            self.user_data.channelColors[fluor] = ccb.color_name.lower()
+        self.color_function()
+        self.update_widget_colors()
+
     '''Called upon widget value change. Couldn't get it to update just the value changed, so this just overwrites every value.
         There will never be more than 8 fluors so this is not a concern, just bad design.'''
     def update_settings(self, source_widgets, target_widgets):
-
         # If there is a value here, the restore button was clicked. Calling function wants to trigger a specific dial to move back
         if self.target_override:
             self.change_viewsettings(self.target_override)
@@ -549,15 +581,15 @@ class ViewSettingsDialog(QDialog):
 
     '''Helper that passes on signal to update function with proper params'''
     def slider_moved(self):
-        self.update_needed = "Spin"
+        # self.update_needed = "Spin"
         self.update_settings(self.sliders, self.spin_boxes)
-        self.update_needed = False
+        # self.update_needed = False
 
     '''Helper that passes on signal to update function with proper params'''
     def spin_edited(self):
-        self.update_needed = "Slider"
+        # self.update_needed = "Slider"
         self.update_settings(self.spin_boxes, self.sliders)
-        self.update_needed = False
+        # self.update_needed = False
         
     ''' Run function to make visual changes in Napari given user-selected viewsettings'''
     def change_viewsettings(self, caller_setting = False):
@@ -616,16 +648,27 @@ class ViewSettingsDialog(QDialog):
     but only show maybe 10-15 at a time. Some CSS needed to make it feel more responsive. '''
 
 class ColorfulComboBox(QComboBox):
-    def __init__(self, parent, color_dict: dict, selection:str = 'Gray'):
+    def __init__(self, parent, color_dict: dict, selection:str = 'Grey'):
         super(ColorfulComboBox, self).__init__(parent)
+        super().setMaxVisibleItems(10)
         self.color_dict = color_dict
         self.init_color_backgrounds()
         self.currentIndexChanged.connect(self.change_active_item_color)
         self.highlighted[int].connect(self.item_highlighted)
         self.setStyleSheet(f"""
+            QComboBox {{ combobox-popup: 0; 
+                        color: white;           
+                        background-color: {self.color_dict[selection]};
+                        border: 1px solid gray;}}
             QComboBox::drop-down {{ background: none; }}
             """)
-        self.setCurrentText(selection) # Start with chosen color
+        self.setCurrentText(selection.capitalize()) # Start with chosen color
+        self.update_stored_color(selection.capitalize())
+
+    def update_stored_color(self, cn):
+        self.color_name = cn
+        self.color_value = self.color_dict[cn]     
+        self.text_color = "white" if self.is_dark_color(QtGui.QColor(self.color_dict[cn])) else "black" 
 
     def lighten_color(self,color):
         factor = 1.3
@@ -652,16 +695,12 @@ class ColorfulComboBox(QComboBox):
             model.setData(model.index(row, 0), text_color, QtCore.Qt.ForegroundRole)
 
     def item_highlighted(self, pos):
-        print(pos)
-        print(self.itemText(pos))
-        highlight_color_value = self.color_dict[self.itemText(pos).lower()]
+        highlight_color_value = self.color_dict[self.itemText(pos)].lower()
         lightened_highlight = self.lighten_color(QtGui.QColor(highlight_color_value))
-        print(lightened_highlight.name())
+        # print(lightened_highlight.name())
 
         highlight_color = 'white' if self.is_dark_color(QtGui.QColor(lightened_highlight.name())) else "black"
-
-
-        active_bg_color = self.color_dict[self.currentText().lower()]       
+        active_bg_color = self.color_dict[self.currentText()].lower()       
         active_text_color = 'white'if self.is_dark_color(QtGui.QColor(active_bg_color)) else "black"
 
         self.setStyleSheet(f"""
@@ -670,6 +709,7 @@ class ColorfulComboBox(QComboBox):
                         selection-color: {highlight_color};
                     }}
             QComboBox {{
+                combobox-popup: 0;
                 color: {active_text_color};           
                 background-color: {active_bg_color};
                 border: 1px solid gray;
@@ -678,12 +718,14 @@ class ColorfulComboBox(QComboBox):
             """)
 
     def change_active_item_color(self):
-        print("Change active item color")
-        current_color_value = self.color_dict[self.currentText().lower()]
+        self.update_stored_color(self.currentText())
+        current_color_value = self.color_dict[self.currentText()]
+        print(f"Startup = {self.currentText()} - {current_color_value}")
                     
-        text_color = 'white' if self.is_dark_color(QtGui.QColor(current_color_value)) else text_color = 'black'
+        text_color = 'white' if self.is_dark_color(QtGui.QColor(current_color_value)) else 'black'
         self.setStyleSheet(f"""
             QComboBox {{
+                combobox-popup: 0;
                 color: {text_color};           
                 background-color: {current_color_value};
                 border: 1px solid gray;

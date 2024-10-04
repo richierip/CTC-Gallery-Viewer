@@ -27,7 +27,8 @@ import webbrowser # for opening github
 import warnings
 warnings.catch_warnings
 
-from custom_qt_classes import ScoringDialog, ChannelDialog, StatusCombo
+from custom_qt_classes import ScoringDialog, ChannelDialog, StatusCombo, ColorfulComboBox
+from custom_color_functions import colormap_titled as rgbcd
 
 VERSION_NUMBER = '1.3.5'
 FONT_SIZE = 12
@@ -357,16 +358,12 @@ class ViewerPresets(QDialog):
 
     def saveColors(self):
         for colorWidget in self.myColors:
-            # Set each the color of each QSpin
-            colorWidget.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[colorWidget.currentText()]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-            
-
-            # print(f'My trigger was {colorWidget.objectName()}')
             channelName = colorWidget.objectName().replace("_"," ")
             # print(f'#### Channel order fsr: {store_and_load.CHANNELS_STR} \n')
             print(self.userInfo.channels)
             
             self.userInfo.channelColors[channelName] = colorWidget.currentText()
+        print(f"Current mapping is {self.userInfo.channelColors}")
 
     def addAnnotation(self):
         # Get status and color from combobox
@@ -716,7 +713,7 @@ class ViewerPresets(QDialog):
         
         # rename keys to ensure channels are mapped to a color we have a colormap for  
         for key in list(fluors.keys()):
-            fluors[rename_key(key)] = fluors.pop(key).lower().replace('white', 'gray').replace('lime','green').replace('pink','Pink')
+            fluors[rename_key(key)] = fluors.pop(key).lower().replace('white', 'gray')
         unused_colors = copy.copy(self.userInfo.available_colors)
         for col in fluors.values():
             if col in unused_colors:
@@ -732,14 +729,6 @@ class ViewerPresets(QDialog):
                     unused_colors.remove(random_color)
                 fluors[key] = random_color
 
-        # Change display widgets to reflect change
-        for combo in self.myColors:
-            widget_name = combo.objectName().replace("_"," ") # object names can't have spaces, so they were replaced with dashes
-            widget_color = fluors[widget_name]
-            # print(widget_name +  "  |  " + widget_color)
-            # colorComboName = button.objectName() + "_colors"
-            combo.setCurrentText(widget_color)
-            combo.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[widget_color]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
         for button in self.mycheckbuttons:
             button.setChecked(False)
             widget_name = button.objectName().replace("_"," ")
@@ -768,95 +757,22 @@ class ViewerPresets(QDialog):
             self.mycheckbuttons.append(check)
         self.topLeftGroupLayout = layout if layout is not None else QGridLayout()
         
-        def create_func(colorWidget):
-            def set_color_index(index):
-                # return None
-                # for colorWidget in self.myColors:
-                if index ==0: # gray
-                    colorWidget.setStyleSheet(f"selection-background-color: rgba(170,170,170, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-                elif index ==1: # purple
-                    colorWidget.setStyleSheet(f"selection-background-color: rgba(160,32,240, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-                elif index ==2: # blue
-                    colorWidget.setStyleSheet(f"selection-background-color: rgba(100,100,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-                elif index ==3: # green
-                    colorWidget.setStyleSheet(f"selection-background-color: rgba(60,179,113, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-                elif index ==4: # orange
-                    colorWidget.setStyleSheet(f"selection-background-color: rgba(255,127,80, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-                elif index ==5: # red
-                    colorWidget.setStyleSheet(f"selection-background-color: rgba(215,40,40, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-                elif index ==6: # yellow
-                    colorWidget.setStyleSheet(f"selection-background-color: rgba(255,215,0, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-                elif index ==7: # cyan
-                    colorWidget.setStyleSheet(f"selection-background-color: rgba(0,220,255, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-                elif index ==8: # pink
-                    colorWidget.setStyleSheet(f"selection-background-color: rgba(255,105,180, 255);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
-                
-                # colorWidget.setStyleSheet(f"color: {colorWidget.currentText()}; font-size: {FONT_SIZE}pt;")
-            return set_color_index 
-        # Space / time saving way to create 16 widgets and change their parameters
         row = 0 ; col = 0
         for pos,button in enumerate(self.mycheckbuttons):
-            colorComboName = button.objectName() + "_colors"
-            exec(f'{colorComboName} = QComboBox()')
-            colored_items = [f'<font color="{item}">{item}</font>' for item in store_and_load.CELL_COLORS]
-            exec(f'{colorComboName}.addItems(store_and_load.CELL_COLORS)')
-            exec(f'{colorComboName}.setCurrentText("{self.userInfo.channelColors[button.objectName().replace("_"," ")]}")')
-
-            # exec(f'{colorComboName}.setItemData(0,QColor("red"),Qt.ForegroundRole)')
-            # test = QComboBox()
-            # test.setItemData(0,value=QColor('red'))
-
-            # colorWidget.setItemData(0,QColor("red"),Qt.BackgroundRole)
-
-            exec(f'{colorComboName}.setItemData(1,QColor(100,100,100,0),Qt.BackgroundRole)') # gray
-            exec(f'{colorComboName}.setItemData(1,QColor(0,0,0,255),Qt.ForegroundRole)')
-            exec(f'{colorComboName}.setItemData(1,QColor(160,32,240,0),Qt.BackgroundRole)') # purple
-            exec(f'{colorComboName}.setItemData(1,QColor(0,0,0,255),Qt.ForegroundRole)')
-            exec(f'{colorComboName}.setItemData(2,QColor(20,20,255,0),Qt.BackgroundRole)') # blue
-            exec(f'{colorComboName}.setItemData(2,QColor(0,0,0,255),Qt.ForegroundRole)')
-            exec(f'{colorComboName}.setItemData(3,QColor(0,255,0,0),Qt.BackgroundRole)') # green
-            exec(f'{colorComboName}.setItemData(3,QColor(0,0,0,255),Qt.ForegroundRole)')
-            exec(f'{colorComboName}.setItemData(4,QColor(255,0,0,0),Qt.BackgroundRole)') # red
-            exec(f'{colorComboName}.setItemData(4,QColor(0,0,0,255),Qt.ForegroundRole)') 
-            exec(f'{colorComboName}.setItemData(5,QColor(255,165,0,0),Qt.BackgroundRole)') # orange
-            exec(f'{colorComboName}.setItemData(5,QColor(0,0,0,255),Qt.ForegroundRole)')
-            exec(f'{colorComboName}.setItemData(6,QColor(255,255,0,0),Qt.BackgroundRole)')# yellow
-            exec(f'{colorComboName}.setItemData(6,QColor(0,0,0,255),Qt.ForegroundRole)')
-            exec(f'{colorComboName}.setItemData(7,QColor(0,255,255,0),Qt.BackgroundRole)') # cyan
-            exec(f'{colorComboName}.setItemData(7,QColor(0,0,0,255),Qt.ForegroundRole)')
-            exec(f'{colorComboName}.setItemData(8,QColor(255,0,255,0),Qt.BackgroundRole)') # pink
-            exec(f'{colorComboName}.setItemData(8,QColor(0,0,0,255),Qt.ForegroundRole)')
-
-            
-            # exec(f'{colorComboName}.setStyleSheet("background-color: rgb(0,0,0); selection-background-color: rgba(255,255,255,1);selection-color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")')
-            # exec(f'{colorComboName}.setStyleSheet("selection-background-color: rgba(255,0,0,255);selection-color: rgb(255,255,255); font-size:{FONT_SIZE}pt;")')
-            # exec(f'{colorComboName}.setStyleSheet("color:{self.userInfo.UI_color_display[pos]};font-size:{FONT_SIZE}pt;")')
-
-            # create function that will be attached to this ComboBox only
-            exec(f'combo_highlighted = create_func({colorComboName})')
-            
-            exec(f'{colorComboName}.highlighted[int].connect(combo_highlighted)')
-            # exec(f'{colorComboName}.highlighted[int].connect(helper_exec)')
-            # src = f'{colorComboName}.highlighted[int].connect(lambda x: print(dir()) )'
-             
-            # exec(f'{colorComboName}.highlighted.connect(change_color)')
-            exec(f'{colorComboName}.setObjectName("{button.objectName()}")')
+            colorComboName = button.objectName()
+            colorCombo = ColorfulComboBox(self, rgbcd, self.userInfo.channelColors[button.objectName().replace("_"," ")].title() )
+            colorCombo.setObjectName(colorComboName)
             if button.objectName().replace("_"," ") in self.userInfo.channels:
                 button.setChecked(True)
             else:
                 button.setChecked(False)
             button.toggled.connect(self.saveChannel) #IMPORTANT that this comes after setting check values
-            exec(f'self.myColors.append({colorComboName})')
-            exec(f'{colorComboName}.activated.connect(self.saveColors)')
+            self.myColors.append(colorCombo)
+            colorCombo.activated.connect(self.saveColors)
             
             self.topLeftGroupLayout.addWidget(button, row//4,col%4)
-            exec(f'self.topLeftGroupLayout.addWidget({colorComboName},{row//4}, {(col%4)+1})')
+            self.topLeftGroupLayout.addWidget(colorCombo, row//4 ,  (col%4)+1 )
             row+=2; col+=2
-
-            
-        for colorWidget in self.myColors:
-            # Set each the color of each QSpin
-            colorWidget.setStyleSheet(f"background-color: rgba{COLOR_TO_RGB[colorWidget.currentText()]};color: rgb(0,0,0); font-size:{FONT_SIZE}pt;")
 
         self.topLeftGroupBox.setLayout(self.topLeftGroupLayout)    
         return self.topLeftGroupLayout, self.topLeftGroupBox
