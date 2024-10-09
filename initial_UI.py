@@ -38,13 +38,21 @@ COLOR_TO_RGB = {'gray': '(170,170,170, 255)', 'purple':'(160,32,240, 255)', 'blu
                     'yellow': '(255,215,0, 255)', 'pink': '(255,105,180, 255)', 'cyan' : '(0,220,255, 255)'}
 WIDGET_SELECTED = None
 
+class WindowTracker():
+    def __init__(self):
+        self.windows = []
+    
+    def start_application(self, app, userdata = None ):
+        new_window = ViewerPresets(app, tracker=self, userdata=userdata)
+        self.windows.append(new_window)
+        return new_window
 
 ''' This class contains the whole dialog box that the user interacts with and all it's widgets. Also contains
     an instance of the userPresets class, which will be passed to the viewer code. '''
 class ViewerPresets(QDialog):
-    def __init__(self, app, parent=None):
-        super(ViewerPresets, self).__init__(parent)
-        
+    def __init__(self, app: QApplication, tracker = None, userdata: store_and_load.userPresets | None = None):
+        super().__init__()
+        self.tracker = tracker
         self.app = app
         # Arrange title bar buttons
         self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
@@ -53,7 +61,10 @@ class ViewerPresets(QDialog):
         # self.setWindowFlag(Qt.WindowContextHelpButtonHint,False)
         # self.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
 
-        self.userInfo = store_and_load.loadObject('data/presets')
+        if userdata is not None:
+            self.userInfo = userdata
+        else:
+            self.userInfo = store_and_load.loadObject('profiles/active.gvconfig')
 
         # For TESTING
         print(f'Initial test print for colors: {self.userInfo.channelColors}')
@@ -153,9 +164,9 @@ class ViewerPresets(QDialog):
         scoring = QAction("Modify scoring decisions and colors", self)
         scoring.setShortcut("Ctrl+P")
         import_gvs = QAction("Import configuration file", self)
-        import_gvs.setShortcut("Shift+S")
+        import_gvs.setShortcut("Ctrl+I+C")
         export_gvs = QAction("Export configuration file", self)
-        export_gvs.setShortcut("Ctrl+S")
+        export_gvs.setShortcut("Ctrl+E+C")
         reset = QAction("Reset GUI to defaults", self)
         reset.setShortcut("Ctrl+R")
         channels = QAction("Select image channels", self)
@@ -219,6 +230,7 @@ class ViewerPresets(QDialog):
         if self.userInfo.view_settings_path is not None:
             self.saveViewSettings()
         self.clearFocus()
+        print("End init\n")
 
 
     def change_scoring_decisions(self):
@@ -269,9 +281,26 @@ class ViewerPresets(QDialog):
                 status += 'Double check that your image and object data file contents match what is listed in Preferences.<br> If problems persist, share the latest log with Peter at prichieri@mgh.harvard.edu.'
                 self.status_label.setText(status)
             case "import configuration":
-                self.status_label.setText("Coming soon")
+                parent_folder = "./profiles/" 
+                file_name, _ = QFileDialog.getOpenFileName(self,"Import configuration",parent_folder,"GalleryViewer Configuration File (*.gvconfig)")
+                if file_name == "": return None # User closed import window. Don't open up a new one...
+                tracker = self.tracker
+                tracker.start_application(self.app, userdata = store_and_load.loadObject(file_name) )
+                open_windows = tracker.windows
+                open_windows[0].close()
+                self = open_windows[1]
+                self.exec_()
+                self.status_label.setText("Import successful")
+
+                print("Import successful?")
             case "export configuration":
-                self.status_label.setText("Coming soon")
+                parent_folder = "./profiles/" 
+                file_name, _ = QFileDialog.getSaveFileName(self,"Export configuration",parent_folder,"GalleryViewer Configuration File (*.gvconfig)")
+                
+                if store_and_load.storeObject(self.userInfo, file_name):
+                    self.status_label.setText("Export successful")
+                else:
+                    self.status_label.setText("Export canceled")
             case _:
                 raise ValueError("Bad input to process_menu_action")
 
@@ -770,6 +799,9 @@ class ViewerPresets(QDialog):
             self.myColors.append(colorCombo)
             colorCombo.activated.connect(self.saveColors)
             
+            button.setStyleSheet(f"""
+                QCheckBox {{ font-size: 10pt;}}
+            """)
             self.topLeftGroupLayout.addWidget(button, row//4,col%4)
             self.topLeftGroupLayout.addWidget(colorCombo, row//4 ,  (col%4)+1 )
             row+=2; col+=2
@@ -782,9 +814,9 @@ class ViewerPresets(QDialog):
 
         # self.explanationLabel0 = QLabel("Custom object data <b>phenotype<b>")
         # self.explanationLabel1 = QLabel("Pull from an <b>annotation layer<b>")
-        explanationLabel2 = QLabel("Cell image size in <b>pixels</b>")
-        explanationLabel3 = QLabel("Number of cells <b>per page<b>")
-        explanationLabel4 = QLabel("Number of cells <b>per row<b>")
+        explanationLabel2 = QLabel("Gallery image size <b>(px)</b>")
+        explanationLabel3 = QLabel("Num. cells <b>per page<b>")
+        explanationLabel4 = QLabel("Num. cells <b>per row<b>")
         explanationLabel5 = QLabel("Load page with <b>Cell ID<b>")
         # self.explanationLabel0.setAlignment(Qt.AlignRight)
         # self.explanationLabel1.setAlignment(Qt.AlignRight)
@@ -1117,7 +1149,7 @@ class ViewerPresets(QDialog):
             self.findDataButton.setEnabled(True)
             return None
 
-        store_and_load.storeObject(self.userInfo, 'data/presets')
+        store_and_load.storeObject(self.userInfo, 'profiles/active.gvconfig')
         self.userInfo.session.image_display_name = pathlib.Path(self.userInfo.qptiff_path).name # save name of image for display later
         self.userInfo.session.image_scale = self._retrieve_image_scale()
         # If user fetched metadata, save changes to color mappings
@@ -1251,8 +1283,9 @@ if __name__ == '__main__':
     app.setStyleSheet(customStyle)
     app.setStyle('Fusion')
     print("Launching UI")
-    gallery = ViewerPresets(app)
-
+    main = WindowTracker()
+    gallery = main.start_application(app)
     gallery.show()
     sys.exit(ensure_saving(gallery,app))
+    # sys.exit(app.exec_())
     print("\nI should never see this.")

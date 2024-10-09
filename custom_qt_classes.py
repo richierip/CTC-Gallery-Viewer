@@ -555,10 +555,25 @@ class ViewSettingsDialog(QDialog):
                                             border: 2px solid black; border-radius: 4px; 
                                             border-color: black; height:20px; width: 14px }}""")
 
+    ''' Get color mappings from dialog widgets and read to user data'''
     def update_colors(self):
+        changed = []
         for fluor, ccb in self.ccbs.items():
-            self.user_data.channelColors[fluor] = ccb.color_name.lower()
-        self.color_function()
+            if self.user_data.channelColors[fluor] != ccb.color_name.lower():
+                changed.append(fluor)
+                self.user_data.channelColors[fluor] = ccb.color_name.lower()
+        self.color_function(changed)
+        self.update_widget_colors()
+    
+    ''' Get color mappings from user data and set widgets'''
+    def set_colors(self):
+        print("Showing full dict")
+        new_colors = copy.copy(self.user_data.channelColors) 
+        print("-------")
+        for fluor, ccb in self.ccbs.items():
+            print(f"Setting {fluor} ccb to the following color {new_colors[fluor].capitalize()} ")
+            ccb.setCurrentText(new_colors[fluor].capitalize())
+        self.color_function(list(self.ccbs.keys()))
         self.update_widget_colors()
 
     '''Called upon widget value change. Couldn't get it to update just the value changed, so this just overwrites every value.
@@ -621,11 +636,18 @@ class ViewSettingsDialog(QDialog):
             parent_folder = self.user_data.last_image_save_folder
             file_name, _ = QFileDialog.getOpenFileName(None,"Import viewsettings",parent_folder,"VIEWSETTINGS file (*.viewsettings)")
             df = pd.read_xml(file_name)
-            self.user_data.transfer_view_settings(df)
+            errors = self.user_data.transfer_view_settings(df)
             self.user_data.imported_view_settings = df
-            self.wipe_viewsettings(mode="Reset")
-            self.change_viewsettings()
-            self.status_label.setText('<font color="#4c9b8f">Import successful</font>')
+            self.wipe_viewsettings(mode="Reset") # Change dialog sliders and numbers to match
+            self.change_viewsettings() # Change viewer settings
+            self.set_colors()
+            if errors != []:
+                self.status_label.setText('<font color="#4c9b8f">Import successful</font>')
+            else:
+                status = ''
+                for e in errors:
+                    status += f'{e}\n'
+                self.status_label.setText(f'<font color="#bd4545"{status}</font>')
 
         except lxml.etree.XMLSyntaxError as e:
                 print("xml")
@@ -634,6 +656,7 @@ class ViewSettingsDialog(QDialog):
                 # self.setWidgetColorBackground(self.viewSettingsEntry, "#4c9b8f")
                 # QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.viewSettingsEntry, "#ffffff"))
                 self.status_label.setText('<font color="#bd4545">Import error: bad XML syntax in viewsettings file</font>')
+        
         except Exception as e:
                 print("other")
                 # self._append_status_br('<font color="#ffa000"> Unable to read .viewsettings file, will use defaults instead</font>')  
@@ -648,16 +671,18 @@ class ViewSettingsDialog(QDialog):
     but only show maybe 10-15 at a time. Some CSS needed to make it feel more responsive. '''
 
 class ColorfulComboBox(QComboBox):
-    def __init__(self, parent, color_dict: dict, selection:str = 'Grey'):
+    def __init__(self, parent, color_dict: dict, selection:str = 'Grey', text_size = "10pt"):
         super(ColorfulComboBox, self).__init__(parent)
         super().setMaxVisibleItems(10)
         self.color_dict = color_dict
         self.init_color_backgrounds()
         self.currentIndexChanged.connect(self.change_active_item_color)
         self.highlighted[int].connect(self.item_highlighted)
+        self.text_size = text_size
         self.setStyleSheet(f"""
             QComboBox {{ combobox-popup: 0; 
-                        color: white;           
+                        color: white;  
+                        font-size: {self.text_size};         
                         background-color: {self.color_dict[selection]};
                         border: 1px solid gray;}}
             QComboBox::drop-down {{ background: none; }}
@@ -710,6 +735,7 @@ class ColorfulComboBox(QComboBox):
                     }}
             QComboBox {{
                 combobox-popup: 0;
+                font-size: {self.text_size};
                 color: {active_text_color};           
                 background-color: {active_bg_color};
                 border: 1px solid gray;
@@ -726,6 +752,7 @@ class ColorfulComboBox(QComboBox):
         self.setStyleSheet(f"""
             QComboBox {{
                 combobox-popup: 0;
+                font-size: {self.text_size};
                 color: {text_color};           
                 background-color: {current_color_value};
                 border: 1px solid gray;
@@ -768,29 +795,41 @@ def make_fluor_toggleButton_stylesheet(clr: str = "gray" , toggled: bool = False
         b = _clamp(b * scalefactor)
         return "#%02x%02x%02x" % (r, g, b)
     
+    ''' Takes QT Color'''
+    def _is_dark_color(color):
+        if not color.isValid():
+            return False
+        r, g, b, _ = color.getRgb()
+        luminance = 0.299 * r + 0.587 * g + 0.114 * b
+        return luminance < 128
+    
     clr = custom_color_functions.colormap[clr] if clr !="None" else '#b6b6b6'
     dark_clr = _colorscale(clr, 0.6)
 
     darkgray = "#333333"
+
+    text_color = 'white'if _is_dark_color(QtGui.QColor(clr)) else "black"
+
     if toggled: # Button is 'off'. Should be muted and indicate that the fluor is not being displayed
-        style = f"QPushButton {{background-color: {'white' if absorption else darkgray}; \
-                            border-style: inset; \
-                            border-width: 2px; \
-                            border-radius: 10px; \
-                            border-color: {clr}; \
-                            min-width: 5em; \
-                            padding: 2px;  }} \
-            QPushButton:pressed{{background-color: {clr}; \
-                                border-style: outset; }}"
+        style = f"""QPushButton {{background-color: {'white' if absorption else darkgray};
+                            border-style: inset;
+                            border-width: 2px;
+                            border-radius: 10px;
+                            border-color: {clr};
+                            min-width: 5em;
+                            padding: 2px;  }}
+            QPushButton:pressed{{background-color: {clr};
+                                border-style: outset; }}"""
     else: # Button is 'on'. should be colored and indicate that the fluor is active
-        style = f"QPushButton {{background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 {clr},stop: 0.4 {clr},  stop: 1 {dark_clr}); \
-                            border-style: outset; \
-                            border-width: 2px; \
-                            border-radius: 10px; \
-                            border-color: {darkgray if absorption else 'white'}; \
-                            min-width: 5em; \
-                            padding: 2px;  }} \
-            QPushButton:pressed{{background-color: {'white' if absorption else darkgray}; \
-                                border-style: inset; }}"
+        style = f"""QPushButton {{background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 {clr},stop: 0.4 {clr},  stop: 1 {dark_clr}); \
+                            border-style: outset;
+                            border-width: 2px;
+                            border-radius: 10px;
+                            border-color: {darkgray if absorption else 'white'};
+                            color: {text_color};
+                            min-width: 5em;
+                            padding: 2px;  }}
+            QPushButton:pressed{{background-color: {'white' if absorption else darkgray};
+                                border-style: inset; }}"""
     return style
 

@@ -87,7 +87,7 @@ def _resize(image):
         anti_aliasing=False
     )
 ## From _stitch.py
-def write_pyramid(image, scale_dict, store, path):
+def write_pyramid(image: da, scale_dict, store, path):
     PYRAMID_LEVELS = math.floor(math.log2(max(image.shape)/256))
     um_per_px = scale_dict["um_per_px"]
     pyramid_scale = 1

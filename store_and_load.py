@@ -22,7 +22,8 @@ import logging
 import os
 from datetime import datetime
 from qtpy.QtWidgets import QToolTip
-from custom_color_functions import colormap
+from custom_color_functions import colormap, hex_color_from_decimal, decimal_color_from_hex
+import pathlib
 
 CELL_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'cyan', 'pink'] # List of colors available to use as colormaps
 CHANNELS_STR = ["DAPI", "Opal 570", "Opal 690", "Opal 480","Opal 620","Opal 780", "Opal 520", "AF"] # List of String names for fluors the user wants to display  
@@ -183,12 +184,41 @@ class userPresets:
     0   0        255           1         1    0.5  ...  0.019608  0.588235     True                5              150
     1   1   16776960           1         1    0.5  ...  0.019608  0.588235     True                5              150'''
     def transfer_view_settings(self, vs_table):
+        
+        cname_dict = {code : cname for cname, code in colormap.items()}
+        
+        issues = []
+        def _catch_problems(self_param, pos, table_column, inform_index_error = False):
+            try:
+                self.view_settings[f'{fluor} {self_param}'] = vs_table.iloc[pos][table_column]
+                return []
+            except KeyError:
+                return [f"Could not find {table_column} in the viewsettings file"]
+            except IndexError:
+                if not inform_index_error:
+                    return [f"Viewsettings file contains data for channel {pos}, but the loaded image only has {len(self.channels)} channels"]
+                else:
+                    return []
+
+        #TODO what if there's a miss for a code? Need to create a new color and add it to the table
         for pos, fluor in enumerate(self.channelOrder):
             if fluor == "Composite": continue
-            self.view_settings[f'{fluor} gamma'] = vs_table.iloc[pos]['Gamma']
-            self.view_settings[f'{fluor} black-in'] = vs_table.iloc[pos]['BlackInAbsolute']
-            self.view_settings[f'{fluor} white-in'] = vs_table.iloc[pos]['WhiteInAbsolute']
-        return True
+            
+            issues += _catch_problems('gamma',pos,'Gamma', inform_index_error= True)
+            issues += _catch_problems('black-in',pos,'BlackInAbsolute')
+            issues += _catch_problems('white-in',pos,'WhiteInAbsolute')
+            try:
+                hc = hex_color_from_decimal(vs_table.iloc[pos]['ColorCode'])
+                self.channelColors[fluor] = cname_dict[hc]
+            except IndexError:
+                pass # Already would have informed user about this above
+            except KeyError:
+                #TODO add automatically?
+                issues += [f"The color {hc} does not currently exist in my table. Please add it and try again"]
+            except (ValueError, TypeError):
+                issues += [f"Cannot parse the color passed for channel {pos} ({fluor}). HALO format viewsettings use decimal color codes"]
+            
+        return issues
     
     ''' Create a .viewsettings file compatible with HALO from the current view settings
         If the user imported a view settings file at the start, we will work from that. '''
@@ -202,11 +232,11 @@ class userPresets:
             df = self.imported_view_settings
             # Set color codes, 
             for i, (fluor, color_hex) in enumerate(user_colors_hex.items()):
-                color_dec = int(color_hex.strip('#'), 16)
+                color_dec = decimal_color_from_hex(color_hex)
                 df.loc[df["Id"] == i, "ColorCode"] = color_dec
-                df.loc[df["Id"] == i, "BlackInAbsolute"] = self.session.view_settings[f'{fluor} black-in']
+                df.loc[df["Id"] == i, "BlackInAbsolute"] = int(self.session.view_settings[f'{fluor} black-in'])
                 df.loc[df["Id"] == i, "BlackIn"] = self.session.view_settings[f'{fluor} black-in'] / 255
-                df.loc[df["Id"] == i, "WhiteInAbsolute"] = self.session.view_settings[f'{fluor} white-in']
+                df.loc[df["Id"] == i, "WhiteInAbsolute"] = int(self.session.view_settings[f'{fluor} white-in'])
                 df.loc[df["Id"] == i, "WhiteIn"] = self.session.view_settings[f'{fluor} white-in'] / 255
                 df.loc[df["Id"] == i, "Gamma"] = self.session.view_settings[f'{fluor} gamma'] 
                 df.loc[df["Id"] == i, "Visible"] = True if fluor in self.active_channels else False
@@ -218,15 +248,15 @@ class userPresets:
             df = pd.DataFrame([], columns = vscols)
             for i, (fluor, color_hex) in enumerate(user_colors_hex.items()):
                 row = { 'Id' : i, 
-                        'ColorCode': [ int(color_hex.strip('#'), 16) ], 
+                        'ColorCode': [ decimal_color_from_hex(color_hex) ], 
                         'Brightness': [1], 'Contrast':[1], 
                         'Gamma':[ self.session.view_settings[f'{fluor} gamma'] ], 
                         'Absorption': [1 if self.session.absorption_mode else 0],
                         'BlackIn': [self.session.view_settings[f'{fluor} black-in'] / 255], 
                         'WhiteIn': [self.session.view_settings[f'{fluor} white-in'] / 255], 
                         'Visible': [True if fluor in self.active_channels else False], 
-                        'BlackInAbsolute': [self.session.view_settings[f'{fluor} black-in']], 
-                        'WhiteInAbsolute':[self.session.view_settings[f'{fluor} white-in']]}
+                        'BlackInAbsolute': [int(self.session.view_settings[f'{fluor} black-in'])], 
+                        'WhiteInAbsolute':[int(self.session.view_settings[f'{fluor} white-in'])]}
                 df = pd.concat([df, pd.DataFrame.from_dict(row)])
 
         #TODO Check if the unpaired </CustomName> tags don't actually work on import with HALO
@@ -336,6 +366,8 @@ class userPresets:
 def storeObject(obj : userPresets, filename : str):
     ''' Write the class object to a file. Default location is data/presets'''
     try:
+        if not pathlib.Path(filename).parent.exists(): # Create the profiles/ folder
+            pathlib.Path(filename).parent.mkdir()
         obj.session = sessionVariables() # reset per-session variables to save space
         obj.fonts = None
         outfile = open(filename, 'wb' )
@@ -350,6 +382,8 @@ def storeObject(obj : userPresets, filename : str):
 def loadObject(filename):
     ''' Read the class object from a file. Default location is data/presets'''
     try:
+        if not pathlib.Path(filename).parent.exists(): # Create the profiles/ folder
+            pathlib.Path(filename).parent.mkdir()
         infile = open(filename,'rb')
         new_obj = pickle.load(infile)
         infile.close()

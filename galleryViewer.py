@@ -218,12 +218,14 @@ def restore_viewsettings_from_cache(arrange_multichannel = False, viewer = VIEWE
         # call worker func
         _modify_images_in_modes(fluor)
 
-def set_layer_colors():
+def set_layer_colors(modified_fluors):
     for mode in ("Gallery ", "Multichannel ", "Context "):
         for fluor, color in userInfo.channelColors.items():
-            if fluor not in userInfo.active_channels: continue
+            if (fluor not in userInfo.active_channels) or (fluor not in modified_fluors): 
+                continue
             cm_name = color if not SESSION.absorption_mode else color+' inverse'
             VIEWER.layers[mode+fluor].colormap = custom_color_functions.retrieve_cm(cm_name)
+    fluor_button_toggled(modified_fluors)
 ## --- Bottom bar functions and GUI elements 
 
 ''' DEPRECATED -- replaced by a button that summons a ViewSettingsDialog'''
@@ -352,8 +354,8 @@ def toggle_absorption():
         bg.setStyleSheet(open(f"data/docked_group_box_border_{oldmode}.css").read())
     VIEWER.theme = newmode
 
-def fluor_button_toggled():
-    # keep track of visible channels in global list and then toggle layer visibility
+def fluor_button_toggled(outdated_fluors: list | None = None):
+    '''keep track of visible channels in global list and then toggle layer visibility'''
     userInfo.active_channels = []
     for toggle in UPDATED_CHECKBOXES:
         name = str(toggle.objectName())
@@ -362,7 +364,14 @@ def fluor_button_toggled():
         if not toggle.isChecked():
             userInfo.active_channels.append(name)
         
-        toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
+        match outdated_fluors:
+            case list():
+                if toggle.objectName() in outdated_fluors:
+                    toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
+            case _:
+                toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
+                print(f"This arg is of type {type(outdated_fluors)}")
+                # raise ValueError("Unable to parse argument. Expected a list or None (default)")
         
         
     print(userInfo.active_channels)
@@ -2562,7 +2571,7 @@ def chn_key_wrapper(viewer):
                 widget_obj.setChecked(False)
             else:
                 widget_obj.setChecked(True)
-            fluor_button_toggled() 
+            fluor_button_toggled([channel]) 
             viewer.window._qt_viewer.setFocus()
         return toggle_channel_visibility
 
