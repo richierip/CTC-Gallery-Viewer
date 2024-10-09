@@ -41,7 +41,7 @@ WIDGET_SELECTED = None
 class WindowTracker():
     def __init__(self):
         self.windows = []
-    
+    @classmethod
     def start_application(self, app, userdata = None ):
         new_window = ViewerPresets(app, tracker=self, userdata=userdata)
         self.windows.append(new_window)
@@ -232,15 +232,17 @@ class ViewerPresets(QDialog):
         self.clearFocus()
         print("End init\n")
 
-
+    ''' Summon dialog box for changing scoring labels'''
     def change_scoring_decisions(self):
         scoring = ScoringDialog(self.app, self.userInfo, {"pheno_widget":self.phenotypeStatuses,"anno_widget": self.annotationStatuses})
         scoring.exec()
 
+    ''' Summon dialog box for changing image data channel order / fluorophore names'''
     def change_channels(self):
         channels = ChannelDialog(self.app, self.userInfo, self.topLeftGroupLayout, self.topLeftGroupBox , self.createTopLeftGroupBox)
         channels.exec()
 
+    ''' Called when a menu bar option is selected'''
     def process_menu_action(self,q):
         class partialMatch(str):
             def __eq__(self, other):
@@ -304,7 +306,7 @@ class ViewerPresets(QDialog):
             case _:
                 raise ValueError("Bad input to process_menu_action")
 
-
+    ''' Anachronistic. Switched to only checking input when Preview button is clicked'''
     def saveQptiff(self):
         cleanpath = os.path.normpath(self.qptiffEntry.text().strip('"')).strip('.')
         if os.path.exists(cleanpath):
@@ -314,6 +316,8 @@ class ViewerPresets(QDialog):
         #     self.previewImageDataButton.setEnabled(True)
         # else:
         #     self.previewImageDataButton.setEnabled(False)
+    
+    ''' Anachronistic. Switched to only checking input when Preview button is clicked'''
     def saveObjectData(self):
         cleanpath = os.path.normpath(self.dataEntry.text().strip('"')).strip('.')
         if os.path.exists(cleanpath):
@@ -324,6 +328,7 @@ class ViewerPresets(QDialog):
         # else:
         #     self.previewObjectDataButton.setEnabled(False)
 
+    ''' Called on viewer start if there's a path written and if the view settings button is clicked'''
     def saveViewSettings(self):
         import lxml
         try:
@@ -349,6 +354,8 @@ class ViewerPresets(QDialog):
                 self._log_problem(e, error_type= 'unspecified-viewsettings-issue')
                 self.setWidgetColorBackground(self.viewSettingsEntry, "#4c9b8f")
                 QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.viewSettingsEntry, "#ffffff"))
+    
+    ''' Internalize the ID of a cell that should be shown in the first open page of cells. Different for if the data has annotations or not.'''
     def saveSpecificCell(self):
         try:
             if self.specificCellChoice.text() == '':
@@ -363,20 +370,28 @@ class ViewerPresets(QDialog):
             print('Bad input to "Specific Cell" widget. Saving as NoneType')
             self.userInfo.specific_cell = None
     
+    ''' Internalize cutout size of cell images'''
     def saveImageSize(self):
         val = self.imageSize.value()
         # Make sure it's an even number. Odd number causes an off by one issue that I don't want to track down.
         self.userInfo.imageSize = val if val%2==0 else val+1
+   
+    ''' Internalize number of cells to show per page'''
     def savePageSize(self):
         self.userInfo.page_size = self.page_size_widget.value()
         self.row_size_widget.setRange(2,self.userInfo.page_size)
+    
+    ''' Internalize number of cells per row'''
     def saveRowSize(self):
         self.userInfo.cells_per_row = self.row_size_widget.value()
         print(f"Row size is now {self.userInfo.cells_per_row}")
+    
+    ''' Internalize channel to sort cells by'''
     def saveGlobalSort(self):
         print("Saving global sort")
         self.userInfo.global_sort = self.global_sort_widget.currentText()
 
+    ''' Internalize channels to show in viewer'''
     def saveChannel(self):
         for button in self.mycheckbuttons:
             channelName = button.objectName().replace("_"," ")
@@ -385,6 +400,7 @@ class ViewerPresets(QDialog):
             elif not button.isChecked():
                 self.userInfo.attempt_channel_remove(channelName)
 
+    ''' Internalize mappings of channel names to colors'''
     def saveColors(self):
         for colorWidget in self.myColors:
             channelName = colorWidget.objectName().replace("_"," ")
@@ -394,6 +410,7 @@ class ViewerPresets(QDialog):
             self.userInfo.channelColors[channelName] = colorWidget.currentText()
         print(f"Current mapping is {self.userInfo.channelColors}")
 
+    ''' Internalize annotations to use as a filter'''
     def addAnnotation(self):
         # Get status and color from combobox
         status = self.annotationStatuses.currentText()
@@ -421,6 +438,7 @@ class ViewerPresets(QDialog):
         self.userInfo.annotation_mappings_label = self.annotationDisplay.text()
         self.userInfo.annotation_mappings[anno] = status
     
+    ''' Internalize phenotypes to use a filter'''
     def addPheno(self):
         # Get status and color from combobox
         status = self.phenotypeStatuses.currentText()
@@ -449,6 +467,7 @@ class ViewerPresets(QDialog):
         self.userInfo.phenotype_mappings_label = self.phenoDisplay.text()
         self.userInfo.phenotype_mappings[pheno] = status
 
+    ''' Internalize intensity threshold filters to add to viewer query'''
     def addFilter(self):
         if self.filterMarkerCombo.isVisible():
             fil = self.filterMarkerCombo.currentText()
@@ -470,6 +489,7 @@ class ViewerPresets(QDialog):
         self.userInfo.filters_label = self.filterDisplay.text()
         self.userInfo.filters.append(f"{fil} {fil_compare_query} {fil_number}")   
 
+    ''' Reset all annotations, filters, and phenotypes'''
     def reset_mappings(self, examine_object_data = True):
         #phenotype
         self.userInfo.phenotype_mappings = {}
@@ -493,10 +513,12 @@ class ViewerPresets(QDialog):
         if examine_object_data:
             self.prefillObjectData(fetch=False)
 
+    ''' Call the logger'''
     def _log_problem(self, e, logpath= None, error_type = None):
         # Log the crash and report key variables
         self.userInfo.log_exception(e, logpath, error_type)
 
+    ''' Add path to viewsettings on button click'''
     def fetchViewsettingsPath(self):
         path = self.userInfo.last_system_folder_visited
 
@@ -512,6 +534,7 @@ class ViewerPresets(QDialog):
         self.viewSettingsEntry.clear()
         self.viewSettingsEntry.insert(pathlib.Path(fileName).name)
 
+    ''' Called on button click'''
     def fetchObjectDataPath(self):
         path = self.userInfo.last_system_folder_visited
 
@@ -526,6 +549,7 @@ class ViewerPresets(QDialog):
         self.dataEntry.clear()
         self.dataEntry.insert(pathlib.Path(fileName).name)
 
+    ''' Called on button click. Read a valid object data file and inform the user of the results'''
     def prefillObjectData(self, fetch = True):
         def _generate_no_anno_string(phenos):
             status = ''
@@ -549,27 +573,22 @@ class ViewerPresets(QDialog):
         try:
             if fetch: 
                 self.fetchObjectDataPath()
-
                 # Have to reset the widgets here since these widgets could be filled out already
                 self.reset_mappings(examine_object_data=False)
-
             # Now get information and pass to widgets
             res = self._prefillObjectData()
             annos = self.annotationCombo.count()
             phenos = self.phenotypeCombo.count()
             self.status_label.setVisible(True)
-
             
             if res == 'no annotations':
                 status = _generate_no_anno_string(phenos)
                 self.status_label.setText(status)
                 self.setWidgetColorBackground(self.dataEntry, "#55ff55")
                 QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
-                # self.previewObjectDataButton.setStyleSheet(f"color: #4c9b8f") 
             elif res == 'passed':
                 status = _generate_typical_string(annos,phenos)
                 self.status_label.setText(status)
-                # self.previewObjectDataButton.setStyleSheet(f"color: #4c9b8f")
                 self.setWidgetColorBackground(self.dataEntry, "#55ff55")
                 QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
             elif res == 'name conflict':
@@ -580,7 +599,7 @@ class ViewerPresets(QDialog):
                 self.status_label.setText(status)
                 self.setWidgetColorBackground(self.dataEntry, "#4c9b8f")
                 QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
-                # self.previewObjectDataButton.setStyleSheet(f"color: #ffa000")
+        
         except Exception as e:
             self._log_problem(e, error_type="csv-metadata-warning")
             # Inform user of possible issue
@@ -592,6 +611,10 @@ class ViewerPresets(QDialog):
             self.setWidgetColorBackground(self.dataEntry, "#ffa000")
             QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
     
+    ''' Worker function to read and object data file and check for compatibility. Dynamic columns names present a challenge. 
+            Tries to only pull in column data that is relevant. 
+            Sets widgets to visible -- dependent on the data
+            Also check if the image location in the data matches the image given'''
     def _prefillObjectData(self):
         headers = pd.read_csv(self.userInfo.objectDataPath, index_col=False, nrows=0).columns.tolist() 
         possible_fluors = self.userInfo.possible_fluors_in_data
@@ -652,6 +675,7 @@ class ViewerPresets(QDialog):
             pass # No name columns that I know of, move on.
         return 'passed'
 
+    ''' Helper to change a stylesheet for a label widget'''
     def setWidgetColorBackground(self, widg, color):
         widg.setStyleSheet(f"background: {color}")
 
@@ -659,6 +683,8 @@ class ViewerPresets(QDialog):
     #     self.textInput.configure(bg = 'green')
     #     self.window.after(150, self.resetInputColor)
 
+    ''' Called on UI init and button click. Saves contents of entry box if it appears to be a valid image, or prompts the user to select one through
+            the OS file system.'''
     def fetchImagePath(self):
         path = self.userInfo.last_system_folder_visited
         current_entry = self.qptiffEntry.text().strip('"').strip("' ")
@@ -672,6 +698,7 @@ class ViewerPresets(QDialog):
         self.qptiffEntry.clear()
         self.qptiffEntry.insert(pathlib.Path(fileName).name)
 
+    ''' Called on UI init and button click. Read a valid image file to parse the metadata and inform the user of the results'''
     def prefillImageData(self, fetch = True):
         try:
             if fetch:
@@ -702,7 +729,8 @@ class ViewerPresets(QDialog):
             self.status_label.setText(status)
             # self.previewImageDataButton.setEnabled(False)
             # self.previewImageDataButton.setStyleSheet(f"color: #ffa000")
-        
+    
+    ''' Helper function to attempt to get the TIF tag for PixelSizeMicrons'''
     def _retrieve_image_scale(self):
         ''' Get pixel per um value for the image'''
         try:
@@ -720,6 +748,9 @@ class ViewerPresets(QDialog):
             # exit()
             return None
 
+    ''' Worker function that parses QPTIFF metadata looking for a few key pieces of information
+            Looking for channel names, order in multichannel image, and color mappings
+            Also configure checkboxes and dropdowns to '''
     def _prefillImageData(self):
         path = self.userInfo.qptiff_path
         # Parse annoying TIF metadata
@@ -735,11 +766,12 @@ class ViewerPresets(QDialog):
         for i in range(0,len(raw),2):
             fluors[raw[i]] = raw[i+1]
         
+        ''' Preempt possibility of differences here'''
         def rename_key(key):
             af_possibilities = ["SampleAF", 'Sample AF', 'Autofluorescence']
             if key in af_possibilities: key = 'AF'
             return key
-        
+    
         # rename keys to ensure channels are mapped to a color we have a colormap for  
         for key in list(fluors.keys()):
             fluors[rename_key(key)] = fluors.pop(key).lower().replace('white', 'gray')
@@ -758,6 +790,7 @@ class ViewerPresets(QDialog):
                     unused_colors.remove(random_color)
                 fluors[key] = random_color
 
+        ''' Set everything to checked?'''
         for button in self.mycheckbuttons:
             button.setChecked(False)
             widget_name = button.objectName().replace("_"," ")
@@ -776,6 +809,7 @@ class ViewerPresets(QDialog):
         # self.saveColors()
         return 'passed'
     
+    ''' Construct widgets for channel checkboxes and color dropdowns'''
     def createTopLeftGroupBox(self, layout: None|QGridLayout = None, groupbox: None|QGroupBox = None ):
         self.topLeftGroupBox = groupbox if groupbox is not None else QGroupBox("Channels and Colors")
         
@@ -809,22 +843,14 @@ class ViewerPresets(QDialog):
         self.topLeftGroupBox.setLayout(self.topLeftGroupLayout)    
         return self.topLeftGroupLayout, self.topLeftGroupBox
     
+    ''' Construct widgets for cell filters area'''
     def createTopRightGroupBox(self):
         self.topRightGroupBox = QGroupBox("Cells to Read")
 
-        # self.explanationLabel0 = QLabel("Custom object data <b>phenotype<b>")
-        # self.explanationLabel1 = QLabel("Pull from an <b>annotation layer<b>")
         explanationLabel2 = QLabel("Gallery image size <b>(px)</b>")
         explanationLabel3 = QLabel("Num. cells <b>per page<b>")
         explanationLabel4 = QLabel("Num. cells <b>per row<b>")
         explanationLabel5 = QLabel("Load page with <b>Cell ID<b>")
-        # self.explanationLabel0.setAlignment(Qt.AlignRight)
-        # self.explanationLabel1.setAlignment(Qt.AlignRight)
-        # explanationLabel2.setAlignment(Qt.AlignRight)
-        # explanationLabel3.setAlignment(Qt.AlignRight)
-        # explanationLabel4.setAlignment(Qt.AlignRight)
-        # explanationLabel5.setAlignment(Qt.AlignRight)
-        # explanationLabel5 = QLabel("Number of cells <b>per row<b>")
         
         #------------------ Annotation widgets
         self.annotationButton = QPushButton("Add Annotation")
@@ -881,19 +907,16 @@ class ViewerPresets(QDialog):
         self.filterNumber = QDoubleSpinBox(self.topRightGroupBox)
         self.filterNumber.setRange(0,1000)
        
-
         # Pheno / annotation selection display label
         self.filterDisplay = QLabel(self.topRightGroupBox)
         self.filterDisplay.setText(self.userInfo.filters_label)
         self.filterDisplay.setAlignment(Qt.AlignTop)
         self.filterDisplay.setStyleSheet("line-height:1.5")
 
-
         # Reset button 
         self.resetButton = QPushButton('Reset choices',self.topRightGroupBox)
         self.resetButton.pressed.connect(self.reset_mappings)
         self.resetButton.setStyleSheet(f"QPushButton {{ font-size: 14px}}")
-
 
         self.imageSize = QSpinBox(self.topRightGroupBox)
         self.imageSize.setRange(50,1000)
@@ -939,7 +962,6 @@ class ViewerPresets(QDialog):
         self.global_sort_widget.setCurrentText(self.userInfo.global_sort)
         self.global_sort_widget.currentTextChanged.connect(self.saveGlobalSort)
 
-
         layout = QGridLayout()
         layout.addWidget(self.filterButton,0,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel0,0,0)
         layout.addWidget(self.filterMarker,0,1,Qt.AlignTop) ; layout.addWidget(self.filterMarkerCombo,0,1,Qt.AlignTop)
@@ -975,9 +997,9 @@ class ViewerPresets(QDialog):
         layout.rowStretch(-100)
         self.topRightGroupBox.setLayout(layout)
 
+    '''Check to see if validation columns are in the data (won't be on first run)
+            Put them in place if needed'''
     def _check_validation_cols(self,df):
-        # Check to see if validation columns are in the data (won't be on first run)
-        #   Put them in place if needed
         try:
             for status in list(self.userInfo.statuses.keys()):
                 df.loc[2,f"Validation | {status}"]
@@ -1017,6 +1039,7 @@ class ViewerPresets(QDialog):
         self._append_status('<font color="#7dbc39">  Done. </font>') 
         return df
 
+    ''' Iterate through phenotype mappings collected from user and assign new statuses to cells if needed'''
     def assign_phenotype_statuses_to_sheet(self,df):
         l = list(set(self.userInfo.phenotype_mappings.keys()))
         if (not self.userInfo.phenotype_mappings):
@@ -1124,8 +1147,11 @@ class ViewerPresets(QDialog):
         current = self.status_label.text()
         self.status_label.setText(current + status)
         self.app.processEvents()
-
     
+    ''' Attempt to start viewer. Stop if there's an issue. Alert user with status label
+            Store .gvconfig object to disk
+            Set some final session parameters
+            Call GUI_execute '''
     def loadGallery(self):
         # self.status_label.setVisible(True)
         # self.app.processEvents()
@@ -1159,10 +1185,6 @@ class ViewerPresets(QDialog):
         print(f'CHANNELS : {self.userInfo.channels}')
         print(f'CHANNELS ORDER : {self.userInfo.channelOrder}')
         print(f'CHANNELS colors : {self.userInfo.channelColors}')
-        # print(f'View Settings : {self.userInfo.view_settings}')
-
-        # self.app.setStyleSheet('')
-        # Now the galleryViewer file loads the presets 
 
         try:
             print('Calling GUI execute...')
