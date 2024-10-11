@@ -42,7 +42,7 @@ import pathlib
 from datetime import datetime
 
 # These files were created as part of the GalleryViewer Project
-import store_and_load
+import storage_classes
 from custom_qt_classes import StatusCombo, ViewSettingsDialog, make_fluor_toggleButton_stylesheet
 # from initial_UI import VERSION_NUMBER
 
@@ -50,7 +50,7 @@ from custom_qt_classes import StatusCombo, ViewSettingsDialog, make_fluor_toggle
 ######-------------------- Globals, will be loaded through pre-processing QT gui #TODO -------------######
 VERSION_NUMBER = '1.3.5'
 QPTIFF_LAYER_TO_RIP = 0 # 0 is high quality. Can use 1 for testing (BF only, loads faster)
-cell_colors = store_and_load.CELL_COLORS
+cell_colors = storage_classes.CELL_COLORS
 print('\n--------------- adding custom cmaps\n')
 
 for colormap in custom_color_functions.rgb_color_dict.keys():
@@ -75,8 +75,9 @@ PHENOTYPES = ['Tumor'] #'CTC 488pos'
 ANNOTATIONS = []
 GLOBAL_SORT = None
 
-userInfo = store_and_load.loadObject('data/presets')
-SESSION = userInfo.session # will store non-persistent global variables that need to be accessible
+user = storage_classes.loadObject('profiles/active.gvconfig')
+gvdata = user.current_data
+SESSION = user.session # will store non-persistent global variables that need to be accessible
 
 VIEWER = None
 SAVED_INTENSITIES={}; 
@@ -84,7 +85,7 @@ RAW_PYRAMID=None
 SESSION.widget_dictionary = {}
 NO_LABEL_BOX = False
 STATUS_COLORS = {}
-STATUSES_TO_HEX = store_and_load.STATUSES_HEX
+STATUSES_TO_HEX = storage_classes.STATUSES_HEX
 STATUSES_RGBA = {}
 UPDATED_CHECKBOXES = []
 ANNOTATIONS_PRESENT = False # Track whether there is an 'Analysis Regions' field in the data (duplicate CIDs possible)
@@ -98,22 +99,22 @@ def adjust_composite_gamma(layer, gamma):
     try:
         layer.gamma = 2-(2*gamma) + 0.001 # avoid gamma = 0 which causes an exception
     except ValueError as e:
-        userInfo.log_exception(e, error_type="adjust-gamma-slider-exception")
+        gvdata.log_exception(e, error_type="adjust-gamma-slider-exception")
 
 def adjust_composite_limits(layer, limits):
     try:
         layer.contrast_limits = limits
     except ValueError as e:
-        userInfo.log_exception(e, error_type="adjust-composite-limits-slider-exception")
+        gvdata.log_exception(e, error_type="adjust-composite-limits-slider-exception")
 
 def hide_invisible_multichannel_fluors():
     
-    all_fluors = [x for x in userInfo.channels if x != "Composite"]
-    active_fluors_only = all_fluors if "Composite" in userInfo.active_channels else [x for x in userInfo.active_channels]
+    all_fluors = [x for x in gvdata.channels if x != "Composite"]
+    active_fluors_only = all_fluors if "Composite" in gvdata.active_channels else [x for x in gvdata.active_channels]
 
-    if "Composite" in userInfo.active_channels or len(active_fluors_only) == len(userInfo.channels): # Reference list has 'Composite' in it
+    if "Composite" in gvdata.active_channels or len(active_fluors_only) == len(gvdata.channels): # Reference list has 'Composite' in it
         # Want to show everything in this case. Use the full image.
-        for fluor in userInfo.channels:
+        for fluor in gvdata.channels:
             if fluor == "Composite": continue
             VIEWER.layers[f"Multichannel {fluor}"].data = copy.copy(SESSION.multichannel_page_images[fluor])
             VIEWER.layers[f"Multichannel Nuclei Boxes"].data = copy.copy(SESSION.multichannel_nuclei_box_coords)
@@ -123,14 +124,14 @@ def hide_invisible_multichannel_fluors():
     num_active_channels = len(active_fluors_only)
     SESSION.cells_per_row['Multichannel'] = num_active_channels + 1
     num_channels = len(all_fluors)
-    imsize = userInfo.imageSize+2
-    page_shape = (PAGE_SIZE*(userInfo.imageSize+2),(userInfo.imageSize+2) * (num_active_channels+1)) 
+    imsize = gvdata.imageSize+2
+    page_shape = (PAGE_SIZE*(gvdata.imageSize+2),(gvdata.imageSize+2) * (num_active_channels+1)) 
     if num_active_channels ==1 : 
-        page_shape = (PAGE_SIZE*(userInfo.imageSize+2),(userInfo.imageSize+2) * (num_active_channels)) 
+        page_shape = (PAGE_SIZE*(gvdata.imageSize+2),(gvdata.imageSize+2) * (num_active_channels)) 
 
     fullpage_col = 1
     collapsed_col = 1
-    for fluor in userInfo.channels:
+    for fluor in gvdata.channels:
         if fluor not in all_fluors: continue
         # print(f"looping on {fluor},{pos}  ||| {fullpage_col} {collapsed_col}")
         if fluor in active_fluors_only:
@@ -147,8 +148,8 @@ def hide_invisible_multichannel_fluors():
 
         # x1 = int(cell["XMin"] + offset - cell_x) ; x2 = int(cell["XMax"] + offset - cell_x)
         # y1 = int(cell["YMin"] + offset - cell_y) ; y2 = int(cell["YMax"] + offset - cell_y)
-        # cXg = (row_g-1)*(userInfo.imageSize+2) ; cYg = (col_g-1)*(userInfo.imageSize+2)
-        # cXm = (row_m-1)*(userInfo.imageSize+2) ; cYm = len(userInfo.channels)*(userInfo.imageSize+2)
+        # cXg = (row_g-1)*(gvdata.imageSize+2) ; cYg = (col_g-1)*(gvdata.imageSize+2)
+        # cXm = (row_m-1)*(gvdata.imageSize+2) ; cYm = len(gvdata.channels)*(gvdata.imageSize+2)
 
         # nuclei_box_coords_g.append([[cXg+y1, cYg+x1], [cXg+y2, cYg+x2]]) # x and y are actually flipped between napari and the object data
         # nuclei_box_coords_m.append([[cXm+y1, cYm+x1], [cXm+y2, cYm+x2]]) 
@@ -207,21 +208,21 @@ def restore_viewsettings_from_cache(arrange_multichannel = False, viewer = VIEWE
         pass
 
 
-    print(f"Mode is {session.mode} and active fluors are {userInfo.active_channels}")
+    print(f"Mode is {session.mode} and active fluors are {gvdata.active_channels}")
     # Loop through channels and adjust
-    for fluor in userInfo.channels:
+    for fluor in gvdata.channels:
         if fluor == 'Composite':
             continue
         # Turn on appropriate layers. Turn on all if "Composite" button is checked
-        if "Composite" in userInfo.active_channels or fluor in userInfo.active_channels: 
+        if "Composite" in gvdata.active_channels or fluor in gvdata.active_channels: 
             viewer.layers[f"{session.mode} {fluor}"].visible = True
         # call worker func
         _modify_images_in_modes(fluor)
 
 def set_layer_colors(modified_fluors):
     for mode in ("Gallery ", "Multichannel ", "Context "):
-        for fluor, color in userInfo.channelColors.items():
-            if (fluor not in userInfo.active_channels) or (fluor not in modified_fluors): 
+        for fluor, color in gvdata.channelColors.items():
+            if (fluor not in gvdata.active_channels) or (fluor not in modified_fluors): 
                 continue
             cm_name = color if not SESSION.absorption_mode else color+' inverse'
             VIEWER.layers[mode+fluor].colormap = custom_color_functions.retrieve_cm(cm_name)
@@ -235,14 +236,14 @@ def set_layer_colors(modified_fluors):
 # def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData: 
 #     def _update_dictionary(name, val):
 #         SESSION.view_settings[name+' gamma'] = val
-#     for fluor in userInfo.active_channels:
+#     for fluor in gvdata.active_channels:
 #         if fluor == 'Composite':
 #             continue
 #         _update_dictionary(fluor,Gamma)
 #         for m in ["Gallery", "Multichannel", "Context"]:
 #             # VIEWER.layers[f"{m} "+fluor].visible = True
 #             adjust_composite_gamma(VIEWER.layers[f"{m} "+fluor],Gamma)
-#             # if ("Composite" not in userInfo.active_channels or fluor not in userInfo.active_channels) or SESSION.mode !=m: 
+#             # if ("Composite" not in gvdata.active_channels or fluor not in gvdata.active_channels) or SESSION.mode !=m: 
 #             #     VIEWER.layers[f"{m} "+fluor].visible = False
 #     VIEWER.window._qt_viewer.setFocus()
 #     SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
@@ -254,7 +255,7 @@ def set_layer_colors(modified_fluors):
 # def adjust_whitein(white_in: float = 255) -> ImageData:
 #     def _update_dictionary(name, val):
 #         SESSION.view_settings[name+' white-in'] = val
-#     for fluor in userInfo.active_channels:
+#     for fluor in gvdata.active_channels:
 #         if fluor == 'Composite':
 #             continue
 #         _update_dictionary(fluor,white_in)
@@ -271,7 +272,7 @@ def set_layer_colors(modified_fluors):
 #     def _update_dictionary(name, val):
 #         SESSION.view_settings[name+' black-in'] = val
     
-#     for fluor in userInfo.active_channels:
+#     for fluor in gvdata.active_channels:
 #         if fluor == 'Composite':
 #             continue
 #         _update_dictionary(fluor,black_in)
@@ -280,9 +281,9 @@ def set_layer_colors(modified_fluors):
 #     VIEWER.window._qt_viewer.setFocus()
 #     SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
 
-def open_vs_popup():
+def open_vs_popup(parent):
     if SESSION.VSDialog is None:
-        vs = ViewSettingsDialog(userInfo, VIEWER, SESSION.view_settings, restore_viewsettings_from_cache, set_layer_colors) # TODO make a function here that works
+        vs = ViewSettingsDialog(parent, gvdata, VIEWER, SESSION.view_settings, restore_viewsettings_from_cache, set_layer_colors) # TODO make a function here that works
         SESSION.VSDialog = vs
         vs.exec()
         SESSION.VSDialog = None
@@ -309,7 +310,7 @@ def toggle_absorption():
             #     layer.visible = False
             #     continue
             sess = layer.name.split()[0] + " "
-            layer.colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[layer.name.replace(sess,"")])
+            layer.colormap = custom_color_functions.retrieve_cm(gvdata.channelColors[layer.name.replace(sess,"")])
             layer.blending = 'Additive' 
         SESSION.widget_dictionary['imsave_cell_borders'].setCurrentText("White borders")
         SESSION.widget_dictionary['imsave_page_borders'].setCurrentText("White borders")
@@ -332,7 +333,7 @@ def toggle_absorption():
             #         layer.data = im.astype(np.uint8)
             #     continue
             sess = layer.name.split()[0] + " "
-            layer.colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[layer.name.replace(sess,"")]+' inverse')
+            layer.colormap = custom_color_functions.retrieve_cm(gvdata.channelColors[layer.name.replace(sess,"")]+' inverse')
             layer.blending = 'Minimum'
         SESSION.widget_dictionary['imsave_cell_borders'].setCurrentText("Black borders")
         SESSION.widget_dictionary['imsave_page_borders'].setCurrentText("Black borders")
@@ -344,7 +345,7 @@ def toggle_absorption():
     # Change colors and widget styles
     for toggle in UPDATED_CHECKBOXES:
         name = str(toggle.objectName())
-        toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
+        toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(gvdata.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
         
     newmode = "light" if SESSION.absorption_mode else "dark"
     oldmode = "dark" if SESSION.absorption_mode else "light"
@@ -356,33 +357,33 @@ def toggle_absorption():
 
 def fluor_button_toggled(outdated_fluors: list | None = None):
     '''keep track of visible channels in global list and then toggle layer visibility'''
-    userInfo.active_channels = []
+    gvdata.active_channels = []
     for toggle in UPDATED_CHECKBOXES:
         name = str(toggle.objectName())
         print(f"{name}  is checked? {toggle.isChecked()}")
-    # print(f"{checkbox_name} has been clicked and will try to remove from {userInfo.active_channels}")
+    # print(f"{checkbox_name} has been clicked and will try to remove from {gvdata.active_channels}")
         if not toggle.isChecked():
-            userInfo.active_channels.append(name)
+            gvdata.active_channels.append(name)
         
         match outdated_fluors:
             case list():
                 if toggle.objectName() in outdated_fluors:
-                    toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
+                    toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(gvdata.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
             case _:
-                toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
+                toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(gvdata.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
                 print(f"This arg is of type {type(outdated_fluors)}")
                 # raise ValueError("Unable to parse argument. Expected a list or None (default)")
         
         
-    print(userInfo.active_channels)
+    print(gvdata.active_channels)
     # Make visible all channels according to rules
     restore_viewsettings_from_cache(arrange_multichannel=True if SESSION.mode == "Multichannel" else False, viewer = VIEWER, session=SESSION,)
-    # for fluor in userInfo.channels:
+    # for fluor in gvdata.channels:
     #     # Different set of layers if we are in context mode
     #     lname = f'{SESSION.mode} {fluor}'
     #     if fluor == "Composite":
     #         continue
-    #     if "Composite" in userInfo.active_channels or fluor in userInfo.active_channels:
+    #     if "Composite" in gvdata.active_channels or fluor in gvdata.active_channels:
     #         VIEWER.layers[lname].visible = True
     #     else:
     #         VIEWER.layers[lname].visible = False  
@@ -394,13 +395,13 @@ def check_creator2(list_of_names):
     for name in list_of_names:
         tb = QPushButton(name); tb.setObjectName(name)
         tb.setCheckable(True)
-        tb.setStyleSheet(make_fluor_toggleButton_stylesheet(userInfo.channelColors[name] if name != "Composite" else "None") )
+        tb.setStyleSheet(make_fluor_toggleButton_stylesheet(gvdata.channelColors[name] if name != "Composite" else "None") )
         all_boxes.append(tb)
         # f = dynamic_checkbox_creator()
         tb.clicked.connect(fluor_button_toggled)
     return all_boxes
 
-# all_boxes = check_creator2(userInfo.channels)
+# all_boxes = check_creator2(gvdata.channels)
 
 
 ## --- Side bar functions and GUI elements 
@@ -420,7 +421,7 @@ def toggle_session_mode_catch_exceptions(target_mode, from_mouse = True):
 
 def toggle_session_mode(target_mode, from_mouse: bool):
     def _save_validation(VIEWER, Mode):
-        res = userInfo._save_validation(to_disk=False)
+        res = gvdata._save_validation(to_disk=False)
         if res:
             VIEWER.status = f'{Mode} Mode enabled. Scoring decisions loaded successfully.'
             return True
@@ -481,8 +482,8 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             cname = f"{target_cell_info['Layer']} {cell_num}" if ANNOTATIONS_PRESENT else str(cell_num)
             row, col = list(SESSION.grid_to_ID["Gallery"].keys())[list(SESSION.grid_to_ID["Gallery"].values()).index(cname)].split(",")
             row, col = (int(row),int(col))
-            cellCanvasY = ((row-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
-            cellCanvasX = ((col-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
+            cellCanvasY = ((row-1)*(gvdata.imageSize+2)) + ((gvdata.imageSize+2)/2)
+            cellCanvasX = ((col-1)*(gvdata.imageSize+2)) + ((gvdata.imageSize+2)/2)
             z,y,x = VIEWER.camera.center
             offsetX = (x/sc) - cellCanvasX 
             offsetY = (y/sc) - cellCanvasY 
@@ -516,7 +517,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             class dummyCursor:
                 def __init__(self, y, x) -> None:
                     self.position = (y,x)
-            p = dummyCursor((target_cell_info["center_y"]+mY-(userInfo.imageSize+2)/2)*sc,(target_cell_info["center_x"]+mX-(userInfo.imageSize+2)/2)*sc)
+            p = dummyCursor((target_cell_info["center_y"]+mY-(gvdata.imageSize+2)/2)*sc,(target_cell_info["center_x"]+mX-(gvdata.imageSize+2)/2)*sc)
             # Used to have the following line to try to show pixel val right away
             #SESSION.display_intensity_func(VIEWER, p)
         # finally, set mode
@@ -586,8 +587,8 @@ def toggle_session_mode(target_mode, from_mouse: bool):
             sc = 1 if SESSION.image_scale is None else SESSION.image_scale # Scale factor necessary
             row, col = list(SESSION.grid_to_ID["Multichannel"].keys())[list(SESSION.grid_to_ID["Multichannel"].values()).index(target_cell_name)].split(",")
             row= int(row) #find the row for multichannel cell. Col should be irrelevant
-            cellCanvasY = ((row-1)*(userInfo.imageSize+2)) + ((userInfo.imageSize+2)/2)
-            cellCanvasX = (len(userInfo.channels)+1)*(userInfo.imageSize+2) /2 # Add 1 to channels to account for merged image
+            cellCanvasY = ((row-1)*(gvdata.imageSize+2)) + ((gvdata.imageSize+2)/2)
+            cellCanvasX = (len(gvdata.channels)+1)*(gvdata.imageSize+2) /2 # Add 1 to channels to account for merged image
             SESSION.last_multichannel_camera_coordinates["center"] = (cellCanvasY*sc, cellCanvasX*sc)
             
             VIEWER.camera.center = SESSION.last_multichannel_camera_coordinates["center"]
@@ -612,7 +613,7 @@ def toggle_session_mode(target_mode, from_mouse: bool):
 def show_next_cell_group():
     def _save_validation(VIEWER,numcells):
 
-        res = userInfo._save_validation(to_disk=False)
+        res = gvdata._save_validation(to_disk=False)
         if res:
             VIEWER.status = f'Next {numcells} cells loaded.'
             return True
@@ -665,16 +666,16 @@ def show_next_cell_group():
                 VIEWER.layers.selection.add(layer)
         VIEWER.layers.remove_selected()
         # VIEWER.layers.clear()
-        add_layers(VIEWER,RAW_PYRAMID, xydata, int(userInfo.imageSize/2))
+        add_layers(VIEWER,RAW_PYRAMID, xydata, int(gvdata.imageSize/2))
 
     # Update scoring tally for this page
-    set_initial_scoring_tally(userInfo.objectDataFrame, SESSION.session_cells)
+    set_initial_scoring_tally(gvdata.objectDataFrame, SESSION.session_cells)
     # Perform adjustments before exiting function
     #TODO
     # Only checked fluors will be visible
     restore_viewsettings_from_cache(arrange_multichannel= True if SESSION.mode == "Multichannel" else False, viewer = VIEWER, session=SESSION,) 
     set_viewer_to_neutral_zoom(VIEWER, reset_session=True) # Fix zoomed out issue
-    VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
+    VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {gvdata.channels[0]}"]  
     VIEWER.window._qt_viewer.setFocus()
     return True
     
@@ -698,7 +699,7 @@ def toggle_statuslayer_visibility(show_widget):
 def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
 
     # Always reset the user's input selection
-    VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
+    VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {gvdata.channels[0]}"]  
     if not checked:
         # This function gets called twice, since when one radio button in the group is toggle on, the other is toggled off. 
         #   We only want to run this function once so the other call can be discarded
@@ -735,7 +736,7 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
         except KeyError:
             pass
         # Always reset the user's input selection
-        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
+        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {gvdata.channels[0]}"]
 
         if SESSION.nuclei_boxes_vis["Context"] != "Show":
             return False # Leave! Nothing more to do since the user does not want to see these boxes
@@ -785,7 +786,7 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
                                 'YMax' : y2,'YMin':y1, "Page":page}
                 SESSION.saved_notes[ckey] = "-"
                 record_notes_and_intensities(cell, SESSION.intensity_columns)
-            validation_colors_hex.append(userInfo.statuses_hex[validation_call])
+            validation_colors_hex.append(gvdata.statuses_hex[validation_call])
             SESSION.context_nuclei_boxes_map_to_ind[ckey] = count
             count+=1
 
@@ -800,7 +801,7 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
             VIEWER.add_shapes(nuclei_box_coords, name="Context Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=validation_colors_hex, 
                                                 face_color='#00000000', scale=sc, features=features,text=nb_text,opacity=0.9 )
         # Always reset the user's input selection
-        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
+        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {gvdata.channels[0]}"]
 
 def toggle_marker_button(marker_button: QPushButton):
     current_marker_mode = SESSION.context_marker_mode
@@ -823,7 +824,7 @@ def set_initial_scoring_tally(df, session_df, page_only = True):
 
     if not page_only:
         cols = [x for x in session_df.columns if "Validation" in x]
-        zeroes_dict = dict(zip(list(userInfo.statuses.keys()) , [0 for i in range(len(userInfo.statuses))]))
+        zeroes_dict = dict(zip(list(gvdata.statuses.keys()) , [0 for i in range(len(gvdata.statuses))]))
         SESSION.scoring_tally =  {"Session":copy.copy(zeroes_dict), "Data":copy.copy(zeroes_dict), "Page":copy.copy(zeroes_dict)}
 
         # Counts for the whole cell set
@@ -859,7 +860,7 @@ def update_scoring_tally(old_score, new_score, in_page = True):
         SESSION.scoring_tally["Page"][old_score] = SESSION.scoring_tally["Page"][old_score] -1
 
 def update_scoring_tally_all(new_score):
-    for score, key in userInfo.statuses.items():
+    for score, key in gvdata.statuses.items():
         
         page_size = len(SESSION.page_cells)
         if score == new_score:
@@ -885,9 +886,9 @@ def set_scoring_label(scoring_label):
         session_tally = SESSION.scoring_tally["Session"][score]
         if count % 2 == 0: 
             display_string+="<br>"
-            display_string += f'<font color="{userInfo.statuses_hex[score]}">{score}: {page_tally}/{session_tally}/{tally}</font>'
+            display_string += f'<font color="{gvdata.statuses_hex[score]}">{score}: {page_tally}/{session_tally}/{tally}</font>'
         else:
-            display_string += f' | <font color="{userInfo.statuses_hex[score]}">{score}: {page_tally}/{session_tally}/{tally}</font>'
+            display_string += f' | <font color="{gvdata.statuses_hex[score]}">{score}: {page_tally}/{session_tally}/{tally}</font>'
         # Add a new line for every other score
         count+=1
     scoring_label.setText(display_string)
@@ -921,12 +922,12 @@ def set_cell_description_label(ID, display_text_override = None):
     # intensity_series = SESSION.session_cells[ID]['intensities']
     names = list(intensity_series.index)
     intensity_str = ''
-    for fluor in userInfo.channels:
+    for fluor in gvdata.channels:
         if fluor == 'Composite':
             continue
         # fluor = str(cell).replace(" Cell Intensity","")
         fluor = str(fluor)
-        intensity_str += f'<br><font color="{userInfo.channelColors[fluor].replace("blue","blue")}">{fluor}</font>'
+        intensity_str += f'<br><font color="{gvdata.channelColors[fluor].replace("blue","blue")}">{fluor}</font>'
         def add_values(intensity_str, fluor, intensity_lookup):
             flag = True
             name = intensity_lookup + ': No data'
@@ -934,7 +935,7 @@ def set_cell_description_label(ID, display_text_override = None):
                 cyto = intensity_lookup
                 cyto = [x for x in names if (cyto in x and 'Cytoplasm Intensity' in x)][0]
                 val = round(float(intensity_series[cyto]),1)
-                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","blue")}"> cyto: {val}</font>'
+                intensity_str += f'<font color="{gvdata.channelColors[fluor].replace("blue","blue")}"> cyto: {val}</font>'
                 flag = False
                 name = cyto.replace(' Cytoplasm Intensity','')
             except (KeyError, IndexError): pass
@@ -942,7 +943,7 @@ def set_cell_description_label(ID, display_text_override = None):
                 nuc = intensity_lookup
                 nuc = [x for x in names if (nuc in x and 'Nucleus Intensity' in x)][0]
                 val = round(float(intensity_series[nuc]),1)
-                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","blue")}"> nuc: {val}</font>'
+                intensity_str += f'<font color="{gvdata.channelColors[fluor].replace("blue","blue")}"> nuc: {val}</font>'
                 flag = False
                 name = nuc.replace(' Nucleus Intensity','')
             except (KeyError, IndexError): pass
@@ -950,7 +951,7 @@ def set_cell_description_label(ID, display_text_override = None):
                 cell = intensity_lookup
                 cell = [x for x in names if (cell in x and 'Cell Intensity' in x)][0]
                 val = round(float(intensity_series[cell]),1)
-                intensity_str += f'<font color="{userInfo.channelColors[fluor].replace("blue","blue")}"> cell: {val}</font>'
+                intensity_str += f'<font color="{gvdata.channelColors[fluor].replace("blue","blue")}"> cell: {val}</font>'
                 flag = False
                 name = cell.replace(' Cell Intensity','')
             except (KeyError, IndexError): pass
@@ -967,7 +968,7 @@ def set_cell_description_label(ID, display_text_override = None):
         # Should have something from the fluorescence column if it's there
 
 
-        # intensity_str += f'<br><font color="{userInfo.channelColors[fluor.replace(" ","").upper()].replace("blue","#0462d4")}">{fluor} cyto: {round(float(intensity_series[cyto]),1)} nuc: {round(float(intensity_series[nuc]),1)} cell: {round(float(intensity_series[cell]),1)}</font>'
+        # intensity_str += f'<br><font color="{gvdata.channelColors[fluor.replace(" ","").upper()].replace("blue","#0462d4")}">{fluor} cyto: {round(float(intensity_series[cyto]),1)} nuc: {round(float(intensity_series[nuc]),1)} cell: {round(float(intensity_series[cell]),1)}</font>'
     # Add note if it exists
     
     SESSION.widget_dictionary['cell description label'].setText(prefix + intensity_str)
@@ -1002,9 +1003,9 @@ def retrieve_status(cell_id, status, new_page):
 
 def black_background(color_space, mult, CPR):
     if color_space == 'RGB':
-        return np.zeros((ceil((PAGE_SIZE*mult)/CPR)*(userInfo.imageSize+2),(userInfo.imageSize+2) * CPR, 4))
+        return np.zeros((ceil((PAGE_SIZE*mult)/CPR)*(gvdata.imageSize+2),(gvdata.imageSize+2) * CPR, 4))
     elif color_space == 'Luminescence':
-        return np.zeros((ceil((PAGE_SIZE*mult)/CPR)*(userInfo.imageSize+2),(userInfo.imageSize+2) * CPR))
+        return np.zeros((ceil((PAGE_SIZE*mult)/CPR)*(gvdata.imageSize+2),(gvdata.imageSize+2) * CPR))
 
 
 ''' Add images layers for Gallery and Multichannel modes. Only make visible the layers for the active mode'''
@@ -1012,28 +1013,28 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
     print(f'\n---------\n \n Entering the add_layers function')
     if pyramid is not None: print(f"pyramid shape is {pyramid.shape}")
   
-    SESSION.cells_per_row["Multichannel"] = len(userInfo.channels) + 1
-    SESSION.cells_per_row["Gallery"] = userInfo.cells_per_row
+    SESSION.cells_per_row["Multichannel"] = len(gvdata.channels) + 1
+    SESSION.cells_per_row["Gallery"] = gvdata.cells_per_row
     cpr_g = SESSION.cells_per_row["Gallery"]
     cpr_m = SESSION.cells_per_row["Multichannel"]
 
 
     # Starting to add
-    # SESSION.page_status_layers["Gallery"] = black_background('RGB', 1, userInfo.cells_per_row)
+    # SESSION.page_status_layers["Gallery"] = black_background('RGB', 1, gvdata.cells_per_row)
     # SESSION.page_status_layers["Multichannel"] = black_background('RGB',cpr_m, cpr_m)
 
     # print(f"Shapes are {SESSION.page_status_layers['Multichannel'].shape}  || {SESSION.page_status_layers['Gallery'].shape}")
     page_image_multichannel = {} ; page_image_gallery = {}
-    for chn in userInfo.channels:
+    for chn in gvdata.channels:
         if chn == 'Composite': continue
-        page_image_gallery[chn] = black_background('Luminescence', 1, userInfo.cells_per_row)
+        page_image_gallery[chn] = black_background('Luminescence', 1, gvdata.cells_per_row)
         page_image_multichannel[chn] = black_background('Luminescence', cpr_m, cpr_m)
 
     # page_image = black_background('RGB',size_multiplier)
 
     nuclei_box_coords_g = []
     nuclei_box_coords_m = []
-    print(f'Adding {len(cells)} cells to viewer... Channels are{userInfo.channels}')
+    print(f'Adding {len(cells)} cells to viewer... Channels are{gvdata.channels}')
     col_g = 0 
     row_g = 0 ; row_m = 0
     SESSION.grid_to_ID = {"Gallery":{}, "Multichannel":{}} # Reset this since we could be changing to multichannel mode
@@ -1053,28 +1054,28 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
         cname = str(cell_id) if cell_anno is None else f"{cell_anno} {cell_id}"
         cell_status = retrieve_status(cname,cell['validation_call'], new_page)
         cid_list.append(cell_id)
-        edge_col_list.append(userInfo.statuses_hex[cell_status])
+        edge_col_list.append(gvdata.statuses_hex[cell_status])
 
 
         x1 = int(cell["XMin"] + offset - cell_x) ; x2 = int(cell["XMax"] + offset - cell_x)
         y1 = int(cell["YMin"] + offset - cell_y) ; y2 = int(cell["YMax"] + offset - cell_y)
-        cXg = (row_g-1)*(userInfo.imageSize+2) ; cYg = (col_g-1)*(userInfo.imageSize+2)
-        cXm = (row_m-1)*(userInfo.imageSize+2) ; cYm = len(userInfo.channels)*(userInfo.imageSize+2)
+        cXg = (row_g-1)*(gvdata.imageSize+2) ; cYg = (col_g-1)*(gvdata.imageSize+2)
+        cXm = (row_m-1)*(gvdata.imageSize+2) ; cYm = len(gvdata.channels)*(gvdata.imageSize+2)
 
         nuclei_box_coords_g.append([[cXg+y1, cYg+x1], [cXg+y2, cYg+x2]]) # x and y are actually flipped between napari and the object data
         nuclei_box_coords_m.append([[cXm+y1, cYm+x1], [cXm+y2, cYm+x2]]) 
 
-        status_box_coords_g.append([[cXg, cYg], [cXg+(userInfo.imageSize+1), cYg+(userInfo.imageSize+1)]]) 
-        status_box_coords_m.append([[cXm, 0], [cXm+(userInfo.imageSize+1), cYm+(userInfo.imageSize+1)]]) 
-        status_box_flags_g.append([[cXg, cYg], [cXg+int(userInfo.imageSize/8), cYg+int(userInfo.imageSize/8)]]) 
-        status_box_flags_m.append([[cXm, 0], [cXm+int(userInfo.imageSize/8), int(userInfo.imageSize/8)]]) 
+        status_box_coords_g.append([[cXg, cYg], [cXg+(gvdata.imageSize+1), cYg+(gvdata.imageSize+1)]]) 
+        status_box_coords_m.append([[cXm, 0], [cXm+(gvdata.imageSize+1), cYm+(gvdata.imageSize+1)]]) 
+        status_box_flags_g.append([[cXg, cYg], [cXg+int(gvdata.imageSize/8), cYg+int(gvdata.imageSize/8)]]) 
+        status_box_flags_m.append([[cXm, 0], [cXm+int(gvdata.imageSize/8), int(gvdata.imageSize/8)]]) 
 
 
         # Create array of channel indices in image data. Will use to fetch from the dask array
         positions = []
-        for fluor in userInfo.channels: # loop through channels
-            if fluor in userInfo.channels and fluor != 'Composite':
-                positions.append(userInfo.channelOrder[fluor]) # channelOrder dict holds mappings of fluors to position in image data
+        for fluor in gvdata.channels: # loop through channels
+            if fluor in gvdata.channels and fluor != 'Composite':
+                positions.append(gvdata.channelOrder[fluor]) # channelOrder dict holds mappings of fluors to position in image data
 
         if RAW_PYRAMID is None:
             # print("Using zarr/dask")
@@ -1086,24 +1087,24 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
             # cell_punchout = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,pos].astype(np.uint8)
 
         fluor_index = 0
-        for fluor in userInfo.channels: # loop through channels
+        for fluor in gvdata.channels: # loop through channels
             if fluor != 'Composite':
                 # multichannel mode: individual image
-                page_image_multichannel[fluor][(row_m-1)*(userInfo.imageSize+2)+1:row_m*(userInfo.imageSize+2)-1,
-                            (col_m-1)*(userInfo.imageSize+2)+1:col_m*(userInfo.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
+                page_image_multichannel[fluor][(row_m-1)*(gvdata.imageSize+2)+1:row_m*(gvdata.imageSize+2)-1,
+                            (col_m-1)*(gvdata.imageSize+2)+1:col_m*(gvdata.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
                 # multichannel mode: composite image
-                page_image_multichannel[fluor][(row_m-1)*(userInfo.imageSize+2)+1:row_m*(userInfo.imageSize+2)-1,
-                            (cpr_m-1)*(userInfo.imageSize+2)+1:cpr_m*(userInfo.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
+                page_image_multichannel[fluor][(row_m-1)*(gvdata.imageSize+2)+1:row_m*(gvdata.imageSize+2)-1,
+                            (cpr_m-1)*(gvdata.imageSize+2)+1:cpr_m*(gvdata.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
                 SESSION.grid_to_ID["Multichannel"][f'{row_m},{col_m}'] = cname
                 SESSION.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cname
                 # if col_m ==1:
-                #     SESSION.page_status_layers["Multichannel"][(row_m-1)*(userInfo.imageSize+2):row_m*(userInfo.imageSize+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Multichannel")
+                #     SESSION.page_status_layers["Multichannel"][(row_m-1)*(gvdata.imageSize+2):row_m*(gvdata.imageSize+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Multichannel")
                 col_m+=1 # so that next luminescence image is tiled 
                 
                 # Gallery images 
                 SESSION.grid_to_ID["Gallery"][f'{row_g},{col_g}'] = cname
-                page_image_gallery[fluor][(row_g-1)*(userInfo.imageSize+2)+1:row_g*(userInfo.imageSize+2)-1, (col_g-1)*(userInfo.imageSize+2)+1:col_g*(userInfo.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
-                # SESSION.page_status_layers["Gallery"][(row_g-1)*(userInfo.imageSize+2):row_g*(userInfo.imageSize+2), (col_g-1)*(userInfo.imageSize+2):col_g*(userInfo.imageSize+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Gallery")
+                page_image_gallery[fluor][(row_g-1)*(gvdata.imageSize+2)+1:row_g*(gvdata.imageSize+2)-1, (col_g-1)*(gvdata.imageSize+2)+1:col_g*(gvdata.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
+                # SESSION.page_status_layers["Gallery"][(row_g-1)*(gvdata.imageSize+2):row_g*(gvdata.imageSize+2), (col_g-1)*(gvdata.imageSize+2):col_g*(gvdata.imageSize+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Gallery")
                 fluor_index+=1
         SESSION.multichannel_page_images = copy.copy(page_image_multichannel)
 
@@ -1122,18 +1123,18 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
             continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
         if SESSION.absorption_mode:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'minimum',
-                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
+                colormap = custom_color_functions.retrieve_cm(gvdata.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'minimum',
-                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
+                colormap = custom_color_functions.retrieve_cm(gvdata.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
             
         else:
             viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'additive',
-                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
+                colormap = custom_color_functions.retrieve_cm(gvdata.channelColors[fluor]), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
             viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
-                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
+                colormap = custom_color_functions.retrieve_cm(gvdata.channelColors[fluor]), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
     # if composite_only:
 
@@ -1143,8 +1144,8 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
     # nb_color_str = ['#ffffff' for x in nb_color_str if (not SESSION.absorption_mode) and (x == '#000000')] 
 
     nb_color_hex = '#000000' if SESSION.absorption_mode else '#ffffff'
-    tl = int(userInfo.imageSize/8)#* (1 if SESSION.image_scale is None else SESSION.image_scale)
-    nb_text = {'string':'{cid}', 'anchor':'lower_left', 'size' : 8,'translation':[-(userInfo.imageSize),int(tl*1.3)], 'color':nb_color_str}
+    tl = int(gvdata.imageSize/8)#* (1 if SESSION.image_scale is None else SESSION.image_scale)
+    nb_text = {'string':'{cid}', 'anchor':'lower_left', 'size' : 8,'translation':[-(gvdata.imageSize),int(tl*1.3)], 'color':nb_color_str}
     SESSION.status_text_object = nb_text
     viewer.add_shapes(nuclei_box_coords_g, name="Gallery Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
                                         face_color='#00000000', scale=sc)
@@ -1171,7 +1172,7 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
     # viewer.add_image(SESSION.page_status_layers["Multichannel"].astype(np.uint8), name='Multichannel Status Layer', interpolation='linear', scale = sc, visible=mult_vis)
     # viewer.layers.selection.active = viewer.layers["Status Layer"]
     
-    VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]  
+    VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {gvdata.channels[0]}"]  
     
 
     #TODO make a page label... 
@@ -1190,7 +1191,7 @@ def catch_exceptions_to_log_file(error_type="runtime-exception"):
             try:
                 func(*args, **kwargs)
             except Exception as e:
-                userInfo.log_exception(e, error_type=error_type)
+                gvdata.log_exception(e, error_type=error_type)
                 VIEWER.status = f"Encountered a non-critical error when attempting to '{func.__name__}'. Please forward the error log to the developer"
         return wrapper
     return custom_error
@@ -1204,16 +1205,16 @@ def attach_functions_to_viewer(viewer):
         x = coords[0]; y = coords[1]
         # sc = 1 if SESSION.image_scale is None else SESSION.image_scale
         # Cannot return 0 this way, since there is no 0 row or col
-        row_num = max(ceil((x+1)/(userInfo.imageSize+2)),1)
-        col_num = max(ceil((y+1)/(userInfo.imageSize+2)),1)
+        row_num = max(ceil((x+1)/(gvdata.imageSize+2)),1)
+        col_num = max(ceil((y+1)/(gvdata.imageSize+2)),1)
         return row_num, col_num
     
     def multichannel_fetch_val(local_x,global_y, fluor):
-        if "Composite" in userInfo.active_channels: 
-            offset_x = (userInfo.imageSize+2) * list([x for x in userInfo.channels if x!="Composite"]).index(fluor)
+        if "Composite" in gvdata.active_channels: 
+            offset_x = (gvdata.imageSize+2) * list([x for x in gvdata.channels if x!="Composite"]).index(fluor)
             return (global_y, offset_x+local_x)
-        elif fluor in userInfo.active_channels:
-            offset_x = (userInfo.imageSize+2) * list([x for x in userInfo.active_channels if x!="Composite"]).index(fluor)
+        elif fluor in gvdata.active_channels:
+            offset_x = (gvdata.imageSize+2) * list([x for x in gvdata.active_channels if x!="Composite"]).index(fluor)
             return (global_y, offset_x+local_x)
         else:
             return (-10,-10) # will result in a None from layer.data.get_value
@@ -1242,12 +1243,12 @@ def attach_functions_to_viewer(viewer):
             # Bail if in multichannel mode and mouse is off to the right. Hard coding this since the grid to id dict
             #   has the full multichannel grid shape, but now I am allowing users to shrink the grid when toggling channels.
 
-            if coords[1] > (len([x for x in userInfo.active_channels if x !="Composite"])+1)*(userInfo.imageSize+2) and "Composite" not in userInfo.active_channels:
+            if coords[1] > (len([x for x in gvdata.active_channels if x !="Composite"])+1)*(gvdata.imageSize+2) and "Composite" not in gvdata.active_channels:
                 
                 return "None" , None, None
             
         if SESSION.mode == "Context":
-            for fluor in userInfo.channels:
+            for fluor in gvdata.channels:
                 if fluor == "Composite": continue
 
                 # Requesting single pixel value from Dask array layer 0
@@ -1265,7 +1266,7 @@ def attach_functions_to_viewer(viewer):
             # curY, curX = SESSION.mouse_coords
             # print(SESSION.session_cells.loc[SESSION.session_cells['center_x'] < ])
             dist, closest_ind = SESSION.kdtree.query([data_coordinates[1],data_coordinates[0]])
-            if dist < .6*userInfo.imageSize:
+            if dist < .6*gvdata.imageSize:
                 closest_cell = SESSION.session_cells.iloc[closest_ind]
             else:
                 closest_cell = None
@@ -1280,9 +1281,9 @@ def attach_functions_to_viewer(viewer):
             except KeyError as e:
                 return "None" , None, None
             
-            local_x = coords[1] - (userInfo.imageSize+2)*(col-1)
-            local_y = coords[0] - (userInfo.imageSize+2)*(row-1)
-            for fluor in userInfo.channels:
+            local_x = coords[1] - (gvdata.imageSize+2)*(col-1)
+            local_y = coords[0] - (gvdata.imageSize+2)*(row-1)
+            for fluor in gvdata.channels:
                 if fluor == "Composite": continue
                 # Context mode already taken care of. Need to handle Gallery / Multichannel 
                 if SESSION.mode=="Multichannel":
@@ -1323,7 +1324,7 @@ def attach_functions_to_viewer(viewer):
 
         sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
         
-        nb_color_hex = userInfo.statuses_hex[SESSION.current_cells[cname]['validation_call']] #'#000000' if SESSION.absorption_mode else '#ffffff'
+        nb_color_hex = gvdata.statuses_hex[SESSION.current_cells[cname]['validation_call']] #'#000000' if SESSION.absorption_mode else '#ffffff'
         nb_text = {'string':'{cid_feat}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_hex}
         SESSION.context_closest_cell_text_object = nb_text
         if layer_present:
@@ -1334,7 +1335,7 @@ def attach_functions_to_viewer(viewer):
         else:
             VIEWER.add_shapes([cell_bbox], name="Context Closest Cell Box", shape_type="rectangle", edge_width=2, edge_color=nb_color_hex, 
                             opacity=0.9, face_color='#00000000', scale=sc, text = nb_text, features=features)
-        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"] 
+        VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {gvdata.channels[0]}"] 
 
     ''' You need to disable napari's native mouse callback that displays the status first.
             This function is in napari.components.viewer_model.py ViewerModel._update_status_bar_from_cursor''' 
@@ -1414,14 +1415,14 @@ def attach_functions_to_viewer(viewer):
                 except KeyError:
                     pass
                 # reset active layer to an image
-                viewer.layers.selection.active = viewer.layers[f"Gallery {userInfo.channels[0]}"] 
+                viewer.layers.selection.active = viewer.layers[f"Gallery {gvdata.channels[0]}"] 
 
     
             # Deal with pixel intensities
             output_str = ''
             for fluor, val in vals.items():
                 if val != "-": val = int(val)
-                output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","blue")}">    {val}   </font>' # "#0462d4"
+                output_str+= f'<font color="{gvdata.channelColors[fluor].replace("blue","blue")}">    {val}   </font>' # "#0462d4"
             
             if ANNOTATIONS_PRESENT:
                 cname = f'Cell {cid} from {layer}' if cell is not None else "Context Mode" # default display name is the mouse is not under a cell
@@ -1460,7 +1461,7 @@ def attach_functions_to_viewer(viewer):
 
             for fluor, val in vals.items():
                 if val != "-": val = int(val)
-                output_str+= f'<font color="{userInfo.channelColors[fluor].replace("blue","blue")}">    {val}   </font>'
+                output_str+= f'<font color="{gvdata.channelColors[fluor].replace("blue","blue")}">    {val}   </font>'
         
             sc = STATUSES_TO_HEX[SESSION.current_cells[str(cell_name)]['validation_call']]
             if sc != "#ffffff":
@@ -1486,7 +1487,7 @@ def attach_functions_to_viewer(viewer):
     SESSION.find_mouse_func = find_mouse
 
     def change_status_display(cell_name, next_status):
-        next_color_txt = userInfo.statuses_rgba[next_status]
+        next_color_txt = gvdata.statuses_rgba[next_status]
         next_color_txt = list(x/255 if next_color_txt.index(x)!=3 else 1 for x in next_color_txt)
 
         SESSION.current_cells[str(cell_name)]['validation_call'] = next_status
@@ -1529,7 +1530,7 @@ def attach_functions_to_viewer(viewer):
                 print(e)
 
     def change_status_display_forAll(next_status):
-        next_color_txt = userInfo.statuses_rgba[next_status]
+        next_color_txt = gvdata.statuses_rgba[next_status]
         next_color_txt = list(x/255 if next_color_txt.index(x)!=3 else 1 for x in next_color_txt)
 
         # set all cells to status
@@ -1582,8 +1583,8 @@ def attach_functions_to_viewer(viewer):
 
         if SESSION.mode == "Context" and SESSION.nuclei_boxes_vis["Context"] == "Mouse":
             # Change Context boxes and mouse only box colors
-            VIEWER.layers["Context Closest Cell Box"].edge_color = userInfo.statuses_hex[next_status]
-            SESSION.context_closest_cell_text_object["color"] = userInfo.statuses_hex[next_status]
+            VIEWER.layers["Context Closest Cell Box"].edge_color = gvdata.statuses_hex[next_status]
+            SESSION.context_closest_cell_text_object["color"] = gvdata.statuses_hex[next_status]
             viewer.layers["Context Closest Cell Box"].text = SESSION.context_closest_cell_text_object
         change_status_display(cell_name, next_status)
 
@@ -1640,8 +1641,8 @@ def attach_functions_to_viewer(viewer):
             
             if SESSION.mode == "Context" and SESSION.nuclei_boxes_vis["Context"] == "Mouse":
                 # Change Context boxes and mouse only box colors
-                VIEWER.layers["Context Closest Cell Box"].edge_color = userInfo.statuses_hex[scoring_decision]
-                SESSION.context_closest_cell_text_object["color"] = userInfo.statuses_hex[scoring_decision]
+                VIEWER.layers["Context Closest Cell Box"].edge_color = gvdata.statuses_hex[scoring_decision]
+                SESSION.context_closest_cell_text_object["color"] = gvdata.statuses_hex[scoring_decision]
                 viewer.layers["Context Closest Cell Box"].text = SESSION.context_closest_cell_text_object
             
             # Update scoring tally BEFORE changing status 
@@ -1664,7 +1665,7 @@ def attach_functions_to_viewer(viewer):
                 # set up for marker tool   
                 toggle_marker_button(SESSION.widget_dictionary["marker button"])
                 SESSION.widget_dictionary["marker combo"].setCurrentText(scoring_decision)
-                SESSION.widget_dictionary["marker combo"].setStyleSheet(f"background-color: rgba{userInfo.statuses_rgba[scoring_decision]}; selection-background-color: rgba(0,0,0,30);")
+                SESSION.widget_dictionary["marker combo"].setStyleSheet(f"background-color: rgba{gvdata.statuses_rgba[scoring_decision]}; selection-background-color: rgba(0,0,0,30);")
                 if SESSION.context_marker_mode == "Enabled":
                     set_score(viewer)
                 return True
@@ -1684,7 +1685,7 @@ def attach_functions_to_viewer(viewer):
             VIEWER.status = ">".join(vstatus_list)
         return set_score, set_scoring_all
 
-    for scoring_decision, keybind in userInfo.statuses.items():
+    for scoring_decision, keybind in gvdata.statuses.items():
         score_name = f'{scoring_decision}_func'
         score_all_name = f"{scoring_decision}_all_func"
         exec(f'globals()["{score_name}"], globals()["{score_all_name}"] = create_score_funcs("{scoring_decision}","{keybind}")')
@@ -1727,7 +1728,7 @@ def attach_functions_to_viewer(viewer):
         print(f'Using stored dataframe')
         viewer.status = 'Saving ...'
         # try:
-        res = userInfo._save_validation(to_disk=True)
+        res = gvdata._save_validation(to_disk=True)
         
         if res: 
             viewer.status = 'Done saving!'
@@ -1795,11 +1796,11 @@ def attach_functions_to_viewer(viewer):
     def scroll_up(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        step_size = ((userInfo.imageSize+2)*sc)
+        step_size = ((gvdata.imageSize+2)*sc)
         if SESSION.mode == "Context":
-            fluor = userInfo.channels[0]
+            fluor = gvdata.channels[0]
             if fluor == "Composite":
-                fluor = userInfo.channels[1] # Make sure to get an actual channel. Doesn't matter which one
+                fluor = gvdata.channels[1] # Make sure to get an actual channel. Doesn't matter which one
             mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
             step_size *= (mult**2)
 
@@ -1814,11 +1815,11 @@ def attach_functions_to_viewer(viewer):
     def scroll_down(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        step_size = ((userInfo.imageSize+2)*sc) 
+        step_size = ((gvdata.imageSize+2)*sc) 
         if SESSION.mode == "Context":
-            fluor = userInfo.channels[0]
+            fluor = gvdata.channels[0]
             if fluor == "Composite":
-                fluor = userInfo.channels[1] # Make sure to get an actual channel. Doesn't matter which one
+                fluor = gvdata.channels[1] # Make sure to get an actual channel. Doesn't matter which one
             mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
             step_size *= (mult**2)
         viewer.camera.center = (y+int(step_size),x)
@@ -1832,11 +1833,11 @@ def attach_functions_to_viewer(viewer):
     def scroll_left(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        step_size = ((userInfo.imageSize+2)*sc)
+        step_size = ((gvdata.imageSize+2)*sc)
         if SESSION.mode == "Context":
-            fluor = userInfo.channels[0]
+            fluor = gvdata.channels[0]
             if fluor == "Composite":
-                fluor = userInfo.channels[1] # Make sure to get an actual channel. Doesn't matter which one
+                fluor = gvdata.channels[1] # Make sure to get an actual channel. Doesn't matter which one
             mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
             step_size *= (mult**2)
 
@@ -1855,11 +1856,11 @@ def attach_functions_to_viewer(viewer):
     def scroll_right(viewer):
         z,y,x = viewer.camera.center
         sc = 1 if SESSION.image_scale is None else SESSION.image_scale
-        step_size = ((userInfo.imageSize+2)*sc)
+        step_size = ((gvdata.imageSize+2)*sc)
         if SESSION.mode == "Context":
-            fluor = userInfo.channels[0]
+            fluor = gvdata.channels[0]
             if fluor == "Composite":
-                fluor = userInfo.channels[1] # Make sure to get an actual channel. Doesn't matter which one
+                fluor = gvdata.channels[1] # Make sure to get an actual channel. Doesn't matter which one
             mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
             step_size *= (mult**2)
 
@@ -1918,12 +1919,12 @@ def attach_functions_to_viewer(viewer):
     @viewer.bind_key('i')
     @catch_exceptions_to_log_file("runtime_switch-interpolation")
     def toggle_interpolation(viewer):
-        current = VIEWER.layers[f"Gallery {userInfo.channels[0]}"].interpolation
+        current = VIEWER.layers[f"Gallery {gvdata.channels[0]}"].interpolation
         if current == 'nearest':
             new = 'linear'
         else:
             new = 'nearest' 
-        for fluor in userInfo.channels:
+        for fluor in gvdata.channels:
             if fluor =='Composite': continue
             VIEWER.layers["Gallery " +fluor].interpolation = new
             VIEWER.layers["Multichannel "+fluor].interpolation = new
@@ -1953,8 +1954,8 @@ def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard
     page_shape = None
     for layer in viewer.layers:
         layer.visible = False
-        for fluor in userInfo.channels:
-            if "Composite" not in userInfo.active_channels and fluor not in userInfo.active_channels:
+        for fluor in gvdata.channels:
+            if "Composite" not in gvdata.active_channels and fluor not in gvdata.active_channels:
                 continue
             layer = VIEWER.layers[f"{mode_choice} {fluor}"]
             page_shape = layer.data.shape
@@ -1966,15 +1967,15 @@ def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard
     if (borders =="Black borders" and SESSION.absorption_mode) or (borders =="White borders" and not SESSION.absorption_mode):
         row,col = 0,0
         fill = 0 if SESSION.absorption_mode else 1
-        lim = userInfo.page_size if mode_choice == 'Gallery' else userInfo.page_size * SESSION.cells_per_row[mode_choice]
+        lim = gvdata.page_size if mode_choice == 'Gallery' else gvdata.page_size * SESSION.cells_per_row[mode_choice]
         print(f"Image shape is {blended.shape}")
         for _ in range(lim):
             if col == SESSION.cells_per_row[mode_choice]:
                 col = 0
                 row = row+1
             
-            x1 = (row*(userInfo.imageSize+2)) ; x2 = x1 + userInfo.imageSize + 2
-            y1 = (col*(userInfo.imageSize+2)) ; y2 = y1 + userInfo.imageSize + 2
+            x1 = (row*(gvdata.imageSize+2)) ; x2 = x1 + gvdata.imageSize + 2
+            y1 = (col*(gvdata.imageSize+2)) ; y2 = y1 + gvdata.imageSize + 2
 
             print(f"My Xs are {x1} {x2} and my Ys are {y1} {y2}")
             if (x2,y2) == blended.shape[:2]:
@@ -2000,7 +2001,7 @@ def save_page_image(viewer:napari.Viewer, mode_choice:str = "Gallery", clipboard
             col +=1
 
 
-    viewer.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"] 
+    viewer.layers.selection.active = VIEWER.layers[f"Gallery {gvdata.channels[0]}"] 
     if separate:
         _slice_page_image(viewer, mode_choice, blended)
     else:
@@ -2040,29 +2041,29 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
 
     sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
     # Need to know this for multichannel mode
-    num_channels = len(userInfo.active_channels) if "Composite" not in userInfo.active_channels else len(userInfo.channels)
+    num_channels = len(gvdata.active_channels) if "Composite" not in gvdata.active_channels else len(gvdata.channels)
     pos = 0
-    for fluor in list(userInfo.channels):
+    for fluor in list(gvdata.channels):
 
         # Passing gamma is currently bugged. Suggested change is to remove the validation in the _on_gamma_change 
         #   (now located at napari/_vispy/layers/image.py
         # See https://github.com/napari/napari/issues/1866
-        if (fluor == 'Composite') or (fluor not in userInfo.active_channels and "Composite" not in userInfo.active_channels):
+        if (fluor == 'Composite') or (fluor not in gvdata.active_channels and "Composite" not in gvdata.active_channels):
             continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
         
 
         fluor_gamma = 2-(2*SESSION.view_settings[fluor+" gamma"]) + 0.001
         fluor_contrast = [SESSION.view_settings[fluor+" black-in"],SESSION.view_settings[fluor+" white-in"]]
-        position = userInfo.channelOrder[fluor]
+        position = gvdata.channelOrder[fluor]
         if SESSION.mode in ("Gallery","Context"):
-            offset = userInfo.imageSize // 2
+            offset = gvdata.imageSize // 2
             cell_image = SESSION.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
-            imsize = userInfo.imageSize
+            imsize = gvdata.imageSize
         elif SESSION.mode == "Multichannel":
             if borders != "No borders":
-                imsize = userInfo.imageSize + 2
+                imsize = gvdata.imageSize + 2
             else:
-                imsize = userInfo.imageSize
+                imsize = gvdata.imageSize
             offset = imsize // 2
             cell_image = np.zeros((imsize, imsize*(num_channels+1)))
             cell_punchout = SESSION.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute()
@@ -2084,12 +2085,12 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
         # SESSION.dask_array[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
         if SESSION.absorption_mode:
             viewer.add_image(cell_image, name = f"Screenshot {fluor}", blending = 'minimum',
-                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
+                colormap = custom_color_functions.retrieve_cm(gvdata.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
             
         else:
             viewer.add_image(cell_image, name = f"Screenshot {fluor}", blending = 'additive',
-                colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]), scale = sc, interpolation="linear",
+                colormap = custom_color_functions.retrieve_cm(gvdata.channelColors[fluor]), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
  
     blended = _blend_visible_layers(viewer, (imsize, imsize))
@@ -2120,7 +2121,7 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
         if "Screenshot" in layer.name:
             viewer.layers.selection.add(layer)
     viewer.layers.remove_selected()
-    viewer.layers.selection.active = VIEWER.layers[f"Gallery {userInfo.channels[0]}"]
+    viewer.layers.selection.active = VIEWER.layers[f"Gallery {gvdata.channels[0]}"]
     # Resets visible layers 
     restore_viewsettings_from_cache(viewer = VIEWER, session=SESSION,)
     _send_image_to_user(viewer, blended, clipboard)
@@ -2129,10 +2130,10 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
 
 def _blend_visible_layers(viewer, blended_image_shape, mode_choice = None, page_image = False):
     print(f"incoming image shape: {blended_image_shape}")
-    num_channels = len(userInfo.active_channels) if "Composite" not in userInfo.active_channels else len(userInfo.channels)
-    # num_channels = num_channels - 1 if "Composite" in userInfo.active_channels else num_channels
-    print(userInfo.active_channels)
-    print(userInfo.channels)
+    num_channels = len(gvdata.active_channels) if "Composite" not in gvdata.active_channels else len(gvdata.channels)
+    # num_channels = num_channels - 1 if "Composite" in gvdata.active_channels else num_channels
+    print(gvdata.active_channels)
+    print(gvdata.channels)
     print(num_channels)
     if SESSION.absorption_mode: # Light mode. Subtractive color space
         if page_image: 
@@ -2205,9 +2206,9 @@ def _send_image_to_user(viewer, blended, clipboard, image_name_override = False 
 
         try:
             if not image_name_override:
-                parent_folder = userInfo.last_image_save_folder 
+                parent_folder = gvdata.last_image_save_folder 
                 file_name, _ = QFileDialog.getSaveFileName(None,"Save single cell image",parent_folder,"PNG file (*.png);;All Files(*)")
-                userInfo.last_image_save_folder = os.path.normpath(pathlib.Path(file_name).parent)
+                gvdata.last_image_save_folder = os.path.normpath(pathlib.Path(file_name).parent)
                 imsave(file_name, blended)
             else:
                 imsave(image_name_override, blended)
@@ -2243,16 +2244,16 @@ def _send_image_to_user(viewer, blended, clipboard, image_name_override = False 
 def _slice_page_image(viewer, page_mode, blended_image ):
 
     try:
-        parent_folder = userInfo.last_image_save_folder 
+        parent_folder = gvdata.last_image_save_folder 
         folder = str(QFileDialog.getExistingDirectory(None, "Select Directory", parent_folder))
-        userInfo.last_image_save_folder = os.path.normpath(pathlib.Path(folder).parent)
+        gvdata.last_image_save_folder = os.path.normpath(pathlib.Path(folder).parent)
         # save_folder_name = datetime.today().strftime(f'{}_%H%M%S.txt')
     except ValueError as e:
         # User closed save window?
         print(f"You just closed the save dialog (maybe?) {e} \n")
         return False
 
-    im_size = userInfo.imageSize + 2
+    im_size = gvdata.imageSize + 2
     if page_mode == "Gallery":
         for cell_dict in SESSION.page_cells.values():
             cname = f"{cell_dict['Layer']} {cell_dict['cid']}" if ANNOTATIONS_PRESENT else str(cell_dict['cid'])
@@ -2307,8 +2308,8 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
     viewer.status = "Analyzing object data..."
     # Create array of channel indices in image data. Will use to fetch from the dask array
     positions = []
-    for fluor in userInfo.channels: # loop through channels
-        if fluor != 'Composite': positions.append(userInfo.channelOrder[fluor]) # channelOrder dict holds mappings of fluors to position in image data
+    for fluor in gvdata.channels: # loop through channels
+        if fluor != 'Composite': positions.append(gvdata.channelOrder[fluor]) # channelOrder dict holds mappings of fluors to position in image data
     # Get data for reference cell
     xmin = singlecell['XMin'] ; xmax = singlecell['XMax'] 
     ymin = singlecell['YMin'] ; ymax = singlecell['YMax'] 
@@ -2319,8 +2320,8 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
    
     plt.close() # Close a plot if it was there already
     # Assemble kwargs conditionally to pass to plotting function
-    new_legend = [mpatches.Patch(color=userInfo.channelColors[fluor], label=fluor) for fluor in userInfo.channels if fluor!='Composite']
-    pal = [userInfo.channelColors[fluor] for fluor in userInfo.channels if fluor!='Composite']
+    new_legend = [mpatches.Patch(color=gvdata.channelColors[fluor], label=fluor) for fluor in gvdata.channels if fluor!='Composite']
+    pal = [gvdata.channelColors[fluor] for fluor in gvdata.channels if fluor!='Composite']
     mult = "fill" if normalize else 'layer'
     fill = True if normalize else False
     e = 'bars' if normalize else 'step'
@@ -2340,7 +2341,7 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
             
             if RAW_PYRAMID is None:
                 cell_punchout = SESSION.dask_array[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
-            cflat = [cell_punchout[x,:,:].flatten() for x in tuple(range(len(userInfo.channels)))]
+            cflat = [cell_punchout[x,:,:].flatten() for x in tuple(range(len(gvdata.channels)))]
             collected = np.concatenate((collected,cflat),axis=1) if count !=0 else cflat
             count +=1
         
@@ -2348,7 +2349,7 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
         viewer.status = "Done - displaying plot in live viewer"
         fig, axs = plt.subplots(nrows=2, sharey=True, )
         fig.suptitle(SESSION.image_display_name, fontsize='20')
-        histplot([reference_pixels[x,:,:].flatten() for x in tuple(range(len(userInfo.channels)))], ax=axs[0], legend=False, **kwargs)
+        histplot([reference_pixels[x,:,:].flatten() for x in tuple(range(len(gvdata.channels)))], ax=axs[0], legend=False, **kwargs)
         
         if not normalize: 
             axs[0].set_yscale('log')
@@ -2366,7 +2367,7 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
         fig.legend(handles=new_legend, fontsize = '14')
     else: # Only plot cell histogram by itself
         viewer.status = "Done - displaying histogram in live viewer"
-        p = histplot([reference_pixels[x,:,:].flatten() for x in tuple(range(len(userInfo.channels)))], **kwargs)
+        p = histplot([reference_pixels[x,:,:].flatten() for x in tuple(range(len(gvdata.channels)))], **kwargs)
         # plt.gcf().get_axes()[0].set_yscale('log')
         if not normalize: 
             p.set_yscale('log')
@@ -2386,12 +2387,12 @@ def generate_intensity_violins(viewer:napari.Viewer, cell_id : str|None, layer_n
     
     match refdataset:
         case "Full dataset":
-            df = userInfo.objectDataFrame
+            df = gvdata.objectDataFrame
         case "All pages in session":
             df = SESSION.session_cells
 
             print(df.columns)
-            print(userInfo.objectDataFrame.columns)
+            print(gvdata.objectDataFrame.columns)
             print('------------------------')
             # exit()
         case "This page only":
@@ -2430,16 +2431,16 @@ def generate_intensity_violins(viewer:napari.Viewer, cell_id : str|None, layer_n
             return None
 
     pal = selection.copy()
-    for chn in userInfo.channels:
-        pal = [userInfo.channelColors[chn] if chn in x else x for x in pal]
+    for chn in gvdata.channels:
+        pal = [gvdata.channelColors[chn] if chn in x else x for x in pal]
 
     print(f'Palette is {list(zip(selection,pal))}')
-    print(f"Phenotypes are {userInfo.phenotypes}")
+    print(f"Phenotypes are {gvdata.phenotypes}")
     match pheno_choice:
         case "All custom":
-            pheno_selection = [x for x in userInfo.phenotypes if (not x.startswith("Validation |")) and x in list(df.columns)]
+            pheno_selection = [x for x in gvdata.phenotypes if (not x.startswith("Validation |")) and x in list(df.columns)]
         case "All validation":
-            pheno_selection = [x for x in userInfo.phenotypes if x.startswith("Validation |") and x in list(df.columns)]
+            pheno_selection = [x for x in gvdata.phenotypes if x.startswith("Validation |") and x in list(df.columns)]
         case _:
             pheno_selection = [pheno_choice]
     df.to_csv('mdf.csv',index=False)
@@ -2466,7 +2467,7 @@ def generate_intensity_violins(viewer:napari.Viewer, cell_id : str|None, layer_n
         ax.set_xticks(ax.get_xticks(),labs, rotation=45, ha='right')
         current_title = ax.title._text
         sc_phen = current_title.replace('Phenotype = ','')
-        c = 'black' if sc_phen.replace("Validation | ",'') not in userInfo.statuses_hex.keys() else userInfo.statuses_hex[sc_phen.replace("Validation | ",'')]
+        c = 'black' if sc_phen.replace("Validation | ",'') not in gvdata.statuses_hex.keys() else gvdata.statuses_hex[sc_phen.replace("Validation | ",'')]
         
         # Only do the following if the user wants to plot the position of a single reference cell on a violin
         if cell_id is not None:
@@ -2496,7 +2497,7 @@ def generate_intensity_violins(viewer:napari.Viewer, cell_id : str|None, layer_n
             # Redo title to include n and color with validation call color if plotting a validation phenotype
             current_title = ax.title._text
             sc_phen = current_title.replace('Phenotype = ','')
-            c = 'black' if sc_phen.replace("Validation | ",'') not in userInfo.statuses_hex.keys() else userInfo.statuses_hex[sc_phen.replace("Validation | ",'')]
+            c = 'black' if sc_phen.replace("Validation | ",'') not in gvdata.statuses_hex.keys() else gvdata.statuses_hex[sc_phen.replace("Validation | ",'')]
             n = mdf.Phenotype.value_counts()[sc_phen] // len(labs)
             new_title = current_title+f'\nn = {n}'
             ax.set_title(new_title, color=c)
@@ -2616,7 +2617,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     if phenotypes is None: phenotypes=PHENOTYPES
     if annotations is None: annotations=ANNOTATIONS  # Name of phenotype of interest
     # print(f'ORDERING PARAMS: id start: {cell_id_start}, page size: {page_size}, direction: {direction}, change?: {change_startID}')
-    halo_export = userInfo.objectDataFrame.copy()
+    halo_export = gvdata.objectDataFrame.copy()
 
     # Check for errors:
     for ph in phenotypes:
@@ -2639,7 +2640,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
     # Get relevant columns for intensity sorting
     # TODO make this conditional, and in a try except format
     headers = pd.read_csv(OBJECT_DATA_PATH, index_col=False, nrows=0).columns.tolist() 
-    possible_fluors = userInfo.possible_fluors_in_data
+    possible_fluors = gvdata.possible_fluors_in_data
     suffixes = ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity']
     all_possible_intensities = [x for x in headers if (any(s in x for s in suffixes) and (any(f in x for f in possible_fluors)))]
     SESSION.intensity_columns = all_possible_intensities
@@ -2709,8 +2710,8 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
         phen_only_df = halo_export.query(_create_anno_pheno_query(annotations,phenotypes)).reset_index()
     else:
         phen_only_df = halo_export.reset_index()
-    if userInfo.filters:
-        phen_only_df = phen_only_df.query(_create_filter_query(userInfo.filters)).reset_index()
+    if gvdata.filters:
+        phen_only_df = phen_only_df.query(_create_filter_query(gvdata.filters)).reset_index()
 
 
     # Assign page numbers to each cell in the table now. These cells can appear in the viewer during this session
@@ -2845,35 +2846,35 @@ def replace_note(cell_widget, note_widget):
 ''' Reset globals and proceed to main '''
 def GUI_execute(preprocess_class):
     
-    global userInfo, qptiff, PAGE_SIZE, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
+    global gvdata, qptiff, PAGE_SIZE, STATUS_COLORS, STATUSES_TO_HEX, STATUSES_RGBA
     global  OBJECT_DATA_PATH, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
     global ANNOTATIONS_PRESENT, SESSION
-    userInfo = preprocess_class.userInfo ; status_label = preprocess_class.status_label
-    SESSION = userInfo.session
+    gvdata = preprocess_class.gvdata ; status_label = preprocess_class.status_label
+    SESSION = gvdata.session
 
-    qptiff = userInfo.qptiff_path
-    PHENOTYPES = list(userInfo.phenotype_mappings.keys())
-    ANNOTATIONS = list(userInfo.annotation_mappings.keys())
-    ANNOTATIONS_PRESENT = userInfo.analysisRegionsInData
-    STATUS_COLORS = userInfo.statuses ; STATUSES_RGBA = userInfo.statuses_rgba ; STATUSES_TO_HEX = userInfo.statuses_hex
-    PAGE_SIZE = userInfo.page_size
-    SPECIFIC_CELL = userInfo.specific_cell
-    OBJECT_DATA_PATH = userInfo.objectDataPath
-    CELLS_PER_ROW = userInfo.cells_per_row
+    qptiff = gvdata.qptiff_path
+    PHENOTYPES = list(gvdata.phenotype_mappings.keys())
+    ANNOTATIONS = list(gvdata.annotation_mappings.keys())
+    ANNOTATIONS_PRESENT = gvdata.analysisRegionsInData
+    STATUS_COLORS = gvdata.statuses ; STATUSES_RGBA = gvdata.statuses_rgba ; STATUSES_TO_HEX = gvdata.statuses_hex
+    PAGE_SIZE = gvdata.page_size
+    SPECIFIC_CELL = gvdata.specific_cell
+    OBJECT_DATA_PATH = gvdata.objectDataPath
+    CELLS_PER_ROW = gvdata.cells_per_row
     
-    # if "Composite" not in list(userInfo.channelColors.keys()): userInfo.channelColors['Composite'] = 'None'
+    # if "Composite" not in list(gvdata.channelColors.keys()): gvdata.channelColors['Composite'] = 'None'
     
 
-    userInfo.active_channels = copy.copy(userInfo.channels)
-    userInfo.active_channels.append("Composite")
-    if userInfo.global_sort == "Sort object table by Cell Id":
+    gvdata.active_channels = copy.copy(gvdata.channels)
+    gvdata.active_channels.append("Composite")
+    if gvdata.global_sort == "Sort object table by Cell Id":
         GLOBAL_SORT = None
     else :
-        chn = userInfo.global_sort.replace("Sort object table by ","")
+        chn = gvdata.global_sort.replace("Sort object table by ","")
         GLOBAL_SORT = chn
 
     # set saving flag so that dataframe will be written upon exit
-    userInfo.session.saving_required = True # make the app save it's data on closing
+    gvdata.session.saving_required = True # make the app save it's data on closing
     main(preprocess_class)
 
 def main(preprocess_class = None):
@@ -2886,7 +2887,7 @@ def main(preprocess_class = None):
 
     print(f'\nChecking if image can be lazily loaded with dask / zarr {qptiff}...\n')
     try:
-        with tifffile.imread(userInfo.qptiff_path, aszarr=True) as zs:
+        with tifffile.imread(gvdata.qptiff_path, aszarr=True) as zs:
             SESSION.dask_array =  da.from_zarr(zs, 0) # Saves a path to the image data that can be used later
 
         
@@ -2955,7 +2956,7 @@ def main(preprocess_class = None):
 
 
     cell_description_label = QLabel(); cell_description_label.setAlignment(Qt.AlignCenter)
-    cell_description_label.setFont(userInfo.fonts.small)
+    cell_description_label.setFont(gvdata.fonts.small)
     cell_description_group = QGroupBox("Cell Attributes")
     cell_description_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
     cell_description_layout = QVBoxLayout(cell_description_group)
@@ -2963,7 +2964,7 @@ def main(preprocess_class = None):
     SESSION.widget_dictionary["cell description label"] = cell_description_label
 
     notes_label = QLabel('Placeholder note'); notes_label.setAlignment(Qt.AlignCenter)
-    notes_label.setFont(userInfo.fonts.small)
+    notes_label.setFont(gvdata.fonts.small)
 
     #TODO arrange these more neatly
     #TODO these dock widgets cause VERY strange behavior when trying to clear all layers / load more
@@ -3014,7 +3015,7 @@ def main(preprocess_class = None):
     page_cell_entry.setPlaceholderText("Cell Id (optional)")#; page_cell_entry.setFixedWidth(200)
     intensity_sort_box = QComboBox()
     intensity_sort_box.addItem("Sort page by Cell Id")
-    for i, chn in enumerate(userInfo.channels):
+    for i, chn in enumerate(gvdata.channels):
         intensity_sort_box.addItem(f"Sort page by {chn} Cell Intensity")
     local_sort = None
     if GLOBAL_SORT is None:
@@ -3082,7 +3083,7 @@ def main(preprocess_class = None):
     
     status_layer_layout = QHBoxLayout(); status_layer_layout.addWidget(status_layer_show) ; status_layer_layout.addWidget(status_layer_hide)
     status_layer_group = QButtonGroup() ; status_layer_group.addButton(status_layer_show); status_layer_group.addButton(status_layer_hide)
-    status_layer_show.setFont(userInfo.fonts.small); status_layer_hide.setFont(userInfo.fonts.small)
+    status_layer_show.setFont(gvdata.fonts.small); status_layer_hide.setFont(gvdata.fonts.small)
     
     status_layer_show.toggled.connect(lambda: toggle_statuslayer_visibility(status_layer_show))
     SESSION.widget_dictionary['show status layer radio']=status_layer_show
@@ -3096,12 +3097,12 @@ def main(preprocess_class = None):
     
     nuc_boxes_layout = QHBoxLayout(); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide); nuc_boxes_layout.addWidget(nuc_boxes_context)
     nuc_boxes_group = QButtonGroup(); nuc_boxes_group.addButton(nuc_boxes_show) ; nuc_boxes_group.addButton(nuc_boxes_hide) ; nuc_boxes_group.addButton(nuc_boxes_context)
-    nuc_boxes_show.setFont(userInfo.fonts.small); nuc_boxes_hide.setFont(userInfo.fonts.small); nuc_boxes_context.setFont(userInfo.fonts.small)
+    nuc_boxes_show.setFont(gvdata.fonts.small); nuc_boxes_hide.setFont(gvdata.fonts.small); nuc_boxes_context.setFont(gvdata.fonts.small)
     
     # Context mode marker tool group
     marker_layout = QHBoxLayout()
     # Create a combobox
-    marker_combo = StatusCombo(show_hide_group ,userInfo, color_mode = 'dark')
+    marker_combo = StatusCombo(show_hide_group ,gvdata, color_mode = 'dark')
     marker_combo.setVisible(False) # Will be shown when context mode is enabled
     marker_combo.setDisabled(True)
     SESSION.widget_dictionary["marker combo"] = marker_combo
@@ -3290,7 +3291,7 @@ def main(preprocess_class = None):
 
     # Ref cell toggle:
     violin_use_refcell = QPushButton("Plot a reference cell")
-    violin_use_refcell.setFont(userInfo.fonts.button_small)
+    violin_use_refcell.setFont(gvdata.fonts.button_small)
     violin_entry_layout.addWidget(violin_use_refcell)
 
     # LineEdit
@@ -3335,7 +3336,7 @@ def main(preprocess_class = None):
 
     violin_third_row_layout = QHBoxLayout()
     violin_phenotype = QComboBox()
-    violin_phenotype.addItems(["All custom", "All validation", *userInfo.phenotypes])
+    violin_phenotype.addItems(["All custom", "All validation", *gvdata.phenotypes])
     vlabel = QLabel("Phenotype(s)")
     vlabel.setAlignment(Qt.AlignRight)
     violin_third_row_layout.addWidget(vlabel)
@@ -3369,7 +3370,7 @@ def main(preprocess_class = None):
 
     # Open viewsettings popout
     open_vs = QPushButton("Modify view settings")
-    open_vs.pressed.connect(open_vs_popup)
+    open_vs.pressed.connect(lambda: open_vs_popup(preprocess_class))
     open_vs.setFont(QFont("Calibri", 6, weight=QFont.Normal))
     SESSION.widget_dictionary["open_vs_button"] = open_vs
 
@@ -3380,7 +3381,7 @@ def main(preprocess_class = None):
 
 
     # Create bottom bar widgets
-    for box in check_creator2(userInfo.active_channels):
+    for box in check_creator2(gvdata.active_channels):
         UPDATED_CHECKBOXES.append(box)
     viewer.window.add_dock_widget(UPDATED_CHECKBOXES + [absorption_widget, open_vs],area='bottom')
     # right_dock.adjustSize()
@@ -3419,16 +3420,16 @@ def main(preprocess_class = None):
 
     preprocess_class._append_status('<font color="#7dbc39">  Done.</font>')
     preprocess_class._append_status(' Adding gallery images to viewer...')
-    set_initial_adjustment_parameters(preprocess_class.userInfo.view_settings) # set defaults: 0.5 gamma, 0 black in, 255 white in
+    set_initial_adjustment_parameters(preprocess_class.gvdata.view_settings) # set defaults: 0.5 gamma, 0 black in, 255 white in
     attach_functions_to_viewer(viewer)
 
 
     # record initial counts for each scoring label
-    set_initial_scoring_tally(userInfo.objectDataFrame, SESSION.session_cells, page_only=False)
+    set_initial_scoring_tally(gvdata.objectDataFrame, SESSION.session_cells, page_only=False)
     set_scoring_label(SESSION.widget_dictionary["scoring label"])
 
     # try:
-    add_layers(viewer,pyramid,cell_information, int(userInfo.imageSize/2))
+    add_layers(viewer,pyramid,cell_information, int(gvdata.imageSize/2))
     # except IndexError as e:
     #     preprocess_class._append_status('<font color="#f5551a">  Failed.<br>A requested image channel does not exist in the data!</font>')
     #     # preprocess_class.findDataButton.setEnabled(True)
@@ -3442,25 +3443,25 @@ def main(preprocess_class = None):
 
     # Filter checkboxes down to relevant ones only and update color
     # print("My active channels are\n")
-    # print(userInfo.active_channels)
-    # all_boxes = check_creator2(userInfo.active_channels)
+    # print(gvdata.active_channels)
+    # all_boxes = check_creator2(gvdata.active_channels)
     
 
     #TODO set custom theme?
     VIEWER.theme = "dark"
 
     # Lazy load full size images as dask array
-    with tifffile.imread(userInfo.qptiff_path, aszarr=True) as zs:
+    with tifffile.imread(gvdata.qptiff_path, aszarr=True) as zs:
         SESSION.zarr_store = zs
         sc = (SESSION.image_scale, SESSION.image_scale) if SESSION.image_scale is not None else None
-        for fluor in userInfo.channels:
+        for fluor in gvdata.channels:
             if fluor == 'Composite':
                 continue
-            pos = userInfo.channelOrder[fluor]
+            pos = gvdata.channelOrder[fluor]
             print(f"\nAdding full size {fluor} image")
             pyramid = [da.from_zarr(zs, n)[pos] for n in range(6) ] #TODO how to know how many pyramid layers?
             viewer.add_image(pyramid, name = f'Context {fluor}', 
-                        blending = 'additive', colormap = custom_color_functions.retrieve_cm(userInfo.channelColors[fluor]),
+                        blending = 'additive', colormap = custom_color_functions.retrieve_cm(gvdata.channelColors[fluor]),
                         interpolation = "linear", scale=sc, multiscale=True, visible = True) 
             # Adding these images with visible = True allows viewsettings changes to be applied to them when the user loads into gallery mode at first.
             # Otherwise, it seems that they only display the changes after they have been visible for some small period of time in the viewer. 
@@ -3470,8 +3471,8 @@ def main(preprocess_class = None):
     chn_key_wrapper(viewer)
     if preprocess_class is not None: preprocess_class.close() # close other window
     # Set adjustment settings to their default now that all images are loaded
-    restore_viewsettings_from_cache(False, viewer, userInfo.session)
-    viewer.layers.selection.active = viewer.layers[f"Gallery {userInfo.channels[0]}"]  
+    restore_viewsettings_from_cache(False, viewer, gvdata.session)
+    viewer.layers.selection.active = viewer.layers[f"Gallery {gvdata.channels[0]}"]  
 
 
     # Make sure user can scroll through tools if there are too many

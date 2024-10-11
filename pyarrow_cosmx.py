@@ -126,6 +126,7 @@ def add_tx(view: napari.Viewer, tx_name, fov = None, col = 'white',cm = 'viridis
         return view.add_points(get_tx(tx_name, fov),
                 name=tx_name, face_color= col, size = psize, scale= (mm_per_px,mm_per_px))
 
+
 ''''''
 def add_tx_heatmap(view: napari.Viewer, tx_name, imshape, fov=None, kind = ["contour"], scale_kde = True,
                    scale_kde_limits = (25, 500),
@@ -237,16 +238,21 @@ def add_tx_heatmap(view: napari.Viewer, tx_name, imshape, fov=None, kind = ["con
     else:
         return return_layers
 
+# I do this and paste all the other code in the embedded terminal. Allows you to continue to enter code in the terminal and have napari work. If you start the viewer BEFORE IPython, the terminal
+#   is hung. Has to do with Napari's event loop.
 IPython.embed()
 exit()
 
 viewer = napari.Viewer(title = "Zarr cosmx test")
+
+# Edit to contain ( *name of image folder under ./images*, *semantic name you want to display in the viewer*, *a valid colormap*)
 npr_params = [("U","DAPI", "gray"), ("B","PanCK","green"), 
               ("Y","Membrane","bop purple"), ("R", "CD45", "red"),
               ("labels","outlines","gray"), ("G", "Not sure", "yellow")]
 
+
 FOV = 126 #126 #136
-layers = update_viewer(viewer, npr_params, fov = FOV)
+layers = update_viewer(viewer, npr_params, fov = FOV) # fov = None will add a full image
 RNA = "LINE1_ORF1"
 l1 = add_tx(viewer, RNA,col="white", psize = 35, fov  =FOV)
 l1c = add_tx_heatmap(viewer, RNA, (cmeta['fov_width'], cmeta['fov_height']), fov  = FOV, kind=["kde","contour","vector"], scale_kde=False)
