@@ -91,8 +91,12 @@ UPDATED_CHECKBOXES = []
 ANNOTATIONS_PRESENT = False # Track whether there is an 'Analysis Regions' field in the data (duplicate CIDs possible)
 
 
-######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
-#TODO merge some of the GUI elements into the same container to prevent strange spacing issues
+# class GView():
+
+#     def __init__(self) -> None:
+#         pass
+    ######------------------------- MagicGUI Widgets, Functions, and accessories ---------------------######
+    #TODO merge some of the GUI elements into the same container to prevent strange spacing issues
 
 ## --- Composite functions 
 def adjust_composite_gamma(layer, gamma):
@@ -178,7 +182,7 @@ def restore_viewsettings_from_cache(arrange_multichannel = False, viewer = VIEWE
                     adjust_composite_limits(viewer.layers[mode+f], (vs[f+" black-in"],vs[f+" white-in"]))
                 case _:
                     raise ValueError("Bad input to restore_viewsettings_from_cache - _modify_images_in_modes")
-               
+            
     if single_setting_change:
         print(f'\nSingle setting change - will exit function')
         spl = single_setting_change.split()
@@ -227,60 +231,8 @@ def set_layer_colors(modified_fluors):
             cm_name = color if not SESSION.absorption_mode else color+' inverse'
             VIEWER.layers[mode+fluor].colormap = custom_color_functions.retrieve_cm(cm_name)
     fluor_button_toggled(modified_fluors)
+
 ## --- Bottom bar functions and GUI elements 
-
-''' DEPRECATED -- replaced by a button that summons a ViewSettingsDialog'''
-# @magicgui(auto_call=True,
-#         Gamma={"widget_type": "FloatSlider", "max":1.0, "min":0.01},
-#         layout = 'horizontal')
-# def adjust_gamma_widget(Gamma: float = 0.5) -> ImageData: 
-#     def _update_dictionary(name, val):
-#         SESSION.view_settings[name+' gamma'] = val
-#     for fluor in gvdata.active_channels:
-#         if fluor == 'Composite':
-#             continue
-#         _update_dictionary(fluor,Gamma)
-#         for m in ["Gallery", "Multichannel", "Context"]:
-#             # VIEWER.layers[f"{m} "+fluor].visible = True
-#             adjust_composite_gamma(VIEWER.layers[f"{m} "+fluor],Gamma)
-#             # if ("Composite" not in gvdata.active_channels or fluor not in gvdata.active_channels) or SESSION.mode !=m: 
-#             #     VIEWER.layers[f"{m} "+fluor].visible = False
-#     VIEWER.window._qt_viewer.setFocus()
-#     SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
-
-''' DEPRECATED -- replaced by a button that summons a ViewSettingsDialog'''
-# # @magicgui(auto_call=True,
-# #         white_in={"widget_type": "FloatSlider", "max":255,"min":1.0, "label": "White-in"},
-# #         layout = 'horizontal')
-# def adjust_whitein(white_in: float = 255) -> ImageData:
-#     def _update_dictionary(name, val):
-#         SESSION.view_settings[name+' white-in'] = val
-#     for fluor in gvdata.active_channels:
-#         if fluor == 'Composite':
-#             continue
-#         _update_dictionary(fluor,white_in)
-#         for m in ["Gallery", "Multichannel", "Context"]:
-#             adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [SESSION.view_settings[fluor+" black-in"],white_in])
-#     VIEWER.window._qt_viewer.setFocus()
-#     SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
-
-''' DEPRECATED -- replaced by a button that summons a ViewSettingsDialog'''
-# @magicgui(auto_call=True,
-#         black_in={"widget_type": "FloatSlider", "max":255, "label":"Black-in"},
-#         layout = 'horizontal')
-# def adjust_blackin(black_in: float = 0) -> ImageData:
-#     def _update_dictionary(name, val):
-#         SESSION.view_settings[name+' black-in'] = val
-    
-#     for fluor in gvdata.active_channels:
-#         if fluor == 'Composite':
-#             continue
-#         _update_dictionary(fluor,black_in)
-#         for m in ["Gallery", "Multichannel", "Context"]:
-#             adjust_composite_limits(VIEWER.layers[f"{m} {fluor}"], [black_in,SESSION.view_settings[fluor+" white-in"]])
-#     VIEWER.window._qt_viewer.setFocus()
-#     SESSION.widget_dictionary["reset_vs_button"].setDisabled(False)
-
 def open_vs_popup(parent):
     if SESSION.VSDialog is None:
         vs = ViewSettingsDialog(parent, gvdata, VIEWER, SESSION.view_settings, restore_viewsettings_from_cache, set_layer_colors) # TODO make a function here that works
@@ -364,8 +316,9 @@ def fluor_button_toggled(outdated_fluors: list | None = None):
     # print(f"{checkbox_name} has been clicked and will try to remove from {gvdata.active_channels}")
         if not toggle.isChecked():
             gvdata.active_channels.append(name)
-        
+        print(f"outdated fluors is {outdated_fluors}")
         match outdated_fluors:
+            
             case list():
                 if toggle.objectName() in outdated_fluors:
                     toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(gvdata.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), SESSION.absorption_mode))
@@ -403,13 +356,8 @@ def check_creator2(list_of_names):
 
 # all_boxes = check_creator2(gvdata.channels)
 
-
 ## --- Side bar functions and GUI elements 
 
-### --- 
-# @magicgui(call_button='Change Mode',
-#         Mode={"widget_type": "RadioButtons","orientation": "vertical",
-#         "choices": [("Multichannel Mode", 1), ("Composite Mode", 2)]})#,layout = 'horizontal')
 def toggle_session_mode_catch_exceptions(target_mode, from_mouse = True):
     # try:
     toggle_session_mode(target_mode, from_mouse)
@@ -417,7 +365,6 @@ def toggle_session_mode_catch_exceptions(target_mode, from_mouse = True):
     #     print(e)
     #     # Might trigger when SESSION.cell_under_mouse holds information on a cell from context mode
     #     VIEWER.status = f"Can't enter {target_mode} Mode right now. Move your mouse around a bit first please"
-
 
 def toggle_session_mode(target_mode, from_mouse: bool):
     def _save_validation(VIEWER, Mode):
@@ -609,7 +556,6 @@ def toggle_session_mode(target_mode, from_mouse: bool):
         VIEWER.window._qt_viewer.setFocus()
         return True
 
-
 def show_next_cell_group():
     def _save_validation(VIEWER,numcells):
 
@@ -678,11 +624,7 @@ def show_next_cell_group():
     VIEWER.layers.selection.active = VIEWER.layers[f"Gallery {gvdata.channels[0]}"]  
     VIEWER.window._qt_viewer.setFocus()
     return True
-    
-# @magicgui(auto_call=True,
-#         Status_Bar_Visibility={"widget_type": "RadioButtons","orientation": "vertical",
-#         "choices": [("Show", 1), ("Hide", 2)]})
-# def toggle_statusbar_visibility(Status_Bar_Visibility: int=1):
+
 def toggle_statuslayer_visibility(show_widget):
     if SESSION.mode == "Context": return False
     if show_widget.isChecked(): SESSION.status_layer_vis = True
@@ -753,7 +695,7 @@ def toggle_nuclei_boxes(btn, checked, distanceSearchCenter = None):
 
         # if there are fewer than k cells, there will be occurences of length of data +1 in the data. Remove these
         #   so we can get real indices from the table
-         
+        
         nearby_cells = SESSION.session_cells.iloc[nearby_inds[nearby_inds!=SESSION.session_cells.shape[0]] ] 
 
         # Add box around cells
@@ -816,9 +758,6 @@ def toggle_marker_button(marker_button: QPushButton):
     display_text = {"Disabled":"Enable marker tool", "Enabled":"Disable marker tool"}[next_marker_mode]
     marker_button.setText(display_text)
     SESSION.widget_dictionary["marker combo"].setDisabled({"Enabled":False, "Disabled":True}[next_marker_mode])
-
-
-
 
 def set_initial_scoring_tally(df, session_df, page_only = True):
 
@@ -1000,19 +939,19 @@ def retrieve_status(cell_id, status, new_page):
         except:
             raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {SESSION.current_cells.keys()}")
 
-
 def black_background(color_space, mult, CPR):
     if color_space == 'RGB':
+        return da.zeros((ceil((PAGE_SIZE*mult)/CPR)*(gvdata.imageSize+2),(gvdata.imageSize+2) * CPR, 4), dtype=np.uint16, chunks=2**14)
         return np.zeros((ceil((PAGE_SIZE*mult)/CPR)*(gvdata.imageSize+2),(gvdata.imageSize+2) * CPR, 4))
     elif color_space == 'Luminescence':
+        return da.zeros((ceil((PAGE_SIZE*mult)/CPR)*(gvdata.imageSize+2),(gvdata.imageSize+2) * CPR), dtype = np.uint16, chunks = 2**14)
         return np.zeros((ceil((PAGE_SIZE*mult)/CPR)*(gvdata.imageSize+2),(gvdata.imageSize+2) * CPR))
-
 
 ''' Add images layers for Gallery and Multichannel modes. Only make visible the layers for the active mode'''
 def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True):
     print(f'\n---------\n \n Entering the add_layers function')
     if pyramid is not None: print(f"pyramid shape is {pyramid.shape}")
-  
+
     SESSION.cells_per_row["Multichannel"] = len(gvdata.channels) + 1
     SESSION.cells_per_row["Gallery"] = gvdata.cells_per_row
     cpr_g = SESSION.cells_per_row["Gallery"]
@@ -1079,6 +1018,7 @@ def add_layers(viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True
 
         if RAW_PYRAMID is None:
             # print("Using zarr/dask")
+            # cell_punchout = [da.from_zarr(SESSION.zarr_store, n)[positions] for n in range(6)] #TODO how to know how many pyramid layers?
             cell_punchout = SESSION.dask_array[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
         else:
             print("Using full size (raw) image. DANGER. DEPRECATED!")
@@ -1350,7 +1290,7 @@ def attach_functions_to_viewer(viewer):
         pass
 
     ''' When in context mode, if radio toggle is enabled, user can move the mouse over a cell to relabel it
-      as a certain scoring decision. Will need to implement this in the GUI as a dropdown menu'''
+    as a certain scoring decision. Will need to implement this in the GUI as a dropdown menu'''
     @catch_exceptions_to_log_file("runtime_mouse-movement-over-context-cell")
     def label_cells_mouseover(viewer,event):
         if SESSION.mode != "Context" or SESSION.context_marker_mode == "Disabled":
@@ -1479,8 +1419,8 @@ def attach_functions_to_viewer(viewer):
             pos = viewer._window._qt_window.mapToGlobal(QPoint(*event._pos).__add__(QPoint(12,-33)))
             # print(f'{QPoint(*event._pos)} || {pos}')
             QToolTip.showText(pos, 
-                              f'<p style="font-size: 20px;">{output_str}</p>', 
-                              viewer._window._qt_window)
+                            f'<p style="font-size: 20px;">{output_str}</p>', 
+                            viewer._window._qt_window)
             # viewer.tooltip.text = f'<p style="font-size: 20px;">{output_str}</p>' 
 
     SESSION.display_intensity_func = display_intensity
@@ -1511,7 +1451,7 @@ def attach_functions_to_viewer(viewer):
             SESSION.status_text_object["color"][ind_target] = next_color_txt
             viewer.layers["Gallery Status Numbers"].text = SESSION.status_text_object
             viewer.layers["Multichannel Status Numbers"].text = SESSION.status_text_object
- 
+
         except (KeyError, ValueError) as e:
             # Changing a cell status that isn't in the current page using Context Mode.
             print(e)
@@ -2092,7 +2032,7 @@ def save_cell_image(viewer: napari.Viewer, cell_id : str, layer_name = None, cli
             viewer.add_image(cell_image, name = f"Screenshot {fluor}", blending = 'additive',
                 colormap = custom_color_functions.retrieve_cm(gvdata.channelColors[fluor]), scale = sc, interpolation="linear",
                 gamma=fluor_gamma, contrast_limits=fluor_contrast)
- 
+
     blended = _blend_visible_layers(viewer, (imsize, imsize))
 
     # Add line separations if desired
@@ -2317,7 +2257,7 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
     
     if RAW_PYRAMID is None:
         reference_pixels = SESSION.dask_array[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
-   
+
     plt.close() # Close a plot if it was there already
     # Assemble kwargs conditionally to pass to plotting function
     new_legend = [mpatches.Patch(color=gvdata.channelColors[fluor], label=fluor) for fluor in gvdata.channels if fluor!='Composite']
@@ -2383,7 +2323,7 @@ def generate_intensity_hist(viewer :napari.Viewer, cell_id : str , layer_name : 
 
 @catch_exceptions_to_log_file("runtime_plot-violins")
 def generate_intensity_violins(viewer:napari.Viewer, cell_id : str|None, layer_name : str|None, refdataset:str="Full dataset",
-                               col_choice:str='Cell', pheno_choice:str='All custom'):
+                            col_choice:str='Cell', pheno_choice:str='All custom'):
     
     match refdataset:
         case "Full dataset":
@@ -2448,7 +2388,7 @@ def generate_intensity_violins(viewer:napari.Viewer, cell_id : str|None, layer_n
     print(pheno_selection)
     mdf = df.melt(id_vars=['Object Id', *pheno_selection ], value_vars=selection).rename(columns={'variable':'Intensity Type','value':'Intensity Value'})
     mdf = mdf.melt(id_vars = ['Object Id','Intensity Type','Intensity Value'], 
-                  value_vars= pheno_selection).rename(columns={'variable':'Phenotype'})
+                value_vars= pheno_selection).rename(columns={'variable':'Phenotype'})
     # Only keep cells positive for the chosen phenotypes. Cells with multiple phenotypes are split into different rows here (this is fine)
     mdf = mdf.loc[mdf['value'] ==1].drop(columns=['value'])
     print("\nmelted data here\n")
@@ -2539,7 +2479,6 @@ def generate_intensity_violins(viewer:napari.Viewer, cell_id : str|None, layer_n
     plt.tight_layout()
     plt.show()
 
-
 #TODO make a button to do this as well?
 def set_viewer_to_neutral_zoom(viewer, reset_session = False):
     sc = 1 if SESSION.image_scale is None else SESSION.image_scale
@@ -2561,7 +2500,6 @@ def set_viewer_to_neutral_zoom(viewer, reset_session = False):
         SESSION.last_gallery_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
         SESSION.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
 
-
 def chn_key_wrapper(viewer):
     def create_fun(position,channel):
         @viewer.bind_key(str(position+1), overwrite=True)
@@ -2572,7 +2510,7 @@ def chn_key_wrapper(viewer):
                 widget_obj.setChecked(False)
             else:
                 widget_obj.setChecked(True)
-            fluor_button_toggled([channel]) 
+            fluor_button_toggled([widget_obj.objectName() ]) 
             viewer.window._qt_viewer.setFocus()
         return toggle_channel_visibility
 
@@ -2580,7 +2518,6 @@ def chn_key_wrapper(viewer):
         binding_func_name = f'{chn}_box_func'
         exec(f'globals()["{binding_func_name}"] = create_fun({pos},"{chn}")')
         
-
 def set_initial_adjustment_parameters(viewsettings):
     for key in list(viewsettings.keys()):
         # print(f'\n key is {key}')
@@ -2609,7 +2546,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
         sort_by_intensity = "Object Id"
     else:
         sort_by_intensity = sort_by_intensity
-   
+
     print(f"SORTBYINTENSITY IS {sort_by_intensity}")
 
     # get defaults from global space
@@ -2781,7 +2718,7 @@ def extract_phenotype_xldata(page_size=None, phenotypes=None,annotations = None,
                     cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = False, kind = 'mergesort')
 
             else:
-                 # First, check if a custom name was used.
+                # First, check if a custom name was used.
                 sort_by_intensity = [x for x in all_possible_intensities if all(y in x for y in sort_by_intensity.split(" "))][0]
                 cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = True, kind = 'mergesort')
         except (KeyError, IndexError):
@@ -2850,7 +2787,7 @@ def GUI_execute(preprocess_class):
     global  OBJECT_DATA_PATH, PHENOTYPES, ANNOTATIONS, SPECIFIC_CELL, GLOBAL_SORT, CELLS_PER_ROW
     global ANNOTATIONS_PRESENT, SESSION
     gvdata = preprocess_class.gvdata ; status_label = preprocess_class.status_label
-    SESSION = gvdata.session
+    SESSION = gvdata.user.session
 
     qptiff = gvdata.qptiff_path
     PHENOTYPES = list(gvdata.phenotype_mappings.keys())
@@ -2874,7 +2811,7 @@ def GUI_execute(preprocess_class):
         GLOBAL_SORT = chn
 
     # set saving flag so that dataframe will be written upon exit
-    gvdata.session.saving_required = True # make the app save it's data on closing
+    gvdata.user.session.saving_required = True # make the app save it's data on closing
     main(preprocess_class)
 
 def main(preprocess_class = None):
@@ -2956,7 +2893,7 @@ def main(preprocess_class = None):
 
 
     cell_description_label = QLabel(); cell_description_label.setAlignment(Qt.AlignCenter)
-    cell_description_label.setFont(gvdata.fonts.small)
+    cell_description_label.setFont(gvdata.user.fonts.small)
     cell_description_group = QGroupBox("Cell Attributes")
     cell_description_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
     cell_description_layout = QVBoxLayout(cell_description_group)
@@ -2964,7 +2901,7 @@ def main(preprocess_class = None):
     SESSION.widget_dictionary["cell description label"] = cell_description_label
 
     notes_label = QLabel('Placeholder note'); notes_label.setAlignment(Qt.AlignCenter)
-    notes_label.setFont(gvdata.fonts.small)
+    notes_label.setFont(gvdata.user.fonts.small)
 
     #TODO arrange these more neatly
     #TODO these dock widgets cause VERY strange behavior when trying to clear all layers / load more
@@ -3083,7 +3020,7 @@ def main(preprocess_class = None):
     
     status_layer_layout = QHBoxLayout(); status_layer_layout.addWidget(status_layer_show) ; status_layer_layout.addWidget(status_layer_hide)
     status_layer_group = QButtonGroup() ; status_layer_group.addButton(status_layer_show); status_layer_group.addButton(status_layer_hide)
-    status_layer_show.setFont(gvdata.fonts.small); status_layer_hide.setFont(gvdata.fonts.small)
+    status_layer_show.setFont(gvdata.user.fonts.small); status_layer_hide.setFont(gvdata.user.fonts.small)
     
     status_layer_show.toggled.connect(lambda: toggle_statuslayer_visibility(status_layer_show))
     SESSION.widget_dictionary['show status layer radio']=status_layer_show
@@ -3097,7 +3034,7 @@ def main(preprocess_class = None):
     
     nuc_boxes_layout = QHBoxLayout(); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide); nuc_boxes_layout.addWidget(nuc_boxes_context)
     nuc_boxes_group = QButtonGroup(); nuc_boxes_group.addButton(nuc_boxes_show) ; nuc_boxes_group.addButton(nuc_boxes_hide) ; nuc_boxes_group.addButton(nuc_boxes_context)
-    nuc_boxes_show.setFont(gvdata.fonts.small); nuc_boxes_hide.setFont(gvdata.fonts.small); nuc_boxes_context.setFont(gvdata.fonts.small)
+    nuc_boxes_show.setFont(gvdata.user.fonts.small); nuc_boxes_hide.setFont(gvdata.user.fonts.small); nuc_boxes_context.setFont(gvdata.user.fonts.small)
     
     # Context mode marker tool group
     marker_layout = QHBoxLayout()
@@ -3291,7 +3228,7 @@ def main(preprocess_class = None):
 
     # Ref cell toggle:
     violin_use_refcell = QPushButton("Plot a reference cell")
-    violin_use_refcell.setFont(gvdata.fonts.button_small)
+    violin_use_refcell.setFont(gvdata.user.fonts.button_small)
     violin_entry_layout.addWidget(violin_use_refcell)
 
     # LineEdit
@@ -3471,7 +3408,7 @@ def main(preprocess_class = None):
     chn_key_wrapper(viewer)
     if preprocess_class is not None: preprocess_class.close() # close other window
     # Set adjustment settings to their default now that all images are loaded
-    restore_viewsettings_from_cache(False, viewer, gvdata.session)
+    restore_viewsettings_from_cache(False, viewer, gvdata.user.session)
     viewer.layers.selection.active = viewer.layers[f"Gallery {gvdata.channels[0]}"]  
 
 

@@ -195,21 +195,36 @@ def get_scales(tiff_path=None, um_per_px=None, scale=1):
         print(f"New scale = {um_per_px:.4f} um/px")
     return {"um_per_px":um_per_px, "mm_per_px":mm_per_px, "px_per_mm":px_per_mm}  
 
-## From pairing.py
-def pair_np(x, y):
-    """Encode x to array of y
+##  From pairing.py 
+# def pair_np(x, y):
+#     """Encode x to array of y
 
+#     Zero remains zero.
+
+#     Args:
+#         x (int): number
+#         y (ndarray): numpy array of int
+#     """    
+#     z = y != 0
+#     a = (x >= y) & z
+#     b = (x < y) & z
+#     np.putmask(y, a, x * x + x + y)
+#     np.putmask(y, b, y * y + x)
+
+# The above method strikes me as overcomplex. Masks are confusing for no reason
+#   It's space efficient i.e. no wasted numbers but do we care? 32bit np array has 4.3 bil numbers.
+#   I don't think we need to preserve them all since that's an infeasible number of cells
+#  Given a constraint of a ceiling number for cells per FOV, this can be simpler and faster (should be). 
+def hash_label_ids(fov, x):
+    """Write label images with unique global IDs
     Zero remains zero.
 
     Args:
-        x (int): number
-        y (ndarray): numpy array of int
+        fov (int): number
+        x (ndarray): numpy array of int
     """    
-    z = y != 0
-    a = (x >= y) & z
-    b = (x < y) & z
-    np.putmask(y, a, x * x + x + y)
-    np.putmask(y, b, y * y + x)
+    nonzero = x != 0
+    np.putmask(x, nonzero, x + (fov *25_000) )
 
 def main(args_list=None):
     parser = argparse.ArgumentParser(description='Tile CellLabels and morphology TIFFs.',
@@ -328,7 +343,7 @@ def main(args_list=None):
             elif len(tile_path) > 1:
                 tqdm.write(f"Multiple CellLabels files found for FOV {fov}\nUsing {tile_path[0]}")
             tile = tifffile.imread(tile_path[0]).astype(np.uint32)
-            pair_np(fov, tile)
+            hash_label_ids(fov, tile)
             y, x = fov_origin(fov_offsets, fov, top_origin_px, left_origin_px, fov_height, scale_dict, dash)
             im[y:y+tile.shape[0], x:x+tile.shape[1]] = tile
         

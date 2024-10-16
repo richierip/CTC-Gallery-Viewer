@@ -32,8 +32,9 @@ from custom_color_functions import colormap_titled as rgbcd
 
 VERSION_NUMBER = '1.3.5'
 FONT_SIZE = 12
-WIDGET_SELECTED = None
 
+''' Keeps a reference to the open QDialog, so that when a new one is created, it can destroy the old one. 
+        Responsible for instantiating the new dialog and updating it's style. Requires the old GVData class as input'''
 class WindowTracker():
     def __init__(self):
         self.windows = []
@@ -52,7 +53,7 @@ class WindowTracker():
         colors = {"HALO": ["#0b2636", "#5e8e92", "#5e8e92", "#333333"],
                   "HALO Multi-Image" : ["#0b2636", "#5e8e92", "#5e8e92", "#333333"],
                   "CosMx" : ["#2d5b71", "#b0ce4c", "#545659", "#545659"],
-                  "Xenium" : ["#48a0df", "e1c552", "#d75451", "#d75451"]}
+                  "Xenium" : ["#1f1f1f", "#8a3634", "#545659", "#545659"]}
     
         accent_colors = colors[ui_mode]
     
@@ -115,7 +116,9 @@ class WindowTracker():
         # Read stored class data
         if gvdata is None:
             user = storage_classes.loadObject('profiles/active.gvconfig')
-            gvdata = user.current_data
+        else:
+            user = gvdata.user
+        gvdata = user.current_data
         print(gvdata.user.UI_mode)
         match gvdata.user.UI_mode:
             case "HALO":
@@ -144,6 +147,24 @@ class GVUI(QDialog):
         self.tracker = tracker
         self.app = app
         self.gvdata = gvdata
+        self.init_window_defaults()
+        self.init_top_layout()
+        self.createTopLeftGroupBox()
+        self.createTopRightGroupBox()
+        self.init_filter_readouts()
+        self.init_status_load_area()
+        self.connect_buttons()
+        self.init_menu_bar()
+        self.insert_previous_hints()
+        self.set_top_layout()
+        self.set_main_layout()
+        print("End init\n")
+
+    #################################
+    #        Initialization functions          
+    #################################
+
+    def init_window_defaults(self):
         # Arrange title bar buttons
         self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
         self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
@@ -152,55 +173,31 @@ class GVUI(QDialog):
         # self.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
 
         # For TESTING
+        print(f"My class type is {type(self)} and || {self.gvdata}")
         print(f'Initial test print for colors: {self.gvdata.channelColors}')
-
-        self.myColors = [] # Holds color selection comboboxes for the channel selection widgets
         self.setWindowIcon(QIcon('data/mghiconwhite.png'))
 
         '''Set title area / logo'''
-        cc_logo = QLabel()
+        self.cc_logo = QLabel()
         pixmap = QPixmap('data/mgh-mgb-cc-logo2 (Custom).png')
-        cc_logo.setPixmap(pixmap)
+        self.cc_logo.setPixmap(pixmap)
+        self.setWindowTitle(f"GalleryViewer v{VERSION_NUMBER}")
+
+    def init_top_layout(self):
         # f'<br><font color="{idcolor}">CID: {ID}</font>'
-        titleLabel = QLabel(f'Tumor Cartography Core <font color="#033b96">Gallery</font><font color="#009ca6">Viewer</font> <font size=12pt>v{VERSION_NUMBER}</font>')
+        self.titleLabel = QLabel(f'Tumor Cartography Core <font color="#033b96">Gallery</font><font color="#009ca6">Viewer</font> <font size=12pt>v{VERSION_NUMBER}</font>')
         # custom_font = QFont(); custom_font.setFamily('Metropolis Black'); custom_font.setPointSize(39)
-        titleLabel.setStyleSheet('font-family: Metropolis ; font-size: 25pt')
+        self.titleLabel.setStyleSheet('font-family: Metropolis ; font-size: 25pt')
         # titleLabel.setFont(QFont('MS Gothic',38))
-        titleLabel.setAlignment(Qt.AlignCenter)
+        self.titleLabel.setAlignment(Qt.AlignCenter)
 
         ''' ComboBox for UI Mode '''
         self.UI_combo = ModeCombo(self,self.gvdata)
         self.UI_combo.currentTextChanged.connect(self.change_UI_mode)
-
-        # reset status mappings for selected annotations and phenotypes
-        new_pheno_label = '<u>Phenotypes</u><br>'
-        if not self.gvdata.phenotype_mappings.keys(): new_pheno_label +='All'
-        for key in self.gvdata.phenotype_mappings:
-            self.gvdata.phenotype_mappings[key] = "Don't assign"
-            new_pheno_label += f'{key}<br>'
-        self.gvdata.phenotype_mappings_label = new_pheno_label
-
-        new_anno_label = '<u>Annotations</u><br>'
-        if not self.gvdata.annotation_mappings.keys(): new_anno_label +='All'
-        for key in self.gvdata.annotation_mappings:
-            self.gvdata.annotation_mappings[key] = "Don't assign"
-            new_anno_label += f'{key}<br>'
-        self.gvdata.annotation_mappings_label = new_anno_label
-
-        self.status_label = QLabel()
-        self.status_label.setStyleSheet('color:#075cbf ; font-size: 15pt')
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setVisible(False)
-
-        self.createTopLeftGroupBox()
-        self.createTopRightGroupBox()
-        # self.createProgressBar()
-
         # entry box for .qptiff        
         self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
         # Want to do this in any case
         self.qptiffEntry.setPlaceholderText('Enter path to .qptiff')
-
         self.qptiffEntry.setFixedWidth(800)
         # qptiffEntry.setAlignment(Qt.AlignLeft)
         # entryLabel = QLabel("Image: ")
@@ -238,11 +235,34 @@ class GVUI(QDialog):
         # viewSettingsLabel.setAlignment(Qt.AlignCenter)
         # viewSettingsLabel.setMaximumWidth(600)
 
+    def init_filter_readouts(self):
+        # reset status mappings for selected annotations and phenotypes
+        new_pheno_label = '<u>Phenotypes</u><br>'
+        if not self.gvdata.phenotype_mappings.keys(): new_pheno_label +='All'
+        for key in self.gvdata.phenotype_mappings:
+            self.gvdata.phenotype_mappings[key] = "Don't assign"
+            new_pheno_label += f'{key}<br>'
+        self.gvdata.phenotype_mappings_label = new_pheno_label
+
+        new_anno_label = '<u>Annotations</u><br>'
+        if not self.gvdata.annotation_mappings.keys(): new_anno_label +='All'
+        for key in self.gvdata.annotation_mappings:
+            self.gvdata.annotation_mappings[key] = "Don't assign"
+            new_anno_label += f'{key}<br>'
+        self.gvdata.annotation_mappings_label = new_anno_label
+
+    def init_status_load_area(self):
+        self.status_label = QLabel()
+        self.status_label.setStyleSheet('color:#075cbf ; font-size: 15pt')
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setVisible(False)
+
+        # self.createProgressBar()
         # Push button to start reading image data and start up napari by remotely executing main method of main script
         self.findDataButton = QPushButton("Load images into viewer")
         self.findDataButton.setDefault(False)
 
-
+    def connect_buttons(self):
         self.findDataButton.pressed.connect(self.loadGallery)
         self.qptiffEntry.textEdited.connect(self.saveQptiff)
         self.dataEntry.textEdited.connect(self.saveObjectData)
@@ -250,6 +270,7 @@ class GVUI(QDialog):
         self.previewObjectDataButton.pressed.connect(self.prefillObjectData)
         self.previewImageDataButton.pressed.connect(self.prefillImageData)
 
+    def init_menu_bar(self):
         # Menu bar
         self.menubar = QMenuBar()
         pref = self.menubar.addMenu('Preferences')
@@ -264,7 +285,6 @@ class GVUI(QDialog):
         channels = QAction("Select image channels", self)
         channels.setShortcut("Ctrl+i")
         
-
         pref.addActions((scoring,import_gvs, export_gvs, channels,reset))
         pref.triggered[QAction].connect(self.process_menu_action)
 
@@ -277,30 +297,28 @@ class GVUI(QDialog):
         about.addActions((manual,errors, github))
         about.triggered[QAction].connect(self.process_menu_action)
 
-        topLayout = QGridLayout()
+    def set_top_layout(self):
+        ''' Top layout'''
+        self.topLayout = QGridLayout()
         # topLayout.addStretch(1)
-        topLayout.addWidget(cc_logo,0,0)
-        topLayout.addWidget(titleLabel,0,1, 1,3, Qt.AlignLeft)
-        topLayout.addWidget(self.UI_combo, 0, 3,1,2,Qt.AlignRight)
-        topLayout.setSpacing(20)
-        # topLayout.addWidget(entryLabel,1,0,1,0)
-        topLayout.addWidget(self.qptiffEntry,1,1,)
-        topLayout.addWidget(self.previewImageDataButton,1,2,1,2)
-        # topLayout.addWidget(dataEntryLabel,2,0,1,0)
-        topLayout.addWidget(self.dataEntry,2,1)
-        # topLayout.addWidget(viewSettingsLabel,3,0,1,0)
-        topLayout.addWidget(self.previewObjectDataButton,2,2,1,2)
-        topLayout.addWidget(self.viewSettingsEntry,3,1)
-        topLayout.addWidget(self.getViewsettingsPathButton,3,2,1,2)
-        # topLayout.addWidget(self.findDataButton,2,1)
+        self.topLayout.addWidget(self.cc_logo,0,0)
+        self.topLayout.addWidget(self.titleLabel,0,1, 1,3, Qt.AlignLeft)
+        self.topLayout.addWidget(self.UI_combo, 0, 3,1,2,Qt.AlignRight)
+        self.topLayout.setSpacing(20)
+        self.topLayout.addWidget(self.qptiffEntry,1,1,)
+        self.topLayout.addWidget(self.previewImageDataButton,1,2,1,2)
+        self.topLayout.addWidget(self.dataEntry,2,1)
+        self.topLayout.addWidget(self.previewObjectDataButton,2,2,1,2)
+        self.topLayout.addWidget(self.viewSettingsEntry,3,1)
+        self.topLayout.addWidget(self.getViewsettingsPathButton,3,2,1,2)
 
+    def set_main_layout(self):  
+        ''' Main layout '''
         self.mainLayout = QGridLayout()
         self.mainLayout.setMenuBar(self.menubar)
-        self.mainLayout.addLayout(topLayout, 0, 0, 1, 2)
+        self.mainLayout.addLayout(self.topLayout, 0, 0, 1, 2)
         self.mainLayout.addWidget(self.topLeftGroupBox, 1, 0)
         self.mainLayout.addWidget(self.topRightGroupBox, 1, 1)
-        # mainLayout.addWidget(self.bottomLeftTabWidget, 2, 0)
-        # mainLayout.addWidget(self.bottomRightGroupBox, 2, 1)
         self.mainLayout.addWidget(self.findDataButton,2,0,1,0)
         self.mainLayout.addWidget(self.status_label,3,0,1,0)
         
@@ -311,8 +329,7 @@ class GVUI(QDialog):
         self.mainLayout.setSizeConstraint(QLayout.SetFixedSize)
         self.setLayout(self.mainLayout)
 
-        self.setWindowTitle(f"GalleryViewer v{VERSION_NUMBER}")
-
+    def insert_previous_hints(self):
         # preprocess things if user has entered paths in a previous session
         if self.gvdata.qptiff_path is not None:
             self.qptiffEntry.insert(pathlib.Path(self.gvdata.qptiff_path).name)
@@ -323,7 +340,202 @@ class GVUI(QDialog):
         if self.gvdata.view_settings_path is not None:
             self.saveViewSettings()
         self.clearFocus()
-        print("End init\n")
+
+    #################################
+    #      Groupbox constructors
+    #################################
+
+    ''' Construct widgets for channel checkboxes and color dropdowns'''
+    def createTopLeftGroupBox(self, layout: None|QGridLayout = None, groupbox: None|QGroupBox = None ):
+        self.topLeftGroupBox = groupbox if groupbox is not None else QGroupBox("Channels and Colors")
+        self.myColors = [] # Holds color selection comboboxes for the channel selection widgets
+        self.mycheckbuttons = []
+        for chn, pos in self.gvdata.channelOrder.items():
+            check = QCheckBox(chn)
+            check.setObjectName(chn.replace(" ","_"))
+            self.mycheckbuttons.append(check)
+        self.topLeftGroupLayout = layout if layout is not None else QGridLayout()
+        
+        row = 0 ; col = 0
+        for pos,button in enumerate(self.mycheckbuttons):
+            colorComboName = button.objectName()
+            colorCombo = ColorfulComboBox(self, rgbcd, self.gvdata.channelColors[button.objectName().replace("_"," ")].title() )
+            colorCombo.setObjectName(colorComboName)
+            if button.objectName().replace("_"," ") in self.gvdata.channels:
+                button.setChecked(True)
+            else:
+                button.setChecked(False)
+            button.toggled.connect(self.saveChannel) #IMPORTANT that this comes after setting check values
+            self.myColors.append(colorCombo)
+            colorCombo.activated.connect(self.saveColors)
+            
+            button.setStyleSheet(f"""
+                QCheckBox {{ font-size: 10pt;}}
+            """)
+            self.topLeftGroupLayout.addWidget(button, row//4,col%4)
+            self.topLeftGroupLayout.addWidget(colorCombo, row//4 ,  (col%4)+1 )
+            row+=2; col+=2
+
+        self.topLeftGroupBox.setLayout(self.topLeftGroupLayout)    
+        return self.topLeftGroupLayout, self.topLeftGroupBox
+    
+    ''' Construct widgets for cell filters area'''
+    def createTopRightGroupBox(self):
+        self.topRightGroupBox = QGroupBox("Cells to Read")
+
+        explanationLabel2 = QLabel("Gallery image size <b>(px)</b>")
+        explanationLabel3 = QLabel("Num. cells <b>per page<b>")
+        explanationLabel4 = QLabel("Num. cells <b>per row<b>")
+        explanationLabel5 = QLabel("Load page with <b>Cell ID<b>")
+        
+        #------------------ Annotation widgets
+        self.annotationButton = QPushButton("Add Annotation")
+        self.annotationButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
+        self.annotationButton.pressed.connect(self.addAnnotation)
+
+         # Annotation layer select
+        self.annotationEdit = QLineEdit(self.topRightGroupBox)
+        self.annotationEdit.setPlaceholderText('Single layer only')
+        self.annotationEdit.setFixedWidth(220)
+        self.annotationCombo = QComboBox(self.topRightGroupBox)
+        self.annotationCombo.setVisible(False)
+        self.annotationStatuses = StatusCombo(self.topRightGroupBox, self.gvdata)
+
+        # Pheno selection display label
+        self.annotationDisplay = QLabel(self.topRightGroupBox)
+        self.annotationDisplay.setText(self.gvdata.annotation_mappings_label)
+        self.annotationDisplay.setAlignment(Qt.AlignTop)
+        # self.annotationDisplay.setStyleSheet("line-height:1.5; padding-left:15px; padding-right:15px; padding-top:0px")
+        self.annotationDisplay.setContentsMargins(15,0,15,0)
+
+        #---------- Phenotype widgets
+        self.phenotypeButton = QPushButton("Add Phenotype")
+        self.phenotypeButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
+        self.phenotypeButton.pressed.connect(self.addPheno)
+
+        # LineEdit / ComboBox
+        self.phenotypeToGrab = QLineEdit(self.topRightGroupBox)
+        self.phenotypeToGrab.setPlaceholderText('Phenotype of interest')
+        self.phenotypeToGrab.setFixedWidth(220)
+        self.phenotypeCombo = QComboBox(self.topRightGroupBox)
+        self.phenotypeCombo.setVisible(False)
+        self.phenotypeStatuses = StatusCombo(self.topRightGroupBox, self.gvdata)
+       
+
+        # Pheno selection display label
+        self.phenoDisplay = QLabel(self.topRightGroupBox)
+        self.phenoDisplay.setText(self.gvdata.phenotype_mappings_label)
+        self.phenoDisplay.setAlignment(Qt.AlignTop)
+        self.phenoDisplay.setStyleSheet("line-height:1.5")
+
+        #---------- Filter widgets
+        self.filterButton = QPushButton("Add Filter")
+        self.filterButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
+        self.filterButton.pressed.connect(self.addFilter)
+
+        self.filterMarker = QLineEdit(self.topRightGroupBox)
+        self.filterMarker.setPlaceholderText('Marker')
+        self.filterMarker.setFixedWidth(220)
+        self.filterMarkerCombo = QComboBox(self.topRightGroupBox)
+        self.filterMarkerCombo.setVisible(False)
+        self.filterFunctionChoice = QComboBox(self.topRightGroupBox)
+        self.filterFunctionChoice.addItems(["greater than", "less than"])
+        self.filterNumber = QDoubleSpinBox(self.topRightGroupBox)
+        self.filterNumber.setRange(0,1000)
+       
+        # Pheno / annotation selection display label
+        self.filterDisplay = QLabel(self.topRightGroupBox)
+        self.filterDisplay.setText(self.gvdata.filters_label)
+        self.filterDisplay.setAlignment(Qt.AlignTop)
+        self.filterDisplay.setStyleSheet("line-height:1.5")
+
+        # Reset button 
+        self.resetButton = QPushButton('Reset choices',self.topRightGroupBox)
+        self.resetButton.pressed.connect(self.reset_mappings)
+        self.resetButton.setStyleSheet(f"QPushButton {{ font-size: 14px}}")
+
+        self.imageSize = QSpinBox(self.topRightGroupBox)
+        self.imageSize.setRange(50,1000)
+        self.imageSize.setValue(self.gvdata.imageSize) # Misbehaving?
+        self.imageSize.editingFinished.connect(self.saveImageSize)
+        self.imageSize.setFixedWidth(100)
+        self.specificCellChoice = QLineEdit(self.topRightGroupBox)
+        self.specificCellChoice.setPlaceholderText('Leave blank for page 1')
+        if self.gvdata.specific_cell is not None:
+            self.specificCellChoice.insert(self.gvdata.specific_cell['ID'])
+        self.specificCellChoice.setFixedWidth(220)
+        self.specificCellChoice.textEdited.connect(self.saveSpecificCell)
+
+        # Widgets to select annotation layer
+        self.specificCellAnnotationEdit = QLineEdit(self.topRightGroupBox)
+        self.specificCellAnnotationEdit.setPlaceholderText('Annotation layer')
+        if self.gvdata.specific_cell is not None:
+            self.specificCellAnnotationEdit.insert(self.gvdata.specific_cell['Annotation Layer'])
+        self.specificCellAnnotationEdit.setFixedWidth(220)
+        self.specificCellAnnotationEdit.textEdited.connect(self.saveSpecificCell)
+
+        self.specificCellAnnotationCombo = QComboBox(self.topRightGroupBox)
+        self.specificCellAnnotationCombo.setVisible(False)
+        self.specificCellAnnotationCombo.activated.connect(self.saveSpecificCell)
+
+        self.page_size_widget = QSpinBox(self.topRightGroupBox)
+        self.page_size_widget.setRange(5,4000)
+        self.page_size_widget.setValue(self.gvdata.page_size)
+        self.page_size_widget.editingFinished.connect(self.savePageSize)
+        self.page_size_widget.setFixedWidth(100)
+
+        self.row_size_widget = QSpinBox(self.topRightGroupBox)
+        self.row_size_widget.setRange(2,self.gvdata.page_size)
+        self.row_size_widget.setValue(self.gvdata.cells_per_row)
+        self.row_size_widget.editingFinished.connect(self.saveRowSize)
+        self.row_size_widget.setFixedWidth(100)
+
+        self.global_sort_widget = QComboBox(self.topRightGroupBox)
+        self.global_sort_widget.addItem("Sort object table by Cell Id")
+        print(f"setting widget to be {self.gvdata.global_sort}")
+        for i, chn in enumerate(self.gvdata.channels):
+            self.global_sort_widget.addItem(f"Sort object table by {chn} Cell Intensity")
+        self.global_sort_widget.setCurrentText(self.gvdata.global_sort)
+        self.global_sort_widget.currentTextChanged.connect(self.saveGlobalSort)
+
+        layout = QGridLayout()
+        layout.addWidget(self.filterButton,0,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel0,0,0)
+        layout.addWidget(self.filterMarker,0,1,Qt.AlignTop) ; layout.addWidget(self.filterMarkerCombo,0,1,Qt.AlignTop)
+        layout.addWidget(self.filterFunctionChoice,0,2,Qt.AlignTop)
+        layout.addWidget(self.filterNumber,0,3,Qt.AlignTop)
+
+        layout.addWidget(self.phenotypeButton,1,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel0,0,0)
+        layout.addWidget(self.phenotypeToGrab,1,1,Qt.AlignTop) ; layout.addWidget(self.phenotypeCombo,1,1,Qt.AlignTop)
+        layout.addWidget(self.phenotypeStatuses,1,2,1,2,Qt.AlignTop)
+        layout.addWidget(self.annotationButton,2,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel1,1,0)
+        layout.addWidget(self.annotationEdit,2,1,Qt.AlignTop); layout.addWidget(self.annotationCombo,2,1,Qt.AlignTop)
+        layout.addWidget(self.annotationStatuses,2,2,1,2,Qt.AlignTop)
+        layout.addWidget(explanationLabel2,3,0,Qt.AlignTop)
+        layout.addWidget(self.imageSize,3,1,Qt.AlignTop)
+        layout.addWidget(self.resetButton,3,2,1,2,Qt.AlignTop)
+        layout.addWidget(explanationLabel3,4,0,Qt.AlignTop)
+        layout.addWidget(self.page_size_widget,4,1,Qt.AlignTop)
+        layout.addWidget(explanationLabel4,5,0,Qt.AlignTop)
+        layout.addWidget(self.row_size_widget,5,1,Qt.AlignTop)
+        layout.addWidget(explanationLabel5,6,0,Qt.AlignTop)
+        layout.addWidget(self.specificCellChoice,6,1,Qt.AlignTop)
+        layout.addWidget(self.specificCellAnnotationEdit,6,2,1,2,Qt.AlignTop)
+        layout.addWidget(self.specificCellAnnotationCombo,6,2,1,2,Qt.AlignTop)
+        layout.addWidget(self.global_sort_widget,7,0,1,2)
+        layout.addWidget(self.phenoDisplay,0,4,7,1)
+        layout.addWidget(self.annotationDisplay,0,5,7,1)
+        layout.addWidget(self.filterDisplay,0,6,7,1)
+        # layout.setColumnStretch(3,6)
+        # layout.setColumnStretch(4,6)
+
+
+        # layout.addWidget(self.findDataButton)
+        layout.rowStretch(-100)
+        self.topRightGroupBox.setLayout(layout)
+
+    #################################
+    #        Event functions          
+    #################################
 
     ''' ui_mode variable tracks with the current display of the widget. Will have changed by now. '''
     def change_UI_mode(self, new_mode):
@@ -335,10 +547,9 @@ class GVUI(QDialog):
         self.gvdata.user.UI_mode = new_mode
         tracker = self.tracker
         tracker.start_application(self.app, gvdata = self.gvdata )
-        open_windows = tracker.windows
-        open_windows[0].finished.connect(lambda: _open_new_mode(open_windows[1]))
-        open_windows[0].close()
-
+        old, new = tracker.windows
+        old.finished.connect(lambda: _open_new_mode(new))
+        old.close()
 
     ''' Summon dialog box for changing scoring labels'''
     def change_scoring_decisions(self):
@@ -371,7 +582,7 @@ class GVUI(QDialog):
                     self.status_label.setText(status)
             case 'reset':
                 try:
-                    os.remove(os.path.normpath(r'./data/presets'))
+                    os.remove(os.path.normpath('profiles/active.gvconfig'))
                     self.status_label.setVisible(True)
                     status ='<font color="#ffa000">Cleared all saved metadata!</font> Close this window to allow the changes to take effect'
                     self.status_label.setText(status)
@@ -512,6 +723,12 @@ class GVUI(QDialog):
                 self.gvdata.attempt_channel_add(channelName)
             elif not button.isChecked():
                 self.gvdata.attempt_channel_remove(channelName)
+
+    ''' Set color widgets with the colors in the data'''
+    def setColors(self):
+        for colorWidget in self.myColors:
+            channelName = colorWidget.objectName().replace("_"," ")
+            colorWidget.setCurrentText(self.gvdata.channelColors[channelName].capitalize())
 
     ''' Internalize mappings of channel names to colors'''
     def saveColors(self):
@@ -888,6 +1105,7 @@ class GVUI(QDialog):
         # rename keys to ensure channels are mapped to a color we have a colormap for  
         for key in list(fluors.keys()):
             fluors[rename_key(key)] = fluors.pop(key).lower().replace('white', 'gray')
+        fluors = {key : val.lower() for key, val in fluors.items()}
         unused_colors = copy.copy(self.gvdata.available_colors)
         for col in fluors.values():
             if col in unused_colors:
@@ -912,6 +1130,10 @@ class GVUI(QDialog):
             if widget_name in list(fluors.keys()):
                 button.setChecked(True)
         # Save info to class
+        print(f"TESTING HERE")
+        print('\n')
+        print(fluors)
+        print('\n')
         self.gvdata.channelColors = fluors
         self.gvdata.channels = []
         for pos, fluor in enumerate(list(fluors.keys())):
@@ -919,196 +1141,12 @@ class GVUI(QDialog):
             self.gvdata.channelOrder[fluor] = int(pos)
         
         self.saveChannel()
-        # self.saveColors()
+        self.setColors()
         return 'passed'
-    
-    ''' Construct widgets for channel checkboxes and color dropdowns'''
-    def createTopLeftGroupBox(self, layout: None|QGridLayout = None, groupbox: None|QGroupBox = None ):
-        self.topLeftGroupBox = groupbox if groupbox is not None else QGroupBox("Channels and Colors")
-        
-        self.mycheckbuttons = []
-        for chn, pos in self.gvdata.channelOrder.items():
-            check = QCheckBox(chn)
-            check.setObjectName(chn.replace(" ","_"))
-            self.mycheckbuttons.append(check)
-        self.topLeftGroupLayout = layout if layout is not None else QGridLayout()
-        
-        row = 0 ; col = 0
-        for pos,button in enumerate(self.mycheckbuttons):
-            colorComboName = button.objectName()
-            colorCombo = ColorfulComboBox(self, rgbcd, self.gvdata.channelColors[button.objectName().replace("_"," ")].title() )
-            colorCombo.setObjectName(colorComboName)
-            if button.objectName().replace("_"," ") in self.gvdata.channels:
-                button.setChecked(True)
-            else:
-                button.setChecked(False)
-            button.toggled.connect(self.saveChannel) #IMPORTANT that this comes after setting check values
-            self.myColors.append(colorCombo)
-            colorCombo.activated.connect(self.saveColors)
-            
-            button.setStyleSheet(f"""
-                QCheckBox {{ font-size: 10pt;}}
-            """)
-            self.topLeftGroupLayout.addWidget(button, row//4,col%4)
-            self.topLeftGroupLayout.addWidget(colorCombo, row//4 ,  (col%4)+1 )
-            row+=2; col+=2
 
-        self.topLeftGroupBox.setLayout(self.topLeftGroupLayout)    
-        return self.topLeftGroupLayout, self.topLeftGroupBox
-    
-    ''' Construct widgets for cell filters area'''
-    def createTopRightGroupBox(self):
-        self.topRightGroupBox = QGroupBox("Cells to Read")
-
-        explanationLabel2 = QLabel("Gallery image size <b>(px)</b>")
-        explanationLabel3 = QLabel("Num. cells <b>per page<b>")
-        explanationLabel4 = QLabel("Num. cells <b>per row<b>")
-        explanationLabel5 = QLabel("Load page with <b>Cell ID<b>")
-        
-        #------------------ Annotation widgets
-        self.annotationButton = QPushButton("Add Annotation")
-        self.annotationButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
-        self.annotationButton.pressed.connect(self.addAnnotation)
-
-         # Annotation layer select
-        self.annotationEdit = QLineEdit(self.topRightGroupBox)
-        self.annotationEdit.setPlaceholderText('Single layer only')
-        self.annotationEdit.setFixedWidth(220)
-        self.annotationCombo = QComboBox(self.topRightGroupBox)
-        self.annotationCombo.setVisible(False)
-        self.annotationStatuses = StatusCombo(self.topRightGroupBox, self.gvdata)
-
-        # Pheno selection display label
-        self.annotationDisplay = QLabel(self.topRightGroupBox)
-        self.annotationDisplay.setText(self.gvdata.annotation_mappings_label)
-        self.annotationDisplay.setAlignment(Qt.AlignTop)
-        # self.annotationDisplay.setStyleSheet("line-height:1.5; padding-left:15px; padding-right:15px; padding-top:0px")
-        self.annotationDisplay.setContentsMargins(15,0,15,0)
-
-        #---------- Phenotype widgets
-        self.phenotypeButton = QPushButton("Add Phenotype")
-        self.phenotypeButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
-        self.phenotypeButton.pressed.connect(self.addPheno)
-
-        # LineEdit / ComboBox
-        self.phenotypeToGrab = QLineEdit(self.topRightGroupBox)
-        self.phenotypeToGrab.setPlaceholderText('Phenotype of interest')
-        self.phenotypeToGrab.setFixedWidth(220)
-        self.phenotypeCombo = QComboBox(self.topRightGroupBox)
-        self.phenotypeCombo.setVisible(False)
-        self.phenotypeStatuses = StatusCombo(self.topRightGroupBox, self.gvdata)
-       
-
-        # Pheno selection display label
-        self.phenoDisplay = QLabel(self.topRightGroupBox)
-        self.phenoDisplay.setText(self.gvdata.phenotype_mappings_label)
-        self.phenoDisplay.setAlignment(Qt.AlignTop)
-        self.phenoDisplay.setStyleSheet("line-height:1.5")
-
-        #---------- Filter widgets
-        self.filterButton = QPushButton("Add Filter")
-        self.filterButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
-        self.filterButton.pressed.connect(self.addFilter)
-
-        self.filterMarker = QLineEdit(self.topRightGroupBox)
-        self.filterMarker.setPlaceholderText('Marker')
-        self.filterMarker.setFixedWidth(220)
-        self.filterMarkerCombo = QComboBox(self.topRightGroupBox)
-        self.filterMarkerCombo.setVisible(False)
-        self.filterFunctionChoice = QComboBox(self.topRightGroupBox)
-        self.filterFunctionChoice.addItems(["greater than", "less than"])
-        self.filterNumber = QDoubleSpinBox(self.topRightGroupBox)
-        self.filterNumber.setRange(0,1000)
-       
-        # Pheno / annotation selection display label
-        self.filterDisplay = QLabel(self.topRightGroupBox)
-        self.filterDisplay.setText(self.gvdata.filters_label)
-        self.filterDisplay.setAlignment(Qt.AlignTop)
-        self.filterDisplay.setStyleSheet("line-height:1.5")
-
-        # Reset button 
-        self.resetButton = QPushButton('Reset choices',self.topRightGroupBox)
-        self.resetButton.pressed.connect(self.reset_mappings)
-        self.resetButton.setStyleSheet(f"QPushButton {{ font-size: 14px}}")
-
-        self.imageSize = QSpinBox(self.topRightGroupBox)
-        self.imageSize.setRange(50,1000)
-        self.imageSize.setValue(self.gvdata.imageSize) # Misbehaving?
-        self.imageSize.editingFinished.connect(self.saveImageSize)
-        self.imageSize.setFixedWidth(100)
-        self.specificCellChoice = QLineEdit(self.topRightGroupBox)
-        self.specificCellChoice.setPlaceholderText('Leave blank for page 1')
-        if self.gvdata.specific_cell is not None:
-            self.specificCellChoice.insert(self.gvdata.specific_cell['ID'])
-        self.specificCellChoice.setFixedWidth(220)
-        self.specificCellChoice.textEdited.connect(self.saveSpecificCell)
-
-        # Widgets to select annotation layer
-        self.specificCellAnnotationEdit = QLineEdit(self.topRightGroupBox)
-        self.specificCellAnnotationEdit.setPlaceholderText('Annotation layer')
-        if self.gvdata.specific_cell is not None:
-            self.specificCellAnnotationEdit.insert(self.gvdata.specific_cell['Annotation Layer'])
-        self.specificCellAnnotationEdit.setFixedWidth(220)
-        self.specificCellAnnotationEdit.textEdited.connect(self.saveSpecificCell)
-
-        self.specificCellAnnotationCombo = QComboBox(self.topRightGroupBox)
-        self.specificCellAnnotationCombo.setVisible(False)
-        self.specificCellAnnotationCombo.activated.connect(self.saveSpecificCell)
-
-        self.page_size_widget = QSpinBox(self.topRightGroupBox)
-        self.page_size_widget.setRange(5,4000)
-        self.page_size_widget.setValue(self.gvdata.page_size)
-        self.page_size_widget.editingFinished.connect(self.savePageSize)
-        self.page_size_widget.setFixedWidth(100)
-
-        self.row_size_widget = QSpinBox(self.topRightGroupBox)
-        self.row_size_widget.setRange(2,self.gvdata.page_size)
-        self.row_size_widget.setValue(self.gvdata.cells_per_row)
-        self.row_size_widget.editingFinished.connect(self.saveRowSize)
-        self.row_size_widget.setFixedWidth(100)
-
-        self.global_sort_widget = QComboBox(self.topRightGroupBox)
-        self.global_sort_widget.addItem("Sort object table by Cell Id")
-        print(f"setting widget to be {self.gvdata.global_sort}")
-        for i, chn in enumerate(self.gvdata.channels):
-            self.global_sort_widget.addItem(f"Sort object table by {chn} Cell Intensity")
-        self.global_sort_widget.setCurrentText(self.gvdata.global_sort)
-        self.global_sort_widget.currentTextChanged.connect(self.saveGlobalSort)
-
-        layout = QGridLayout()
-        layout.addWidget(self.filterButton,0,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel0,0,0)
-        layout.addWidget(self.filterMarker,0,1,Qt.AlignTop) ; layout.addWidget(self.filterMarkerCombo,0,1,Qt.AlignTop)
-        layout.addWidget(self.filterFunctionChoice,0,2,Qt.AlignTop)
-        layout.addWidget(self.filterNumber,0,3,Qt.AlignTop)
-
-        layout.addWidget(self.phenotypeButton,1,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel0,0,0)
-        layout.addWidget(self.phenotypeToGrab,1,1,Qt.AlignTop) ; layout.addWidget(self.phenotypeCombo,1,1,Qt.AlignTop)
-        layout.addWidget(self.phenotypeStatuses,1,2,1,2,Qt.AlignTop)
-        layout.addWidget(self.annotationButton,2,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel1,1,0)
-        layout.addWidget(self.annotationEdit,2,1,Qt.AlignTop); layout.addWidget(self.annotationCombo,2,1,Qt.AlignTop)
-        layout.addWidget(self.annotationStatuses,2,2,1,2,Qt.AlignTop)
-        layout.addWidget(explanationLabel2,3,0,Qt.AlignTop)
-        layout.addWidget(self.imageSize,3,1,Qt.AlignTop)
-        layout.addWidget(self.resetButton,3,2,1,2,Qt.AlignTop)
-        layout.addWidget(explanationLabel3,4,0,Qt.AlignTop)
-        layout.addWidget(self.page_size_widget,4,1,Qt.AlignTop)
-        layout.addWidget(explanationLabel4,5,0,Qt.AlignTop)
-        layout.addWidget(self.row_size_widget,5,1,Qt.AlignTop)
-        layout.addWidget(explanationLabel5,6,0,Qt.AlignTop)
-        layout.addWidget(self.specificCellChoice,6,1,Qt.AlignTop)
-        layout.addWidget(self.specificCellAnnotationEdit,6,2,1,2,Qt.AlignTop)
-        layout.addWidget(self.specificCellAnnotationCombo,6,2,1,2,Qt.AlignTop)
-        layout.addWidget(self.global_sort_widget,7,0,1,2)
-        layout.addWidget(self.phenoDisplay,0,4,7,1)
-        layout.addWidget(self.annotationDisplay,0,5,7,1)
-        layout.addWidget(self.filterDisplay,0,6,7,1)
-        # layout.setColumnStretch(3,6)
-        # layout.setColumnStretch(4,6)
-
-
-        # layout.addWidget(self.findDataButton)
-        layout.rowStretch(-100)
-        self.topRightGroupBox.setLayout(layout)
+    #################################
+    #        Viewer input cleanup          
+    #################################
 
     '''Check to see if validation columns are in the data (won't be on first run)
             Put them in place if needed'''
@@ -1289,8 +1327,8 @@ class GVUI(QDialog):
             return None
 
         storage_classes.storeObject(self.gvdata.user, 'profiles/active.gvconfig')
-        self.gvdata.session.image_display_name = pathlib.Path(self.gvdata.qptiff_path).name # save name of image for display later
-        self.gvdata.session.image_scale = self._retrieve_image_scale()
+        self.gvdata.user.session.image_display_name = pathlib.Path(self.gvdata.qptiff_path).name # save name of image for display later
+        self.gvdata.user.session.image_scale = self._retrieve_image_scale()
         # If user fetched metadata, save changes to color mappings
         # self.saveColors()
 
@@ -1314,8 +1352,12 @@ class GVUI(QDialog):
             # self.processEvents()
             GUI_execute(self)
         except Exception as e:
-            # self.gvdata.session.zarr_store.close() # close zarr file??
+            # self.gvdata.user.session.zarr_store.close() # close zarr file??
             self._log_problem(e, error_type="runtime-crash")
+
+#################################
+#        Subclasses          
+#################################
 
 class GVUI_Halo(GVUI):
     def __init__(self, app: QApplication, tracker = None, gvdata: storage_classes.GVData | None = None):
@@ -1331,12 +1373,53 @@ class GVUI_CosMx(GVUI):
     def __init__(self, app: QApplication, tracker = None, gvdata: storage_classes.GVData | None = None):
         super().__init__(app, tracker, gvdata)
         self.UI_mode = "CosMx"
+        # self.init_top_layout()
+
+    def init_top_layout(self):
+        self.titleLabel = QLabel(f'Tumor Cartography Core <font color="#033b96">Gallery</font><font color="#009ca6">Viewer</font> <font size=12pt>v{VERSION_NUMBER}</font>')
+        # custom_font = QFont(); custom_font.setFamily('Metropolis Black'); custom_font.setPointSize(39)
+        self.titleLabel.setStyleSheet('font-family: Metropolis ; font-size: 25pt')
+        # titleLabel.setFont(QFont('MS Gothic',38))
+        self.titleLabel.setAlignment(Qt.AlignCenter)
+
+        ''' ComboBox for UI Mode '''
+        self.UI_combo = ModeCombo(self,self.gvdata)
+        self.UI_combo.currentTextChanged.connect(self.change_UI_mode)
+        # entry box for .qptiff        
+        self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
+        # Want to do this in any case
+        self.qptiffEntry.setVisible(False)
+        self.qptiffEntry.setEnabled(False)
+
+        self.dataEntry = QLineEdit()  # Put retrieved previous answer here
+        self.dataEntry.setPlaceholderText('Enter path to viewer-compatible folder')
+        self.dataEntry.setFixedWidth(800)
+
+        self.previewObjectDataButton = QPushButton("Choose Data")
+        self.previewObjectDataButton.setMaximumWidth(200)
+        self.previewObjectDataButton.setDefault(True)
+        self.previewImageDataButton = QPushButton("Choose Image")
+        self.previewImageDataButton.setVisible(False)
+        self.previewImageDataButton.setEnabled(False)
+        
+        self.viewSettingsEntry = QLineEdit()
+        self.viewSettingsEntry.insert(pathlib.Path(self.gvdata.view_settings_path).name)
+        self.viewSettingsEntry.setPlaceholderText('Enter path to a .viewsettings file (optional)')
+        self.viewSettingsEntry.setFixedWidth(800)
+
+        self.getViewsettingsPathButton = QPushButton("Import viewsettings")
+        # self.getViewsettingsPathButton.setMaximumWidth(220)
 
 class GVUI_Xenium(GVUI):
     def __init__(self, app: QApplication, tracker = None, gvdata: storage_classes.GVData | None = None):
         super().__init__(app, tracker, gvdata)
         self.UI_mode = "Xenium"
 
+#################################
+#            On exit          
+#################################
+
+''' Helper class for ensure_saving'''
 class ThreadSave(QThread):
     def __init__(self, gallery:GVUI, target=None) -> None:
         super().__init__()
@@ -1346,6 +1429,8 @@ class ThreadSave(QThread):
         if self.target:
             self.target(self.gallery)
 
+''' Clean-up function called on viewer exit. Handles data saving with a feedback loop in case of error that gives the user
+        another chance to save their data. '''
 def ensure_saving(gallery : GVUI, app) -> None:
     app.exec()
     window = QDialog()
@@ -1373,8 +1458,10 @@ def ensure_saving(gallery : GVUI, app) -> None:
         layout.addWidget(button,1,0)
         window.setLayout(layout)
         window.show()
+        ''' Called on exit'''
         def begin_save(g):
             g.save_result = g.gvdata._save_validation(to_disk=True)
+        ''' Called on ThreadSave exit. A check in case things still were not properly saved.'''
         def goodbye(gallery,app,window,notice,button, save_result):
             if save_result:
                 notice.setText(notice.text()+'<br><font color="#7dbc39">  Done. </font>')
@@ -1398,8 +1485,7 @@ def ensure_saving(gallery : GVUI, app) -> None:
             
             time.sleep(2)
             window.close()
-        try:
-                    
+        try:      
             t = ThreadSave(gallery, target = begin_save)
             t.start()
             print('\nShould be saving data now...')

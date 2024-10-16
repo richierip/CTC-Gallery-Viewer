@@ -1,10 +1,10 @@
 
 from qtpy.QtCore import Qt, QTimer
-from qtpy.QtGui import QIcon, QColor, QLinearGradient
+from qtpy.QtGui import QIcon, QColor, QLinearGradient, QFont
 from qtpy.QtWidgets import (QApplication, QComboBox, QDialog, QGridLayout, QLayout, QSlider, QDoubleSpinBox, QFileDialog,
                             QRadioButton, QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QHBoxLayout)
 from qtpy import QtGui, QtCore
-from store_and_load import sessionVariables, userPresets
+from storage_classes import SessionVariables, GVData
 from napari import Viewer
 import os
 import pandas as pd
@@ -24,18 +24,13 @@ from custom_color_functions import colormap_titled as hexcd
 VERSION_NUMBER = '1.3.5'
 FONT_SIZE = 12
 
-COLOR_TO_RGB = {'gray': '(170,170,170, 255)', 'purple':'(160,32,240, 255)', 'blue':'(100,100,255, 255)',
-                    'green':'(60,179,113, 255)', 'orange':'(255,127,80, 255)', 'red': '(215,40,40, 255)',
-                    'yellow': '(255,215,0, 255)', 'pink': '(255,105,180, 255)', 'cyan' : '(0,220,255, 255)'}
-WIDGET_SELECTED = None
-
 
 ''' This class will be used for the dropdown menu that can assign a scoring decision to every cell 
     from an annotation layer or phenotype'''
 class StatusCombo(QComboBox):
-    def __init__(self, parent, userInfo, color_mode = "light"):
+    def __init__(self, parent, gvdata, color_mode = "light"):
         super(QComboBox, self).__init__(parent)
-        self.user_data = userInfo
+        self.gvdata = gvdata
         self.color_mode = color_mode
         # self.setVisible(False)
         
@@ -45,14 +40,14 @@ class StatusCombo(QComboBox):
             self.setItemData(0,QColor(255,255,255,255),Qt.BackgroundRole)
             self.setItemData(0,QColor(0,0,0,255),Qt.ForegroundRole)
         elif color_mode == 'dark':
-            self.setStyleSheet(f"background-color: rgba{self.user_data.statuses_rgba['Unseen']};color: white; selection-background-color: rgba(0,0,0,20);")
+            self.setStyleSheet(f"background-color: rgba{self.gvdata.statuses_rgba['Unseen']};color: white; selection-background-color: rgba(0,0,0,20);")
         else:
             raise ValueError("Expected the 'color' parameter to be 'light' or 'dark' ")
         self.add_scoring_decisions()
         self.activated.connect(self.set_bg)
 
     def add_scoring_decisions(self):
-        for pos,status in enumerate(list(self.user_data.statuses.keys())):
+        for pos,status in enumerate(list(self.gvdata.statuses.keys())):
             if self.color_mode == 'light':
                 pos = pos+1
             elif self.color_mode == 'dark':
@@ -60,7 +55,7 @@ class StatusCombo(QComboBox):
             else:
                 raise ValueError("Expected the 'color' parameter to be 'light' or 'dark' ")
             self.addItem(status)
-            self.setItemData(pos,QColor(*self.user_data.statuses_rgba[status]),Qt.BackgroundRole)
+            self.setItemData(pos,QColor(*self.gvdata.statuses_rgba[status]),Qt.BackgroundRole)
             self.setItemData(pos,QColor(255,255,255,255),Qt.ForegroundRole)
     
     def reset_items(self):
@@ -71,24 +66,24 @@ class StatusCombo(QComboBox):
     def set_bg(self):
         status = self.currentText()
         if self.color_mode == 'light':
-            if status not in self.user_data.statuses_rgba.keys():
+            if status not in self.gvdata.statuses_rgba.keys():
                 self.setStyleSheet(f"background-color: rgba(255,255,255,255);color: rgb(0,0,0); selection-background-color: rgba(255,255,255,140);")
             else:
-                self.setStyleSheet(f"background-color: rgba{self.user_data.statuses_rgba[status]};color: rgb(0,0,0);selection-background-color: rgba(255,255,255,140);")
+                self.setStyleSheet(f"background-color: rgba{self.gvdata.statuses_rgba[status]};color: rgb(0,0,0);selection-background-color: rgba(255,255,255,140);")
         elif self.color_mode =='dark':
-            self.setStyleSheet(f"background-color: rgba{self.user_data.statuses_rgba[status]}; selection-background-color: rgba(0,0,0,30);")
+            self.setStyleSheet(f"background-color: rgba{self.gvdata.statuses_rgba[status]}; selection-background-color: rgba(0,0,0,30);")
         else:
             raise ValueError("Expected the 'color' parameter to be 'light' or 'dark' ")
 
 ''' A QDialog that the user can interact with to select scoring decision names, color values,
     and keybindings. Loads with defaults initialized in the user data class'''
 class ChannelDialog(QDialog):
-    def __init__(self, app: QApplication, user_data: userPresets, 
+    def __init__(self, parent, app: QApplication, gvdata: GVData, 
                  check_layout : QGridLayout, check_group : QGroupBox, check_group_create: Callable):
-        super(ChannelDialog, self).__init__()
+        super().__init__(parent)
         self.app = app
-        self.user_data = user_data
-        self.channelColors = copy.copy(user_data.channelColors)
+        self.gvdata = gvdata
+        self.channelColors = copy.copy(gvdata.channelColors)
         self.check_layout = check_layout
         self.check_group = check_group
         self.check_group_create = check_group_create
@@ -192,14 +187,14 @@ class ChannelDialog(QDialog):
                     break
             return None
         
-        unused_colors = copy.copy(self.user_data.available_colors)
+        unused_colors = copy.copy(self.gvdata.available_colors)
         for col in self.channelColors.values():
             if col in unused_colors:
                 unused_colors.remove(col)
 
         # For this new fluor, give it a color
         if len(unused_colors) < 1:
-            random_color = choice(self.user_data.available_colors)
+            random_color = choice(self.gvdata.available_colors)
         else:
             random_color = choice(unused_colors)
 
@@ -219,12 +214,12 @@ class ChannelDialog(QDialog):
         self.position_spin.setValue(len(self.channelColors))
 
     def save(self):
-        self.user_data.channelColors = self.channelColors
-        self.user_data.channels = list(self.channelColors.keys())
-        self.user_data.channelOrder = dict(zip(self.user_data.channels,range(len(self.user_data.channels))))
-        self.user_data.remake_viewsettings()
+        self.gvdata.channelColors = self.channelColors
+        self.gvdata.channels = list(self.channelColors.keys())
+        self.gvdata.channelOrder = dict(zip(self.gvdata.channels,range(len(self.gvdata.channels))))
+        self.gvdata.remake_viewsettings()
 
-        # self.user_data.remake_channelOrder()
+        # self.gvdata.remake_channelOrder()
         #TODO set channel widgets in main UI
 
         for i in reversed(range(self.check_layout.count())): 
@@ -238,13 +233,13 @@ class ChannelDialog(QDialog):
 ''' A QDialog that the user can interact with to select scoring decision names, color values,
     and keybindings. Loads with defaults initialized in the user data class'''
 class ScoringDialog(QDialog):
-    def __init__(self, app: QApplication, user_data: userPresets, widget_dict: dict[str:QComboBox]):
-        super(ScoringDialog, self).__init__()
+    def __init__(self, parent, app: QApplication, gvdata: GVData, widget_dict: dict[str:QComboBox]):
+        super().__init__(parent)
         self.app = app
-        self.user_data = user_data
-        self.statuses_hex = copy.copy(user_data.statuses_hex)
-        self.statuses = copy.copy(user_data.statuses)
-        self.available_statuses_keybinds = copy.copy(user_data.available_statuses_keybinds)
+        self.gvdata = gvdata
+        self.statuses_hex = copy.copy(gvdata.statuses_hex)
+        self.statuses = copy.copy(gvdata.statuses)
+        self.available_statuses_keybinds = copy.copy(gvdata.available_statuses_keybinds)
         self.pheno_widget = widget_dict["pheno_widget"]
         self.anno_widget = widget_dict["anno_widget"]
 
@@ -295,6 +290,7 @@ class ScoringDialog(QDialog):
         self.layout.setSizeConstraint(QLayout.SetFixedSize) # Allows window to resize to shrink when widgets are removed
         self.setLayout(self.layout)
         self.show()
+        self.app.processEvents()
 
     def make_labels(self):
 
@@ -313,7 +309,7 @@ class ScoringDialog(QDialog):
         # self.decision_label.setText(display_str)
         self.decisionBox.setLayout(self.decisionBoxLayout)
         self.decisionBoxLayout.update()
-        self.app.processEvents()
+        # self.app.processEvents()
 
     def add_label(self):
 
@@ -358,10 +354,10 @@ class ScoringDialog(QDialog):
         self.make_labels()
 
     def save(self):
-        self.user_data.statuses = self.statuses
-        self.user_data.statuses_hex = self.statuses_hex
-        self.user_data.available_statuses_keybinds = [self.keybind_widget.itemText(i) for i in range(self.keybind_widget.count())]
-        self.user_data.remake_rgba()
+        self.gvdata.statuses = self.statuses
+        self.gvdata.statuses_hex = self.statuses_hex
+        self.gvdata.available_statuses_keybinds = [self.keybind_widget.itemText(i) for i in range(self.keybind_widget.count())]
+        self.gvdata.remake_rgba()
         self.pheno_widget.reset_items()
         self.anno_widget.reset_items()
         self.close()
@@ -413,10 +409,10 @@ class DoubleSlider(QSlider):
 
 ''' A QDialog that the user can interact with to adjust the Napari view settings while running the app.'''
 class ViewSettingsDialog(QDialog):
-    def __init__(self, user_data: userPresets, viewer: Viewer , vs: dict, adjustment_function : Callable, color_function : Callable):
-        super(ViewSettingsDialog, self).__init__()
-        self.user_data = user_data
-        self.session = user_data.session # 
+    def __init__(self, parent, gvdata: GVData, viewer: Viewer , vs: dict, adjustment_function : Callable, color_function : Callable):
+        super().__init__(parent)
+        self.gvdata = gvdata
+        self.session = gvdata.user.session # 
         self.viewer = viewer
         self.viewsettings = vs # Dictionary of viewsettings. E.g., for each chn,  '[chn] gamma' : 0.5, '[chn] whitein':255, '[chn] blackin':0
         self.original_viewsettings = copy.deepcopy(vs)
@@ -438,13 +434,20 @@ class ViewSettingsDialog(QDialog):
         self.setWindowIcon(QIcon('data/mghiconwhite.png')) 
 
 
+        print(type(gvdata))
+        print(gvdata.__dict__.keys())
+        # print(gvdata.fonts)
+        print(type(gvdata.user))
+        print(gvdata.user.__dict__.keys())
+        print(type(gvdata.user.fonts))
+        print(gvdata.user.fonts.__dict__.keys())
         # Create gamma and contrast sliders for each fluor in the user data
         #TODO Consider importing a custom double-slider to get two values at once. Would make this much easier.
         # Not built in though, but there's a class posted somewhere on StackOverflow. I forget why I didn't try to do this already
         self.vsBox = QGroupBox()
         self.vsLayout = QGridLayout()
         row = -1 ; col=0
-        for fluor, setting in product(user_data.channels, ("gamma","black-in", "white-in")):
+        for fluor, setting in product(gvdata.channels, ("gamma","black-in", "white-in")):
             
             d = QDoubleSpinBox(self) 
             match setting:
@@ -455,11 +458,11 @@ class ViewSettingsDialog(QDialog):
                     row+=1
                     col=0
                     l = QLabel(fluor)
-                    l.setFont(user_data.fonts.medium)
+                    l.setFont(gvdata.user.fonts.medium)
                     l.setAlignment(Qt.AlignRight)
                     l.setStyleSheet(f"QLabel{{ color : {self.ccbs[fluor].text_color}; \
                                               font-size: 18pt; \
-                                              background-color: {self.user_data.channelColors[fluor]} ; \
+                                              background-color: {self.gvdata.channelColors[fluor]} ; \
                                               }}")
                     self.labels[fluor] = l
                     self.vsLayout.addWidget(l, row, col)
@@ -480,7 +483,7 @@ class ViewSettingsDialog(QDialog):
             s.valueChanged.connect(self.slider_moved)
             s.setOrientation(Qt.Horizontal)
             s.setStyleSheet(
-                f"""QSlider::groove:horizontal {{background-color : {self.user_data.channelColors[fluor]};\
+                f"""QSlider::groove:horizontal {{background-color : {self.gvdata.channelColors[fluor]};\
                                                 border: 1px solid #999999 ; 
                                                 height: 20px; 
                                                 margin: 0px;}}
@@ -504,7 +507,7 @@ class ViewSettingsDialog(QDialog):
             # Reset viewsettings button
         self.reset_button = QPushButton("Reload defaults")
         self.reset_button.pressed.connect(lambda: self.wipe_viewsettings('Reset'))
-        # self.reset_vs.setFont(self.user_data.fonts.button_small)
+        # self.reset_vs.setFont(self.gvdata.user.fonts.button_small)
 
         self.export_button = QPushButton("Export viewsettings")
         self.export_button.pressed.connect(lambda: self.export_viewsettings())
@@ -520,7 +523,7 @@ class ViewSettingsDialog(QDialog):
 
         self.status_label = QLabel()
         self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setFont(self.user_data.fonts.medium)
+        self.status_label.setFont(self.gvdata.user.fonts.medium)
 
         # Set Group layouts and main layout
         self.vsBox.setLayout(self.vsLayout)
@@ -536,13 +539,13 @@ class ViewSettingsDialog(QDialog):
     
     def create_color_combos(self):
         self.ccbs = {}
-        for fluor in self.user_data.channels:
-            ccb = ColorfulComboBox(self, color_dict=hexcd, selection = self.user_data.channelColors[fluor].capitalize())
+        for fluor in self.gvdata.channels:
+            ccb = ColorfulComboBox(self, color_dict=hexcd, selection = self.gvdata.channelColors[fluor].capitalize())
             ccb.currentIndexChanged.connect(self.update_colors)
             self.ccbs[fluor] = ccb
 
     def update_widget_colors(self):
-        for fluor, setting in product(self.user_data.channels, ("label", "gamma","black-in", "white-in")):
+        for fluor, setting in product(self.gvdata.channels, ("label", "gamma","black-in", "white-in")):
             c = self.ccbs[fluor].color_name
             tc = self.ccbs[fluor].text_color
             if setting == "label":
@@ -559,16 +562,16 @@ class ViewSettingsDialog(QDialog):
     def update_colors(self):
         changed = []
         for fluor, ccb in self.ccbs.items():
-            if self.user_data.channelColors[fluor] != ccb.color_name.lower():
+            if self.gvdata.channelColors[fluor] != ccb.color_name.lower():
                 changed.append(fluor)
-                self.user_data.channelColors[fluor] = ccb.color_name.lower()
+                self.gvdata.channelColors[fluor] = ccb.color_name.lower()
         self.color_function(changed)
         self.update_widget_colors()
     
     ''' Get color mappings from user data and set widgets'''
     def set_colors(self):
         print("Showing full dict")
-        new_colors = copy.copy(self.user_data.channelColors) 
+        new_colors = copy.copy(self.gvdata.channelColors) 
         print("-------")
         for fluor, ccb in self.ccbs.items():
             print(f"Setting {fluor} ccb to the following color {new_colors[fluor].capitalize()} ")
@@ -614,7 +617,7 @@ class ViewSettingsDialog(QDialog):
     ''' Bring viewsettings back to a previous state. Either original (what was loaded at the start) or
             to the settings from when the Dialog opened.'''
     def wipe_viewsettings(self, mode = 'Restore'):
-        template = {'Reset':self.user_data.view_settings, 'Restore':self.original_viewsettings}[mode]
+        template = {'Reset':self.gvdata.view_settings, 'Restore':self.original_viewsettings}[mode]
         self.viewsettings = copy.deepcopy(template)
         self.session.view_settings = copy.deepcopy(template)
         for setting, w in self.sliders.items():
@@ -625,19 +628,20 @@ class ViewSettingsDialog(QDialog):
     
     ''' Write a HALO-compatible viewsettings file to disk. Calls a worker function in the user class'''
     def export_viewsettings(self):
-        parent_folder = self.user_data.last_image_save_folder 
+        parent_folder = self.gvdata.last_image_save_folder 
         file_name, _ = QFileDialog.getSaveFileName(None,"Export viewsettings",parent_folder,"VIEWSETTINGS file (*.viewsettings)")
-        self.user_data.write_view_settings(file_name)
-        self.status_label.setText('<font color="#4c9b8f">Export successful</font>')
+        if os.path.exists(file_name):
+            self.gvdata.write_view_settings(file_name)
+            self.status_label.setText('<font color="#4c9b8f">Export successful</font>')
     
     def import_viewsettings(self):
         import lxml
         try:
-            parent_folder = self.user_data.last_image_save_folder
+            parent_folder = self.gvdata.last_image_save_folder
             file_name, _ = QFileDialog.getOpenFileName(None,"Import viewsettings",parent_folder,"VIEWSETTINGS file (*.viewsettings)")
             df = pd.read_xml(file_name)
-            errors = self.user_data.transfer_view_settings(df)
-            self.user_data.imported_view_settings = df
+            errors = self.gvdata.transfer_view_settings(df)
+            self.gvdata.imported_view_settings = df
             self.wipe_viewsettings(mode="Reset") # Change dialog sliders and numbers to match
             self.change_viewsettings() # Change viewer settings
             self.set_colors()
@@ -833,3 +837,43 @@ def make_fluor_toggleButton_stylesheet(clr: str = "gray" , toggled: bool = False
                                 border-style: inset; }}"""
     return style
 
+class ModeCombo(QComboBox):
+    def __init__(self, parent, gvdata: GVData):
+        super(ModeCombo, self).__init__(parent)
+        self.gvdata = gvdata
+        self.setMaximumWidth(180)
+        self.addItems(["HALO", "HALO Multi-Image", "CosMx", "Xenium"])
+        self.setCurrentText(self.gvdata.user.UI_mode)
+        # self.highlighted.connect(lambda: self.showPopup())
+
+        # Set some styles for a modern look
+        self.setStyleSheet("""
+            QWidget{
+                selection-background-color: #f5f5f5;
+                selection-color: #333;
+            }
+            QComboBox {
+                combobox-popup: 0;
+                border: 2px solid #555;
+                border-radius: 5px;
+                padding: 5px 15px;
+                background: #fff;
+
+            }
+            QComboBox::drop-down {
+                background: none;
+            }
+            QComboBox QAbstractItemView {
+                border: 1px solid #555;
+                selection-background-color: #eee;
+            }
+        """)
+
+        # Set font for a modern look
+        font = QFont("Helvetica", 10)
+        self.setFont(font)
+
+        # Add a custom arrow icon
+        # self.setEditable(True)
+        # self.lineEdit().setReadOnly(True)
+        # self.lineEdit().setAlignment(QtCore.Qt.AlignCenter)

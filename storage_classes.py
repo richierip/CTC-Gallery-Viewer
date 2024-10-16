@@ -33,8 +33,8 @@ CHANNELS_STR = ["DAPI", "Opal 570", "Opal 690", "Opal 480","Opal 620","Opal 780"
 #   to use. 
 # CHANNEL_ORDER = {'DAPI': 'gray', 'OPAL570': 'purple', 'OPAL690': 'blue', 'OPAL480': 'green', 'OPAL620': 'orange',
 #   'OPAL780': 'red', 'OPAL520': 'yellow', 'AF': 'cyan'} # mappings of fluors to user selected colors. Order is also significant, represents image data channel order
-STATUSES = {"Unseen":"c", "Needs review":"v", "Confirmed":"b", "Rejected":"n", "Interesting": "m"}
-STATUSES_HEX = {"Unseen":'#787878', 'Needs review':'#ffa000', 'Confirmed':'#00ff00', 'Rejected':'#ff0000',  "Interesting":"#be7ddb"} # A mapping of statuses to the color used to represent them
+HALO_STATUSES = {"Unseen":"c", "Needs review":"v", "Confirmed":"b", "Rejected":"n", "Interesting": "m"}
+HALO_STATUSES_HEX = {"Unseen":'#787878', 'Needs review':'#ffa000', 'Confirmed':'#00ff00', 'Rejected':'#ff0000',  "Interesting":"#be7ddb"} # A mapping of statuses to the color used to represent them
 
 
 vs_list = [f"{x[0]} {x[1]}" for x in product(CHANNELS_STR, ['Gamma', 'white-in', 'black-in'])]
@@ -49,7 +49,7 @@ VIEW_SETTINGS = {v:[0.5, 255, 0][i%3] for i,v in enumerate(vs_list)}
 #                   "OPAL620 white-in": 255, "OPAL780 white-in": 255, "OPAL520 white-in": 255, 
 #                   "AF white-in": 255,"Sample AF white-in": 255,"Autofluorescence white-in": 255}
 
-class sessionVariables:
+class SessionVariables:
     ''' Stores variables that will only last for the duration of a single session'''
     def __init__(self) -> None:
         self.viewer = None # napari.Viewer()
@@ -116,7 +116,7 @@ class ViewerFonts:
 class UserData:
     def __init__(self):
         self.fonts = ViewerFonts()
-        self.session = sessionVariables()
+        self.session = SessionVariables()
         self.halo = HaloData(self)
         self.cosmx = CosMxData(self)
         self.xenium = XeniumData(self)
@@ -126,10 +126,6 @@ class UserData:
     def __switch_current_data(self, new_mode):
         match new_mode:
             case "HALO" | "HALO Multi-Image":
-                print(" in __switch $$$$$$$$$$$$$$$")
-                print(type(self))
-                print(self.__dict__)
-                print("$$$$$$$$$$$$$$$")
                 self.current_data = self.halo
             case "CosMx":
                 self.current_data = self.cosmx
@@ -153,32 +149,19 @@ class GVData:
     with values I have chosen (can modify these in the init below, or with certain global 
     variables above.) '''
 
-    def __init__(self, channels = copy.copy(CHANNELS_STR), qptiff_path = None, 
-                phenotype = None, imageSize = 100, specific_cell = None, page_size = 56, global_sort = "Sort object table by Cell Id",
-                cells_per_row = 8, statuses = None, ):
-        
-        self.qptiff_path = qptiff_path # String - image path
-        self.last_system_folder_visited = "C:/"
-        self.last_image_save_folder = "C:/"
-        self.objectDataPath = '' # String - object data path
-        self.objectDataFrame = None # Pandas DataFrame created using read_csv. Storing this saves time when wanting the df later
+    def __init__(self, user_data: UserData, channels = copy.copy(CHANNELS_STR), qptiff_path = None, 
+                imageSize = 100, specific_cell = None, page_size = 56, global_sort = "Sort object table by Cell Id",
+                cells_per_row = 8):
+        self.user = user_data
         self.imageSize = imageSize # Int - size of EACH punchout around a cell
         self.channels = channels # String array - user choice for channels to read and display
         self.active_channels = channels
         self.specific_cell = specific_cell # Dictionary of the format {'ID': (int),'Annotation Layer': (str)}, or None 
-        self.available_colors = copy.copy(CELL_COLORS)
-        self.channelColors = dict(zip(channels,CELL_COLORS)) #String array - Order of multichannel data found in the image
-        self.channelOrder = dict(zip(channels,range(len(channels))))
         self.page_size = page_size # Integer - How many cells should be displayed per page
         self.global_sort = global_sort # String - Header to use to sort the object data. Default is cell ID (sheet is usually pre-sorted like this)
         self.cells_per_row = cells_per_row # Int - how many cells should be placed in a row before wrapping to the next (multichannel mode only)
-        self.statuses = copy.copy(STATUSES) # Dict of statuses and string keybinds, e.g. {'status A':'a'}
-        self.statuses_hex = copy.copy(STATUSES_HEX) # Dict of statuses and HEX codes of color mappings, e.g. {'status A':'#ff0000'}
-        self.statuses_rgba = {key: ImageColor.getcolor(val, "RGBA") for key,val in self.statuses_hex.items()} # Dict of statuses and RGBA tuples color mappings, e.g. {'status A':(255,0,0,255)}
-        self.available_statuses_keybinds = ["q","w","e","t","y","u","o","p","d","f","g","j","l","z","x",",",".","/","[","]",";","'"]
-        self.view_settings = self.remake_viewsettings(pass_value=True) # Dict of view settings. Will NOT change after reading from file. ex: {fluor A gamma: 0.5}
-        self.view_settings_path = '' # Path to .viewsettings file. The file is a type of HALO export and will use XML formatting
-        self.imported_view_settings = None
+        self.statuses = copy.copy(HALO_STATUSES) # Dict of statuses and string keybinds, e.g. {'status A':'a'}
+        self.statuses_hex = copy.copy(HALO_STATUSES_HEX) # Dict of statuses and HEX codes of color mappings, e.g. {'status A':'#ff0000'}
         self.phenotype_mappings = {} # Dict of user selected phenotypes and their status mappings. Cells in the data of these phenotypes will be kept for viewing and assigned the given status 
         self.phenotype_mappings_label = '<u>Phenotypes</u><br>All' # String representation of the above info for displaying in a QLabel
         self.annotation_mappings = {} # Dict of user selected annotations and their status mappings. Cells in the data of these annotations will be kept for viewing and assigned the given status 
@@ -193,6 +176,20 @@ class GVData:
         self.other_cols_in_data = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
                   'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
         self.phenotypes = []
+        self.qptiff_path = qptiff_path # String - image path
+
+        self.last_system_folder_visited = "C:/"
+        self.last_image_save_folder = "C:/"
+        self.objectDataPath = '' # String - object data path
+        self.objectDataFrame = None # Pandas DataFrame created using read_csv. Storing this saves time when wanting the df later
+        self.available_colors = list(colormap.keys())
+        self.channelColors = dict(zip(channels, list(colormap.keys())[:len(channels)] )) #String array - Order of multichannel data found in the image
+        self.channelOrder = dict(zip(channels,range(len(channels))))
+        self.statuses_rgba = {key: ImageColor.getcolor(val, "RGBA") for key,val in self.statuses_hex.items()} # Dict of statuses and RGBA tuples color mappings, e.g. {'status A':(255,0,0,255)}
+        self.available_statuses_keybinds = ["q","w","e","t","y","u","o","p","d","f","g","j","l","z","x",",",".","/","[","]",";","'"]
+        self.view_settings = self.remake_viewsettings(pass_value=True) # Dict of view settings. Will NOT change after reading from file. ex: {fluor A gamma: 0.5}
+        self.view_settings_path = '' # Path to .viewsettings file. The file is a type of HALO export and will use XML formatting
+        self.imported_view_settings = None
 
 
     ''' Restore viewsettings to [chn] gamma : 0.5, [chn] whitein:255, [chn] blackin:0
@@ -267,13 +264,13 @@ class GVData:
             for i, (fluor, color_hex) in enumerate(user_colors_hex.items()):
                 color_dec = decimal_color_from_hex(color_hex)
                 df.loc[df["Id"] == i, "ColorCode"] = color_dec
-                df.loc[df["Id"] == i, "BlackInAbsolute"] = int(self.session.view_settings[f'{fluor} black-in'])
-                df.loc[df["Id"] == i, "BlackIn"] = self.session.view_settings[f'{fluor} black-in'] / 255
-                df.loc[df["Id"] == i, "WhiteInAbsolute"] = int(self.session.view_settings[f'{fluor} white-in'])
-                df.loc[df["Id"] == i, "WhiteIn"] = self.session.view_settings[f'{fluor} white-in'] / 255
-                df.loc[df["Id"] == i, "Gamma"] = self.session.view_settings[f'{fluor} gamma'] 
+                df.loc[df["Id"] == i, "BlackInAbsolute"] = int(self.user.session.view_settings[f'{fluor} black-in'])
+                df.loc[df["Id"] == i, "BlackIn"] = self.user.session.view_settings[f'{fluor} black-in'] / 255
+                df.loc[df["Id"] == i, "WhiteInAbsolute"] = int(self.user.session.view_settings[f'{fluor} white-in'])
+                df.loc[df["Id"] == i, "WhiteIn"] = self.user.session.view_settings[f'{fluor} white-in'] / 255
+                df.loc[df["Id"] == i, "Gamma"] = self.user.session.view_settings[f'{fluor} gamma'] 
                 df.loc[df["Id"] == i, "Visible"] = True if fluor in self.active_channels else False
-                df.loc[df["Id"] == i, "Absorption"] = 1 if self.session.absorption_mode else 0
+                df.loc[df["Id"] == i, "Absorption"] = 1 if self.user.session.absorption_mode else 0
         else: 
             # Make table from scratch
             vscols = ['Id', 'ColorCode', 'Brightness', 'Contrast', 'Gamma', 'Absorption',
@@ -283,13 +280,13 @@ class GVData:
                 row = { 'Id' : i, 
                         'ColorCode': [ decimal_color_from_hex(color_hex) ], 
                         'Brightness': [1], 'Contrast':[1], 
-                        'Gamma':[ self.session.view_settings[f'{fluor} gamma'] ], 
-                        'Absorption': [1 if self.session.absorption_mode else 0],
-                        'BlackIn': [self.session.view_settings[f'{fluor} black-in'] / 255], 
-                        'WhiteIn': [self.session.view_settings[f'{fluor} white-in'] / 255], 
+                        'Gamma':[ self.user.session.view_settings[f'{fluor} gamma'] ], 
+                        'Absorption': [1 if self.user.session.absorption_mode else 0],
+                        'BlackIn': [self.user.session.view_settings[f'{fluor} black-in'] / 255], 
+                        'WhiteIn': [self.user.session.view_settings[f'{fluor} white-in'] / 255], 
                         'Visible': [True if fluor in self.active_channels else False], 
-                        'BlackInAbsolute': [int(self.session.view_settings[f'{fluor} black-in'])], 
-                        'WhiteInAbsolute':[int(self.session.view_settings[f'{fluor} white-in'])]}
+                        'BlackInAbsolute': [int(self.user.session.view_settings[f'{fluor} black-in'])], 
+                        'WhiteInAbsolute':[int(self.user.session.view_settings[f'{fluor} white-in'])]}
                 df = pd.concat([df, pd.DataFrame.from_dict(row)])
 
         #TODO Check if the unpaired </CustomName> tags don't actually work on import with HALO
@@ -332,13 +329,13 @@ class GVData:
             self.objectDataFrame.insert(8,"Notes","-")
             self.objectDataFrame.fillna("")
         
-        updated_cells = copy.copy(self.session.current_cells)
+        updated_cells = copy.copy(self.user.session.current_cells)
         for key, cdict in updated_cells.items():
             cid = cdict['cid']
             ann = cdict['Layer']
             status = cdict['validation_call']
             vals = [1 if x == status else 0 for x in list(self.statuses.keys())]
-            updated_cells[key] = [ann, int(cid),self.session.saved_notes[key], *vals]
+            updated_cells[key] = [ann, int(cid),self.user.session.saved_notes[key], *vals]
 
         # Create dataframe from stored dictionary and join with original df by assigning them the same kind of index
         calls = [f"Validation | {status}" for status in list(self.statuses.keys())]
@@ -399,24 +396,25 @@ class GVData:
 
 class HaloData(GVData):
     def __init__(self, parent):
-        super().__init__()
-        self.user = parent
+        super().__init__(parent)
+        # self.user = parent
 
 class CosMxData(GVData):
     def __init__(self, parent):
-        self.user = parent
+        super().__init__(parent)
+        # self.user = parent
 
 class XeniumData(GVData):
     def __init__(self, parent):
-        super().__init__()
-        self.user = parent
+        super().__init__(parent)
+        # self.user = parent
 
 def storeObject(obj : UserData, filename : str):
     ''' Write the class object to a file. Default location is data/presets'''
     try:
         if not pathlib.Path(filename).parent.exists(): # Create the profiles/ folder
             pathlib.Path(filename).parent.mkdir()
-        obj.session = sessionVariables() # reset per-session variables to save space
+        obj.session = SessionVariables() # reset per-session variables to save space
         obj.fonts = None
         outfile = open(filename, 'wb' )
         pickle.dump(obj, outfile)
@@ -436,7 +434,7 @@ def loadObject(filename):
         new_obj = pickle.load(infile)
         infile.close()
 
-        new_obj.session = sessionVariables() # just make sure nothing happened here
+        new_obj.session = SessionVariables() # just make sure nothing happened here
         new_obj.fonts = ViewerFonts()
         return new_obj
     except Exception as e:
