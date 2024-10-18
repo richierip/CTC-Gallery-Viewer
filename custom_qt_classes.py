@@ -4,7 +4,6 @@ from qtpy.QtGui import QIcon, QColor, QLinearGradient, QFont
 from qtpy.QtWidgets import (QApplication, QComboBox, QDialog, QGridLayout, QLayout, QSlider, QDoubleSpinBox, QFileDialog,
                             QRadioButton, QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QHBoxLayout)
 from qtpy import QtGui, QtCore
-from storage_classes import SessionVariables, GVData
 from napari import Viewer
 import os
 import pandas as pd
@@ -12,12 +11,13 @@ import pandas as pd
 # warnings.filterwarnings("ignore")
 # warnings.catch_warnings
 import copy
-import custom_color_functions
-
 # Used in fetching and processing metadata
 from random import choice
 from typing import Callable
 from itertools import product
+
+from storage_classes import SessionVariables, GVData
+import custom_color_functions
 from custom_color_functions import colormap_titled as hexcd
 
 
@@ -407,17 +407,17 @@ class DoubleSlider(QSlider):
         number_of_steps = int((self._max - self._min) / self.interval)
         super(DoubleSlider, self).setMaximum(number_of_steps)
 
+# from galleryViewer import GView
 ''' A QDialog that the user can interact with to adjust the Napari view settings while running the app.'''
 class ViewSettingsDialog(QDialog):
-    def __init__(self, parent, gvdata: GVData, viewer: Viewer , vs: dict, adjustment_function : Callable, color_function : Callable):
+    def __init__(self, parent, gview):
         super().__init__(parent)
-        self.gvdata = gvdata
-        self.session = gvdata.user.session # 
-        self.viewer = viewer
-        self.viewsettings = vs # Dictionary of viewsettings. E.g., for each chn,  '[chn] gamma' : 0.5, '[chn] whitein':255, '[chn] blackin':0
-        self.original_viewsettings = copy.deepcopy(vs)
-        self.adjustment_function = adjustment_function
-        self.color_function = color_function
+        self.gview = gview # galleryViewer.py GView -- can't import here for typing due to circular import
+        self.gvdata = gview.data
+        self.session = gview.session # 
+        self.viewer = gview.viewer
+        self.viewsettings = gview.session.view_settings # Dictionary of viewsettings. E.g., for each chn,  '[chn] gamma' : 0.5, '[chn] whitein':255, '[chn] blackin':0
+        self.original_viewsettings = copy.deepcopy(self.viewsettings)
         self.last_adjustment = None
         self.target_override = False # Used in restore function to one by one trigger the appropriate fluors to re-adjust
         self.sliders = {}
@@ -433,21 +433,13 @@ class ViewSettingsDialog(QDialog):
         self.setWindowTitle('Edit view settings')
         self.setWindowIcon(QIcon('data/mghiconwhite.png')) 
 
-
-        print(type(gvdata))
-        print(gvdata.__dict__.keys())
-        # print(gvdata.fonts)
-        print(type(gvdata.user))
-        print(gvdata.user.__dict__.keys())
-        print(type(gvdata.user.fonts))
-        print(gvdata.user.fonts.__dict__.keys())
         # Create gamma and contrast sliders for each fluor in the user data
         #TODO Consider importing a custom double-slider to get two values at once. Would make this much easier.
         # Not built in though, but there's a class posted somewhere on StackOverflow. I forget why I didn't try to do this already
         self.vsBox = QGroupBox()
         self.vsLayout = QGridLayout()
         row = -1 ; col=0
-        for fluor, setting in product(gvdata.channels, ("gamma","black-in", "white-in")):
+        for fluor, setting in product(self.gvdata.channels, ("gamma","black-in", "white-in")):
             
             d = QDoubleSpinBox(self) 
             match setting:
@@ -458,7 +450,7 @@ class ViewSettingsDialog(QDialog):
                     row+=1
                     col=0
                     l = QLabel(fluor)
-                    l.setFont(gvdata.user.fonts.medium)
+                    l.setFont(self.gvdata.user.fonts.medium)
                     l.setAlignment(Qt.AlignRight)
                     l.setStyleSheet(f"QLabel{{ color : {self.ccbs[fluor].text_color}; \
                                               font-size: 18pt; \
@@ -565,7 +557,7 @@ class ViewSettingsDialog(QDialog):
             if self.gvdata.channelColors[fluor] != ccb.color_name.lower():
                 changed.append(fluor)
                 self.gvdata.channelColors[fluor] = ccb.color_name.lower()
-        self.color_function(changed)
+        self.gview.set_layer_colors(changed)
         self.update_widget_colors()
     
     ''' Get color mappings from user data and set widgets'''
@@ -576,7 +568,7 @@ class ViewSettingsDialog(QDialog):
         for fluor, ccb in self.ccbs.items():
             print(f"Setting {fluor} ccb to the following color {new_colors[fluor].capitalize()} ")
             ccb.setCurrentText(new_colors[fluor].capitalize())
-        self.color_function(list(self.ccbs.keys()))
+        self.gview.set_layer_colors(list(self.ccbs.keys()))
         self.update_widget_colors()
 
     '''Called upon widget value change. Couldn't get it to update just the value changed, so this just overwrites every value.
@@ -612,7 +604,7 @@ class ViewSettingsDialog(QDialog):
     ''' Run function to make visual changes in Napari given user-selected viewsettings'''
     def change_viewsettings(self, caller_setting = False):
         self.session.view_settings = self.viewsettings
-        self.adjustment_function(arrange_multichannel = False, viewer = self.viewer, session=self.session, single_setting_change = caller_setting)
+        self.gview.restore_viewsettings_from_cache(arrange_multichannel = False, single_setting_change = caller_setting)
 
     ''' Bring viewsettings back to a previous state. Either original (what was loaded at the start) or
             to the settings from when the Dialog opened.'''

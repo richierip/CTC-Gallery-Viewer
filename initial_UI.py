@@ -10,7 +10,7 @@ import sys
 import os
 import time
 import storage_classes
-from galleryViewer import GUI_execute
+from galleryViewer import gui_execute
 import ctypes
 import os
 import warnings
@@ -1350,7 +1350,7 @@ class GVUI(QDialog):
             #         exec(f'newStyle += "{elem}{{font-size: {FONT_SIZE-10}pt;}}"')
             # self.app.setStyleSheet(newStyle)
             # self.processEvents()
-            GUI_execute(self)
+            gui_execute(self)
         except Exception as e:
             # self.gvdata.user.session.zarr_store.close() # close zarr file??
             self._log_problem(e, error_type="runtime-crash")
