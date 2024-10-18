@@ -16,6 +16,7 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 import pandas as pd
+import numpy as np
 import copy
 import pathlib
 
@@ -1150,19 +1151,20 @@ class GVUI(QDialog):
 
     '''Check to see if validation columns are in the data (won't be on first run)
             Put them in place if needed'''
-    def _check_validation_cols(self,df):
-        try:
-            for status in list(self.gvdata.statuses.keys()):
-                df.loc[2,f"Validation | {status}"]
-        except KeyError:
-            for call_type in reversed(list(self.gvdata.statuses.keys())):
+    def _check_halo_validation_cols(self,df):
+        missing = False
+        for call_type in reversed(self.gvdata.statuses.keys()):
+            missing = (f"Validation | {call_type}" not in df.columns) or missing
+            
+        if missing:
+            for call_type in reversed(self.gvdata.statuses.keys()):
                 try:
                     if call_type == 'Unseen':
                         df.insert(8,f"Validation | {call_type}", 1)
                     else:
-                        df.insert(8,f"Validation | {call_type}", 0) 
+                        df.insert(8,f"Validation | {call_type}", 0)  
                 except ValueError:
-                    pass # triggered when trying to insert column that already exists
+                    pass# triggered when trying to insert column that already exists
     
     ''' Iterate through annotation mappings collected from user and assign new statuses to cells if needed'''
     def assign_annotation_statuses_to_sheet(self,df):
@@ -1177,16 +1179,14 @@ class GVUI(QDialog):
         
         print("Assignments to complete")
         self._append_status('Assigning decisions to annotations...')
-        self._check_validation_cols(df)
+        self._check_halo_validation_cols(df)
         sk = list(self.gvdata.statuses.keys())
         validation_cols = [f"Validation | " + s for s in sk]
         for annotation in self.gvdata.annotation_mappings.keys():
             status = self.gvdata.annotation_mappings[annotation]
             if status == "Don't assign":
                 continue
-            for call_type in sk:
-                df.loc[df["Analysis Region"]==annotation,f"Validation | {call_type}"] = 0
-            df.loc[df["Analysis Region"]==annotation,f"Validation | {status}"] = 1
+            df.loc[df["Analysis Region"]==annotation, "Validation"] = status
         self._append_status('<font color="#7dbc39">  Done. </font>') 
         return df
 
@@ -1200,16 +1200,14 @@ class GVUI(QDialog):
             return df # Also break if there are no status mappings for any annotation
         
         self._append_status('Assigning decisions to phenotypes...')
-        self._check_validation_cols(df)
+        self._check_halo_validation_cols(df)
         sk = list(self.gvdata.statuses.keys())
         validation_cols = [f"Validation | " + s for s in sk]
         for phenotype in self.gvdata.phenotype_mappings.keys():
             status = self.gvdata.phenotype_mappings[phenotype]
             if status == "Don't assign":
                 continue
-            for call_type in sk:
-                df.loc[df[phenotype]==1,f"Validation | {call_type}"] = 0
-            df.loc[df[phenotype]==1,f"Validation | {status}"] = 1
+            df.loc[df[phenotype] == 1, 'Validation'] = status
         self._append_status('<font color="#7dbc39">  Done. </font>')
         return df
 
@@ -1248,9 +1246,26 @@ class GVUI(QDialog):
         for pheno in phenotypes:
             if pheno not in headers: return False
         return True
-         
+    
+    def convert_from_halo_phenotypes(self, df: pd.DataFrame):
+        v = list(self.gvdata.statuses.keys())
+        validation_cols = [f"Validation | " + s for s in v]
+        conds = [df[c] ==1 for c in validation_cols]
+        choices = list(self.gvdata.statuses.keys())
+        df['Validation'] = np.select(conds, choices, 'Unseen')
+        df.drop(columns=validation_cols)
+        return df
+    
+    def add_global_id(self, df:pd.DataFrame):
+        if self.gvdata.analysisRegionsInData:
+            df['gvid'] = df['Analysis Region'].astype(str) +' '+ df['Object Id'].astype(str)
+        else:
+            # df.drop(columns=['Analysis Region'], inplace=True)
+            df['gvid'] = df['Object Id'].astype(str)    
+        return df.set_index('gvid', drop=True)
+
     '''Read in the object data file and assign user chosen validation calls to the data, if needed'''
-    def assign_statuses_to_sheet(self):
+    def process_cell_table(self):
         self._replace_status('Reading object data... ')
         try:
             df = pd.read_csv(self.gvdata.objectDataPath)
@@ -1263,16 +1278,11 @@ class GVUI(QDialog):
                 # self._append_status_br('Saving data back to file...')
                 # df.to_csv(self.gvdata.objectDataPath,index=False)
                 # self._append_status('<font color="#7dbc39">  Done. </font>')
-                for call_type in reversed(self.gvdata.statuses.keys()):
-                    try:
-                        df[f"Validation | {call_type}"]
-                    except KeyError:
-                        if call_type == 'Unseen':
-                            df.insert(8,f"Validation | {call_type}", 1)
-                        else:
-                            df.insert(8,f"Validation | {call_type}", 0)  
+                self._check_halo_validation_cols(df)
+                df = self.convert_from_halo_phenotypes(df)
                 df = self.assign_phenotype_statuses_to_sheet(df)
                 df = self.assign_annotation_statuses_to_sheet(df)
+                df = self.add_global_id(df)
                 self._append_status('<font color="#7dbc39">  Done. </font>')
                 self.gvdata.objectDataFrame = df
 
@@ -1307,7 +1317,7 @@ class GVUI(QDialog):
         # self.status_label.setVisible(True)
         # self.app.processEvents()
         self.findDataButton.setEnabled(False) # disable load button after click
-        res = self.assign_statuses_to_sheet()
+        res = self.process_cell_table()
         if res == 'Bad input':
             # Will execute if the phenotypes / annotations given do not match to object data
             self.status_label.setVisible(True)

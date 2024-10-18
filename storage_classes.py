@@ -315,55 +315,23 @@ class GVData:
 
     def _save_validation(self, to_disk = False):
         '''Save new calls to the session's Pandas DataFrame, and optionally save that frame to disk'''
-        for call_type in reversed(self.statuses.keys()):
-            try:
-                self.objectDataFrame[f"Validation | {call_type}"]
-            except KeyError:
-                if call_type == 'Unseen':
-                    self.objectDataFrame.insert(8,f"Validation | {call_type}", 1)
-                else:
-                    self.objectDataFrame.insert(8,f"Validation | {call_type}", 0)  
-        try:
-            self.objectDataFrame["Notes"]
-        except KeyError:
-            self.objectDataFrame.insert(8,"Notes","-")
-            self.objectDataFrame.fillna("")
-        
-        updated_cells = copy.copy(self.user.session.current_cells)
-        for key, cdict in updated_cells.items():
-            cid = cdict['cid']
-            ann = cdict['Layer']
-            status = cdict['validation_call']
-            vals = [1 if x == status else 0 for x in list(self.statuses.keys())]
-            updated_cells[key] = [ann, int(cid),self.user.session.saved_notes[key], *vals]
 
-        # Create dataframe from stored dictionary and join with original df by assigning them the same kind of index
-        calls = [f"Validation | {status}" for status in list(self.statuses.keys())]
-        df = pd.DataFrame.from_dict(updated_cells, orient = 'index', columns = ["Analysis Region", "Object Id",'Notes', *calls] )
-
-        if self.analysisRegionsInData:
-            self.objectDataFrame['new_index'] = self.objectDataFrame['Analysis Region'] +' '+ self.objectDataFrame['Object Id'].astype(str)
-        else:
-            df.drop(columns=['Analysis Region'], inplace=True)
-            self.objectDataFrame['new_index'] = self.objectDataFrame['Object Id'].astype(str)
-        self.objectDataFrame = self.objectDataFrame.set_index('new_index')
-        # Drop analysis region if it does not belong
-
+        df = self.user.session.current_cells.copy()
         self.objectDataFrame.update(df) # overwrite data with new cols
-        self.objectDataFrame[calls + ['Object Id']] = self.objectDataFrame[calls + ['Object Id']].astype(int)
-        # print(self.objectDataFrame.columns)
-        # print(self.objectDataFrame[calls].head(15))
 
+
+        vcols = [f'Validation | {s}' for s in self.statuses]
+        for status, vcol in zip(self.statuses, vcols):
+            self.objectDataFrame[vcol] = np.where(self.objectDataFrame["Validation"] == status,1,0)
+        self.objectDataFrame[vcols + ['Object Id']] = self.objectDataFrame[vcols + ['Object Id']].astype(int)
+        
         if to_disk:
             try:
                 self.objectDataFrame.to_csv(self.objectDataPath, index=False)
-                self.objectDataFrame.reset_index(drop=True,inplace=True)
+                # self.objectDataFrame.reset_index(drop=True,inplace=True)
             except PermissionError: # file in use
-                self.objectDataFrame.reset_index(drop=True,inplace=True)
+                # self.objectDataFrame.reset_index(drop=True,inplace=True)
                 return False
-        
-            # hdata.loc[:,1:].to_excel(
-            # OBJECT_DATA,sheet_name='Exported from gallery viewer')
         return True
     
             # Log the crash and report key variables

@@ -85,7 +85,6 @@ class GView:
 
         #Trackers. Should move elsewhere (to session, maybe)
         self.updated_checkboxes = []
-        self.saved_intensities = {}
         self.raw_pyramid = None
         self.viewer = None
 
@@ -638,7 +637,7 @@ class GView:
         # Now process object data and fetch images
         try:
             local_sort = self.data.global_sort
-            self.cell_information = self.extract_phenotype_xldata(specific_cell=self.data.specific_cell, sort_by_intensity=local_sort)
+            self.extract_phenotype_xldata(specific_cell=self.data.specific_cell, sort_by_intensity=local_sort)
         except KeyError as e:
             print(e)
             # If the user has given bad input, the function will raise a KeyError. Fail gracefully and inform the user
@@ -671,7 +670,7 @@ class GView:
         self.set_scoring_label(self.session.widget_dictionary["scoring label"])
 
         # try:
-        self.add_layers(self.viewer,self.raw_pyramid,self.cell_information, int(self.data.imageSize/2))
+        self.add_layers(self.viewer,self.raw_pyramid,self.session.page_cells, int(self.data.imageSize/2))
 
         #Enable scale bar
         if self.session.image_scale:
@@ -1047,7 +1046,7 @@ class GView:
                         cname = f"{layer} {cid}"
                     else:
                         cname = str(cid)
-                    target_cell_info = self.session.current_cells[cname]
+                    target_cell_info = self.session.current_cells.loc[cname]
                     self.session.cell_under_mouse = target_cell_info
                     # print(target_cell_info)
                 except KeyError:
@@ -1058,7 +1057,7 @@ class GView:
                 # print(target_cell_info)
 
             self.session.context_target = target_cell_info
-            cell_num = str(target_cell_info["cid"])
+            cell_num = str(target_cell_info.name)
             sc = 1 if self.session.image_scale is None else self.session.image_scale # Scale factor necessary.
 
             # Find offset coordinates
@@ -1144,29 +1143,21 @@ class GView:
                     try:
                         cid = self.session.widget_dictionary['switch mode cell'].text()
                         if cid == '':
-                            target_cell_info = self.session.page_cells[self.session.grid_to_ID["Multichannel"]["1,1"]] # get first
-                            target_cell_name = f"{target_cell_info['Layer']} {target_cell_info['cid']}" if self.data.analysisRegionsInData else str(target_cell_info['cid'])
+                            target_cell_info = self.session.page_cells.loc[self.session.grid_to_ID["Multichannel"]["1,1"]] # get first
+                            target_cell_name = target_cell_info.name
                         elif self.data.analysisRegionsInData:
                             layer = self.session.widget_dictionary['switch mode annotation'].currentText()
                             target_cell_name = f"{layer} {cid}"
-                            target_cell_info = self.session.current_cells[target_cell_name]
+                            target_cell_info = self.session.current_cells.loc[target_cell_name]
                         else:
                             target_cell_name = str(cid)
-                            target_cell_info = self.session.current_cells[target_cell_name]
+                            target_cell_info = self.session.current_cells.loc[target_cell_name]
                         self.session.cell_under_mouse = target_cell_info
                     except KeyError:
                         self.viewer.status = f"Can't find cell [{cid}] in the current page. Staying in {self.session.mode} mode"
                         return False
                 else:
-                    match bool(self.data.analysisRegionsInData): # variable will be False, or a List of String names of annotations present in data
-                    
-                        case True:
-                            target_cell_name = f"{self.session.cell_under_mouse['Layer']} {str(self.session.cell_under_mouse['cid'])}"
-                        case False: # Will match 
-                            target_cell_name = str(self.session.cell_under_mouse['cid'])
-                        case _:
-                            # Placeholder. Should never get here at the moment.
-                            raise Exception("Something very wrong has happened")
+                    target_cell_name = self.session.cell_under_mouse.name
 
                 sc = 1 if self.session.image_scale is None else self.session.image_scale # Scale factor necessary
                 row, col = list(self.session.grid_to_ID["Multichannel"].keys())[list(self.session.grid_to_ID["Multichannel"].values()).index(target_cell_name)].split(",")
@@ -1240,8 +1231,8 @@ class GView:
             return None
 
         # Load into same mode as the current
-        xydata = self.extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
-        if xydata is False:
+        res = self.extract_phenotype_xldata(page_number=page_number, specific_cell=cell_choice, sort_by_intensity=sort_option)
+        if res != 'pass':
             self.viewer.status="Can't load cells: out of bounds error."
         else:
             for layer in self.viewer.layers:
@@ -1249,7 +1240,7 @@ class GView:
                     self.viewer.layers.selection.add(layer)
             self.viewer.layers.remove_selected()
             # self.viewer.layers.clear()
-            self.add_layers(self.viewer,self.raw_pyramid, xydata, int(self.data.imageSize/2))
+            self.add_layers(self.viewer,self.raw_pyramid, self.session.page_cells, int(self.data.imageSize/2))
 
         # Update scoring tally for this page
         self.set_initial_scoring_tally(self.data.objectDataFrame, self.session.session_cells)
@@ -1334,40 +1325,17 @@ class GView:
             #   so we can get real indices from the table
             
             nearby_cells = self.session.session_cells.iloc[nearby_inds[nearby_inds!=self.session.session_cells.shape[0]] ] 
+            nearby_cells.to_csv('nearby_cells.csv')
 
             # Add box around cells
-            nuclei_box_coords = []
-            cids = []
-            validation_colors_hex = []
-            count = 0
-            self.session.context_nuclei_boxes_map_to_ind = {} # reset this, will be different
-            for index, cell in nearby_cells.iterrows():
-                cid = cell["Object Id"]
-                layer = cell["Analysis Region"] if self.data.analysisRegionsInData else None
-                ckey = f'{layer} {cid}' if self.data.analysisRegionsInData else str(cid)
-                page = cell['Page']
-                x1 = int(cell["XMin"]); x2 = int(cell["XMax"])
-                y1 = int(cell["YMin"]); y2 = int(cell["YMax"])
-                nuclei_box_coords.append([[y1,x1] , [y2,x2]])
-                cids.append(str(cell["Object Id"]))
-                vals = cell[self.session.validation_columns]
-                try:
-
-                    validation_call = self.session.current_cells[ckey]['validation_call']
-                except KeyError:
-                    try:
-                        validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation | ", "")
-                    except IndexError:
-                        # row has no validation call (all zeroes). Assign to Unseen
-                        validation_call = "Unseen"
-                    self.session.current_cells[ckey] = {'Layer':layer,"cid": cid,"center_x": (x1+x2)//2,'center_y': (y1+y2)//2,
-                                    'validation_call': validation_call, 'XMax' : x2,'XMin':x1,
-                                    'YMax' : y2,'YMin':y1, "Page":page}
-                    self.session.saved_notes[ckey] = "-"
-                    self.record_notes_and_intensities(cell, self.session.intensity_columns)
-                validation_colors_hex.append(self.data.statuses_hex[validation_call])
-                self.session.context_nuclei_boxes_map_to_ind[ckey] = count
-                count+=1
+            cids = nearby_cells.index.tolist()
+            x1 = nearby_cells["XMin"].astype(int).tolist() ; x2 = nearby_cells["XMax"].astype(int).tolist()
+            y1 = nearby_cells["YMin"].astype(int).tolist() ; y2 = nearby_cells["YMax"].astype(int).tolist()
+            a = [list(x) for x in zip(y1,x1)]
+            b = [list(x) for x in zip(y2,x2)]
+            nuclei_box_coords = [list(x) for x in zip(a,b)] #list(zip(zip(y1,x1), zip(y2,x2)))
+            validation_colors_hex = [self.data.statuses_hex[s] for s in nearby_cells["Validation"]]
+            self.session.context_nuclei_boxes_map_to_ind = {cid:i for cid, i in zip(nearby_cells.index.tolist(),  range(len(nearby_cells)))}
 
             if nuclei_box_coords: # We have cells to box
                 features = {'cid': cids}
@@ -1404,25 +1372,19 @@ class GView:
             self.session.scoring_tally =  {"Session":copy.copy(zeroes_dict), "Data":copy.copy(zeroes_dict), "Page":copy.copy(zeroes_dict)}
 
             # Counts for the whole cell set
-            melted = df[cols].melt()
-            scoring_tally_series = melted.loc[melted["value"] == 1].value_counts()
-            for ind in scoring_tally_series.index:
-                score = ind[0].replace("Validation | ",'')
-                self.session.scoring_tally["Data"][score] = scoring_tally_series[ind]
+            tally = df['Validation'].value_counts()
+            for score in tally.index:
+                self.session.scoring_tally["Data"][score] = tally[score]
             
             # Counts for just the cells in this session
-            melted = session_df[cols].melt()
-            scoring_tally_series = melted.loc[melted["value"] == 1].value_counts()
-            for ind in scoring_tally_series.index:
-                score = ind[0].replace("Validation | ",'')
-                self.session.scoring_tally["Session"][score] = scoring_tally_series[ind]
+            tally = session_df['Validation'].value_counts()
+            for score in tally.index:
+                self.session.scoring_tally["Session"][score] = tally[score]
         
-        # Counts for the page
-        for score in [x["validation_call"] for i,x in self.session.current_cells.items()]:
-            try:
-                self.session.scoring_tally["Page"][score] = self.session.scoring_tally["Page"][score] + 1
-            except KeyError:
-                self.session.scoring_tally["Page"][score] = 1
+        # Counts for just the cells in this session
+        tally = self.session.current_cells['Validation'].value_counts()
+        for score in tally.index:
+            self.session.scoring_tally["Page"][score] = tally[score]
 
     def update_scoring_tally(self, old_score, new_score, in_page = True):
         self.session.scoring_tally["Session"][new_score] = self.session.scoring_tally["Session"][new_score] +1
@@ -1473,7 +1435,7 @@ class GView:
     def set_cell_description_label(self, ID, display_text_override = None):
         # Instead of showing a cell's info, display this text
         if display_text_override is not None:
-            description = f'{self.session.saved_notes["page"]}<br>' + display_text_override
+            description = f'{self.session.current_page}<br>' + display_text_override
             self.session.widget_dictionary['cell description label'].setText(description)
             self.session.widget_dictionary['notes label'].setVisible(False)
             self.viewer.window._qt_viewer.setFocus()
@@ -1484,19 +1446,22 @@ class GView:
         else:
             cell_name = f'Cell {cell_num}'
         try:
-            note = str(self.session.saved_notes[ID])
+            cell = self.session.current_cells.loc[str(ID)]
         except KeyError: # in case the name was off
             return False
-        status = self.session.current_cells[str(ID)]['validation_call']
+        note = cell['Notes']
+        status = cell['Validation']
         if self.data.statuses_hex[status] != "#ffffff":
-            prefix = f'Page {self.session.current_cells[ID]["Page"]}<br><font color="{self.data.statuses_hex[status]}">{cell_name}</font>'
+            prefix = f'Page {cell["Page"]}<br><font color="{self.data.statuses_hex[status]}">{cell_name}</font>'
         else:
-            prefix = f'Page {self.session.current_cells[ID]["Page"]}<br>{cell_name}' 
+            prefix = f'Page {cell[ID]["Page"]}<br>{cell_name}' 
 
         # Add intensities
-        intensity_series = self.saved_intensities[ID]
+        # Find out which columns are present in the Series and subset to those
+        present_intensities = sorted(list(set(list(cell.index)).intersection(set(self.session.intensity_columns))))
+        intensity_series = cell.loc[present_intensities]
         # intensity_series = self.session.session_cells[ID]['intensities']
-        names = list(intensity_series.index)
+        
         intensity_str = ''
         for fluor in self.data.channels:
             if fluor == 'Composite':
@@ -1509,7 +1474,7 @@ class GView:
                 name = intensity_lookup + ': No data'
                 try:
                     cyto = intensity_lookup
-                    cyto = [x for x in names if (cyto in x and 'Cytoplasm Intensity' in x)][0]
+                    cyto = [x for x in present_intensities if (cyto in x and 'Cytoplasm Intensity' in x)][0]
                     val = round(float(intensity_series[cyto]),1)
                     intensity_str += f'<font color="{self.data.channelColors[fluor].replace("blue","blue")}"> cyto: {val}</font>'
                     flag = False
@@ -1517,7 +1482,7 @@ class GView:
                 except (KeyError, IndexError): pass
                 try:
                     nuc = intensity_lookup
-                    nuc = [x for x in names if (nuc in x and 'Nucleus Intensity' in x)][0]
+                    nuc = [x for x in present_intensities if (nuc in x and 'Nucleus Intensity' in x)][0]
                     val = round(float(intensity_series[nuc]),1)
                     intensity_str += f'<font color="{self.data.channelColors[fluor].replace("blue","blue")}"> nuc: {val}</font>'
                     flag = False
@@ -1525,7 +1490,7 @@ class GView:
                 except (KeyError, IndexError): pass
                 try:
                     cell = intensity_lookup
-                    cell = [x for x in names if (cell in x and 'Cell Intensity' in x)][0]
+                    cell = [x for x in present_intensities if (cell in x and 'Cell Intensity' in x)][0]
                     val = round(float(intensity_series[cell]),1)
                     intensity_str += f'<font color="{self.data.channelColors[fluor].replace("blue","blue")}"> cell: {val}</font>'
                     flag = False
@@ -1559,23 +1524,6 @@ class GView:
         return True
     ######------------------------- Image loading and processing functions ---------------------######
 
-    def retrieve_status(self, cell_id, status, new_page):
-        ''' Kind of an anachronistic function at this point.'''
-        
-        if new_page:
-            if type(status) is not str or status not in self.data.statuses.keys():
-                status = "Unseen"
-            # Save to dict to make next retrieval faster
-            # If there are annotations, need to track a separate list for each one
-            self.session.current_cells[str(cell_id)]['validation_call'] = status
-            return status
-        else:
-            # Just grab it because it's there already
-            try:
-                return self.session.current_cells[str(cell_id)]['validation_call']
-            except:
-                raise Exception(f"Looking for {cell_id} in the Status list dict but can't find it. List here:\n {self.session.current_cells.keys()}")
-
     def black_background(self, color_space, mult, CPR):
         if color_space == 'RGB':
             return da.zeros((ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR, 4), dtype=np.uint16, chunks=2**14)
@@ -1585,7 +1533,7 @@ class GView:
             return np.zeros((ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR))
 
     ''' Add images layers for Gallery and Multichannel modes. Only make visible the layers for the active mode'''
-    def add_layers(self, viewer: napari.Viewer, pyramid, cells, offset: int, new_page=True):
+    def add_layers(self, viewer: napari.Viewer, pyramid, cells:pd.DataFrame, offset: int, new_page=True):
         print(f'\n---------\n \n Entering the add_layers function')
         if pyramid is not None: print(f"pyramid shape is {pyramid.shape}")
     
@@ -1614,21 +1562,20 @@ class GView:
         col_g = 0 
         row_g = 0 ; row_m = 0
         self.session.grid_to_ID = {"Gallery":{}, "Multichannel":{}} # Reset this since we could be changing to multichannel mode
-        cells = list(cells.values())
+
         cid_list = []
         edge_col_list = []
         status_box_coords_g = [] ; status_box_flags_g = []
         status_box_coords_m = [] ; status_box_flags_m = []
 
-        while bool(cells): # coords left
+        for _, cell in cells.iterrows(): # coords left
             col_g = (col_g%cpr_g)+1 
             if col_g ==1: row_g+=1
             col_m = 1 ;  row_m+=1 
 
-            cell = cells.pop(); 
-            cell_anno = cell["Layer"]; cell_id = cell['cid']; cell_x = cell['center_x']; cell_y = cell['center_y']
-            cname = str(cell_id) if cell_anno is None else f"{cell_anno} {cell_id}"
-            cell_status = self.retrieve_status(cname,cell['validation_call'], new_page)
+            cell_id = cell.name
+            cell_x = cell['center_x']; cell_y = cell['center_y']
+            cell_status = cell['Validation']
             cid_list.append(cell_id)
             edge_col_list.append(self.data.statuses_hex[cell_status])
 
@@ -1672,14 +1619,14 @@ class GView:
                     # multichannel mode: composite image
                     page_image_multichannel[fluor][(row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
                                 (cpr_m-1)*(self.data.imageSize+2)+1:cpr_m*(self.data.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
-                    self.session.grid_to_ID["Multichannel"][f'{row_m},{col_m}'] = cname
-                    self.session.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cname
+                    self.session.grid_to_ID["Multichannel"][f'{row_m},{col_m}'] = cell_id
+                    self.session.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cell_id
                     # if col_m ==1:
                     #     self.session.page_status_layers["Multichannel"][(row_m-1)*(self.data.imageSize+2):row_m*(self.data.imageSize+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Multichannel")
                     col_m+=1 # so that next luminescence image is tiled 
                     
                     # Gallery images 
-                    self.session.grid_to_ID["Gallery"][f'{row_g},{col_g}'] = cname
+                    self.session.grid_to_ID["Gallery"][f'{row_g},{col_g}'] = cell_id
                     page_image_gallery[fluor][(row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
                     # self.session.page_status_layers["Gallery"][(row_g-1)*(self.data.imageSize+2):row_g*(self.data.imageSize+2), (col_g-1)*(self.data.imageSize+2):col_g*(self.data.imageSize+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Gallery")
                     fluor_index+=1
@@ -1750,12 +1697,8 @@ class GView:
         # viewer.layers.selection.active = viewer.layers["Status Layer"]
         
         self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]  
-        
-
         #TODO make a page label... 
-
         # Exiting add_layers function
-
         return True
 
     ###################################################################
@@ -1892,7 +1835,7 @@ class GView:
                     return str(image_name), (local_x,local_y), vals
 
         @self.catch_exceptions_to_log_file("runtime_box-cell-near-mouse")
-        def box_closest_context_mode_cell(cell):
+        def box_closest_context_mode_cell(cell: pd.Series):
             if not self.session.cell_under_mouse_changed:  # Save computation and don't do this unless needed
                 return False 
             elif self.session.nuclei_boxes_vis["Context"] != "Mouse": # Don't run the regular routine unless the "Show under mouse only" radio is toggled on
@@ -1908,14 +1851,13 @@ class GView:
                 layer_present = False
             
 
-            layer = cell["Layer"]; cid = cell["cid"]
-            cname = str(cid) if layer is None else f"{layer} {cid}"
+            cid = cell.name
             features = {'cid_feat': [cid]}
             cell_bbox = [[cell["YMin"],cell["XMin"]] , [cell["YMax"],cell["XMax"]] ]
 
             sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
             
-            nb_color_hex = self.data.statuses_hex[self.session.current_cells[cname]['validation_call']] #'#000000' if self.session.absorption_mode else '#ffffff'
+            nb_color_hex = self.data.statuses_hex[cell['Validation']] #'#000000' if self.session.absorption_mode else '#ffffff'
             nb_text = {'string':'{cid_feat}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_hex}
             self.session.context_closest_cell_text_object = nb_text
             if layer_present:
@@ -1973,32 +1915,21 @@ class GView:
                     return False 
                 
                 if cell is not None:
-                    cid = cell["Object Id"]
-                    layer = cell["Analysis Region"] if self.data.analysisRegionsInData else None
-                    ckey = f'{layer} {cid}' if self.data.analysisRegionsInData else str(cid)
-                    try:
-                        cell_dict = self.session.current_cells[ckey]
-                        if cell_dict != self.session.cell_under_mouse: self.session.cell_under_mouse_changed = True
-                    except KeyError:
-                        center_x = int((cell['XMax']+cell['XMin'])/2)
-                        center_y = int((cell['YMax']+cell['YMin'])/2)
-                        vcs = cell[self.session.validation_columns]
-                        validation_call = str(vcs[vcs == 1].index.values[0]).replace(f"Validation | ", "")
-
-                        cell_dict = {'Layer':layer,"cid": cid,"center_x": center_x,'center_y': center_y,
-                                                'validation_call': validation_call, 'XMax' : cell['XMax'],'XMin':cell['XMin'],
-                                                'YMax' : cell['YMax'],'YMin':cell['YMin'], 'Page':cell["Page"]}
-                        
-                        self.session.current_cells[ckey] = cell_dict
-                        self.record_notes_and_intensities(cell, self.session.intensity_columns)
-                        self.session.cell_under_mouse_changed = True # If we haven' seen this cell before, it has definitely changed.
+                    cid = cell.name
+                    
+                    
+                    if cid != self.session.cell_under_mouse.name: self.session.cell_under_mouse_changed = True
+                
+                    
+                    self.session.current_cells.loc[cid] = cell
                     # Now that we have the cell dict, proceed to display
-                    self.session.cell_under_mouse =  cell_dict # save info
-                    self.set_cell_description_label(ckey)
+                    self.session.cell_under_mouse =  cell # save info
+                    self.set_cell_description_label(cid)
                     # Draw box around closest cell
-                    box_closest_context_mode_cell(cell_dict)
+                    box_closest_context_mode_cell(cell)
 
                 else: # Not near a cell
+                    cid =''
                     self.set_cell_description_label(None, display_text_override="No cell nearby to show!")
                     try:
                         self.viewer.layers.selection.active = self.viewer.layers["Context Closest Cell Box"]
@@ -2015,12 +1946,9 @@ class GView:
                     if val != "-": val = int(val)
                     output_str+= f'<font color="{self.data.channelColors[fluor].replace("blue","blue")}">    {val}   </font>' # "#0462d4"
                 
-                if self.data.analysisRegionsInData:
-                    cname = f'Cell {cid} from {layer}' if cell is not None else "Context Mode" # default display name is the mouse is not under a cell
-                else:
-                    cname = f'Cell {cid}' if cell is not None else "Context Mode" # default display name is the mouse is not under a cell
+                cname = f'Cell {cid}' if cell is not None else "Context Mode" # default display name if the mouse is not under a cell
                 
-                sc = self.data.statuses_hex[self.session.current_cells[str(ckey)]['validation_call']] if cell is not None else '' # 
+                sc = self.data.statuses_hex[self.session.current_cells.loc[str(cid)]['Validation']] if cell is not None else '' # 
                 if not sc == "#ffffff":
                     self.viewer.status = f'<font color="{sc}">{cname}</font> pixel intensities at {coords}: {output_str}'
                 else:
@@ -2038,8 +1966,8 @@ class GView:
                     self.viewer.status = 'Out of bounds gallery / multichannel'
                     self.session.cell_under_mouse = None
                     return True
-                
-                self.session.cell_under_mouse = self.session.current_cells[cell_name] # save info
+
+                self.session.cell_under_mouse = self.session.current_cells.loc[cell_name] # save info
                 cell_num = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_num,'')
 
                 if self.data.analysisRegionsInData:
@@ -2054,7 +1982,7 @@ class GView:
                     if val != "-": val = int(val)
                     output_str+= f'<font color="{self.data.channelColors[fluor].replace("blue","blue")}">    {val}   </font>'
             
-                sc = self.data.statuses_hex[self.session.current_cells[str(cell_name)]['validation_call']]
+                sc = self.data.statuses_hex[self.session.current_cells.loc[str(cell_name),'Validation']]
                 if sc != "#ffffff":
                     self.viewer.status = f'<font color="{sc}">{image_name}</font> intensities at {coords}: {output_str}'
                 else:
@@ -2081,9 +2009,10 @@ class GView:
             next_color_txt = self.data.statuses_rgba[next_status]
             next_color_txt = list(x/255 if next_color_txt.index(x)!=3 else 1 for x in next_color_txt)
 
-            self.session.current_cells[str(cell_name)]['validation_call'] = next_status
+            self.session.current_cells.loc[str(cell_name),'Validation'] = next_status
+            self.session.session_cells.loc[str(cell_name),'Validation'] = next_status
             try:
-                self.session.page_cells[str(cell_name)]['validation_call'] = next_status
+                self.session.page_cells.loc[str(cell_name),'Validation'] = next_status
             except (KeyError, ValueError) as e:
                 pass # Cell not in page. Should still be marked in self.session.current_cells list
 
@@ -2111,6 +2040,8 @@ class GView:
             if self.session.mode =="Context" and self.session.context_nuclei_boxes_text_object is not None and self.session.context_nuclei_boxes_map_to_ind:
                 try:
                     ind_target = self.session.context_nuclei_boxes_map_to_ind[str(cell_name)]
+                    print(f'% ind target')
+                    print(ind_target)
                     x = viewer.layers["Context Nuclei Boxes"].edge_color # List of colors
                     x[ind_target] = next_color_txt # Change only the color of this cell
                     viewer.layers["Context Nuclei Boxes"].edge_color = x
@@ -2118,7 +2049,7 @@ class GView:
                     viewer.layers["Context Nuclei Boxes"].text = self.session.context_nuclei_boxes_text_object
                 except (KeyError, ValueError) as e:
                 # Changing a cell status that isn't in the current page using Context Mode.
-                    print(e)
+                    print(f"context box status issue: {e}")
 
         def change_status_display_forAll(next_status):
             next_color_txt = self.data.statuses_rgba[next_status]
@@ -2126,9 +2057,10 @@ class GView:
 
             # set all cells to status
             for coords, cname in self.session.grid_to_ID[self.session.mode].items():
-                self.session.current_cells[str(cname)]['validation_call'] = next_status
+                self.session.current_cells.loc[str(cname),'Validation'] = next_status
+                self.session.session_cells.loc[str(cname),'Validation'] = next_status
                 try:
-                    self.session.page_cells[str(cname)]['validation_call'] = next_status
+                    self.session.page_cells.loc[str(cname),'Validation'] = next_status
                 except (KeyError, ValueError) as e:
                     pass # Cell not in page. Should still be marked in self.session.current_cells list
             # Change gallery mode status layer
@@ -2164,11 +2096,11 @@ class GView:
             cell = self.session.cell_under_mouse
             if cell is None:
                 return False # leave if the mouse is not near a cell (not sure that this could even happen)
-            cell_name = f"{cell['Layer']} {cell['cid']}" if self.data.analysisRegionsInData else str(cell['cid'])  
+            cell_name = cell.name  
 
                 
 
-            cur_status = self.session.current_cells[str(cell_name)]['validation_call']
+            cur_status = self.session.current_cells.loc[str(cell_name)]['Validation']
             cur_index = list(status_colors.keys()).index(cur_status)
             next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
 
@@ -2180,11 +2112,11 @@ class GView:
             change_status_display(cell_name, next_status)
 
             # Update scoring tally
-            self.update_scoring_tally(cur_status, next_status, cell_name in self.session.page_cells.keys())
+            self.update_scoring_tally(cur_status, next_status, cell_name in self.session.page_cells.index)
             self.set_scoring_label(self.session.widget_dictionary["scoring label"])
             # change color of viewer status
             vstatus_list = copy.copy(self.viewer.status).split('>')
-            vstatus_list[0] = sub(r'#.{6}',self.data.statuses_hex[self.session.current_cells[str(cell_name)]['validation_call']], vstatus_list[0])
+            vstatus_list[0] = sub(r'#.{6}',self.data.statuses_hex[self.session.current_cells.loc[str(cell_name)]['Validation']], vstatus_list[0])
             self.viewer.status = ">".join(vstatus_list)
 
         @viewer.mouse_drag_callbacks.append
@@ -2193,8 +2125,8 @@ class GView:
             #TODO decide on the behavior for clicking on a cell
             if self.session.cell_under_mouse is None:
                 return None # Nothing to do if no cell under mouse
-            layer = self.session.cell_under_mouse['Layer']
-            cid = str(self.session.cell_under_mouse['cid'])
+            layer = self.session.cell_under_mouse['Analysis Region'] if self.data.analysisRegionsInData else ''
+            cid = str(self.session.cell_under_mouse.name)
             # Allow user to click on a cell to get it's name into the entry box  
             if self.data.analysisRegionsInData:
                 self.session.widget_dictionary['notes annotation combo'].setCurrentText(layer)
@@ -2225,7 +2157,7 @@ class GView:
                 cell = self.session.cell_under_mouse 
                 if cell is None:
                     return False # leave if the mouse is not near a cell (not sure that this could even happen)
-                cell_name = f"{cell['Layer']} {cell['cid']}" if self.data.analysisRegionsInData else str(cell['cid'])    
+                cell_name = cell.name    
                 
                 
                 if self.session.mode == "Context" and self.session.nuclei_boxes_vis["Context"] == "Mouse":
@@ -2235,7 +2167,7 @@ class GView:
                     viewer.layers["Context Closest Cell Box"].text = self.session.context_closest_cell_text_object
                 
                 # Update scoring tally BEFORE changing status 
-                self.update_scoring_tally(self.session.current_cells[str(cell_name)]['validation_call'], scoring_decision, cell_name in self.session.page_cells.keys())
+                self.update_scoring_tally(self.session.current_cells.loc[str(cell_name)]['Validation'], scoring_decision, cell_name in self.session.page_cells.keys())
                 self.set_scoring_label(self.session.widget_dictionary["scoring label"])
 
                 change_status_display(cell_name, scoring_decision)
@@ -2243,7 +2175,7 @@ class GView:
 
                 # change color of viewer status
                 vstatus_list = copy.copy(self.viewer.status).split('>')
-                vstatus_list[0] = sub(r'#.{6}',self.data.statuses_hex[self.session.current_cells[str(cell_name)]['validation_call']], vstatus_list[0])
+                vstatus_list[0] = sub(r'#.{6}',self.data.statuses_hex[self.session.current_cells.loc[str(cell_name)]['Validation']], vstatus_list[0])
                 self.viewer.status = ">".join(vstatus_list)
 
             @viewer.bind_key(f'Control-{keybind}')
@@ -2270,7 +2202,7 @@ class GView:
                     return None
                 self.set_cell_description_label(str(cell_name))
                 vstatus_list = copy.copy(self.viewer.status).split('>')
-                vstatus_list[0] = sub(r'#.{6}',self.data.statuses_hex[self.session.current_cells[str(cell_name)]['validation_call']], vstatus_list[0])
+                vstatus_list[0] = sub(r'#.{6}',self.data.statuses_hex[self.session.current_cells.loc[str(cell_name)]['Validation']], vstatus_list[0])
                 self.viewer.status = ">".join(vstatus_list)
             return set_score, set_scoring_all
 
@@ -2292,9 +2224,10 @@ class GView:
                 else:
                     if self.session.cell_under_mouse is None: 
                         return False # Can't do anything without a target cell
-                    layer = self.session.cell_under_mouse["Layer"]
-                    cid = str(self.session.cell_under_mouse["cid"])
+                    
+                    cid = str(self.session.cell_under_mouse.name)
                     if self.data.analysisRegionsInData:
+                        layer = self.session.cell_under_mouse["Analysis Region"]
                         self.session.widget_dictionary['switch mode annotation'].setCurrentText(layer)
                     self.session.widget_dictionary['switch mode cell'].setText(cid)
                     self.toggle_session_mode_catch_exceptions("Multichannel")
@@ -2305,9 +2238,9 @@ class GView:
                 else:
                     if self.session.cell_under_mouse is None: 
                         return False # Can't do anything without a target cell
-                    layer =self.session.cell_under_mouse["Layer"]
-                    cid = str(self.session.cell_under_mouse["cid"])
+                    cid = str(self.session.cell_under_mouse.name)
                     if self.data.analysisRegionsInData:
+                        layer = self.session.cell_under_mouse["Layer"]
                         self.session.widget_dictionary['switch mode annotation'].setCurrentText(layer)
                     self.session.widget_dictionary['switch mode cell'].setText(cid)
                     self.toggle_session_mode_catch_exceptions("Context")
@@ -2608,21 +2541,16 @@ class GView:
         
         df = self.session.session_cells
         try:
-            if self.data.analysisRegionsInData:
-                singlecell_df = df[(df['Object Id']==int(cell_id)) & (df['Analysis Region']==str(layer_name))]
-            else:
-                singlecell_df = df[df['Object Id']==int(cell_id)]
+            cell_id = cell_id if layer_name is None else f'{cell_id} {layer_name}'
+            singlecell_df  = df.loc[str(cell_id)]
         except (ValueError, TypeError, IndexError):
             # Cell doesn't exist
-            if self.data.analysisRegionsInData:
-                viewer.status = f"Unable to screenshot cell '{layer_name} {cell_id}'. This ID was not found in my table."
-            else:
-                viewer.status = f"Unable to screenshot cell '{cell_id}'. This ID was not found in my table."
+            viewer.status = f"Unable to screenshot cell '{cell_id}'. This ID was not found in my table."
             return False
         
         # print(f"Trying to take screenshot for the following frame: {singlecell_df}")
-        cell_x = singlecell_df.iloc[0]["center_x"]
-        cell_y = singlecell_df.iloc[0]["center_y"]
+        cell_x = singlecell_df["center_x"]
+        cell_y = singlecell_df["center_y"]
         # Get images from dask in chosen channels
 
         # if self.raw_pyramid is None:
@@ -2844,9 +2772,9 @@ class GView:
 
         im_size = self.data.imageSize + 2
         if page_mode == "Gallery":
-            for cell_dict in self.session.page_cells.values():
-                cname = f"{cell_dict['Layer']} {cell_dict['cid']}" if self.data.analysisRegionsInData else str(cell_dict['cid'])
-                cname_display = f"{cell_dict['Layer']}- cell {cell_dict['cid']}" if self.data.analysisRegionsInData else f"cell {cell_dict['cid']}"
+            for _, cell in self.session.page_cells.iterrows():
+                cname = cell.name
+                cname_display = cell.name
                 row, col = list(self.session.grid_to_ID[page_mode].keys())[list(self.session.grid_to_ID[page_mode].values()).index(cname)].split(",")
                 col, row = (int(row),int(col))
                 col_start = (col-1)*(im_size)+1
@@ -2857,9 +2785,9 @@ class GView:
                 self._send_image_to_user(viewer, blended_cell, clipboard=False, image_name_override= image_path, silence_animation=True)
 
         elif page_mode == "Multichannel":
-            for cell_dict in self.session.page_cells.values():
-                cname = f"{cell_dict['Layer']} {cell_dict['cid']}" if self.data.analysisRegionsInData else str(cell_dict['cid'])
-                cname_display = f"{cell_dict['Layer']}- cell {cell_dict['cid']}" if self.data.analysisRegionsInData else f"cell {cell_dict['cid']}"
+            for _, cell in self.session.page_cells.iterrows():
+                cname = cell.name
+                cname_display = cell.name
                 row, col = list(self.session.grid_to_ID[page_mode].keys())[list(self.session.grid_to_ID[page_mode].values()).index(cname)].split(",")
                 row, col = (int(row),int(col))
                 col_start = ((row-1)*(im_size))
@@ -2880,18 +2808,11 @@ class GView:
     def generate_intensity_hist(self, viewer :napari.Viewer, cell_id : str , layer_name : str | None, 
                                 bins:int, include_all:bool, normalize:bool):
         
-        cells = self.session.page_cells
         try:
-            if self.data.analysisRegionsInData:
-                singlecell = cells[f"{layer_name} {cell_id}"]
-            else:
-                singlecell = cells[str(cell_id)]
+            singlecell = self.session.page_cells.loc[cell_id]
         except (ValueError, TypeError, IndexError):
             # Cell doesn't exist
-            if self.data.analysisRegionsInData:
-                viewer.status = f"Unable to plot histogram for cell '{layer_name} {cell_id}'. This ID was not found in my table."
-            else:
-                viewer.status = f"Unable to plot histogram for cell '{cell_id}'. This ID was not found in my table."
+            viewer.status = f"Unable to plot histogram for cell '{cell_id}'. This ID was not found in my table."
             return False
 
         viewer.status = "Analyzing object data..."
@@ -2902,7 +2823,7 @@ class GView:
         # Get data for reference cell
         xmin = singlecell['XMin'] ; xmax = singlecell['XMax'] 
         ymin = singlecell['YMin'] ; ymax = singlecell['YMax'] 
-        cname = f"Cell {cell_id}" if not self.data.analysisRegionsInData else f"{layer_name} - cell {cell_id}"
+        cname = singlecell.name
         
         if self.raw_pyramid is None:
             reference_pixels = self.session.dask_array[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
@@ -2923,7 +2844,7 @@ class GView:
             # Get data for all cells
             collected = np.array([])
             count = 0
-            for _, cell in cells.items():
+            for _, cell in self.session.page_cells.iterrows():
                 # Get data for single cell
                 xmin = cell['XMin'] ; xmax = cell['XMax'] 
                 ymin = cell['YMin'] ; ymax = cell['YMax']
@@ -2992,16 +2913,10 @@ class GView:
         cell_id = None if cell_id == '' else cell_id # Let's consider passing a blank as wanting to NOT plot a reference cell, so let's continue
         if cell_id is not None:
             try:
-                if self.data.analysisRegionsInData:
-                    singlecell_df = df[(df['Object Id']==int(cell_id)) & (df['Analysis Region']==str(layer_name))]
-                else:
-                    singlecell_df = df[df['Object Id']==int(cell_id)]
+                singlecell_df = df.loc[cell_id]
             except (ValueError, TypeError, IndexError):
                 # Cell doesn't exist
-                if self.data.analysisRegionsInData:
-                    viewer.status = f"Unable to plot reference cell '{layer_name} {cell_id}'. This ID was not found in my table."
-                else:
-                    viewer.status = f"Unable to plot reference cell '{cell_id}'. This ID was not found in my table."
+                viewer.status = f"Unable to plot reference cell '{cell_id}'. This ID was not found in my table."
                 return False
         viewer.status = 'Analyzing object data...'
         
@@ -3023,8 +2938,8 @@ class GView:
         for chn in self.data.channels:
             pal = [self.data.channelColors[chn] if chn in x else x for x in pal]
 
-        print(f'Palette is {list(zip(selection,pal))}')
-        print(f"Phenotypes are {self.data.phenotypes}")
+        # print(f'Palette is {list(zip(selection,pal))}')
+        # print(f"Phenotypes are {self.data.phenotypes}")
         match pheno_choice:
             case "All custom":
                 pheno_selection = [x for x in self.data.phenotypes if (not x.startswith("Validation |")) and x in list(df.columns)]
@@ -3032,16 +2947,13 @@ class GView:
                 pheno_selection = [x for x in self.data.phenotypes if x.startswith("Validation |") and x in list(df.columns)]
             case _:
                 pheno_selection = [pheno_choice]
-        df.to_csv('mdf.csv',index=False)
-        print(selection)
-        print(pheno_selection)
-        mdf = df.melt(id_vars=['Object Id', *pheno_selection ], value_vars=selection).rename(columns={'variable':'Intensity Type','value':'Intensity Value'})
-        mdf = mdf.melt(id_vars = ['Object Id','Intensity Type','Intensity Value'], 
-                    value_vars= pheno_selection).rename(columns={'variable':'Phenotype'})
+        # df.to_csv('mdf.csv',index=False)
+        # print(selection)
+        # print(pheno_selection)
+        mdf = df.reset_index().melt(id_vars=['gvid', *pheno_selection ], value_vars=selection).rename(columns={'variable':'Intensity Type','value':'Intensity Value'})
+        mdf = mdf.melt(id_vars = ['gvid','Intensity Type','Intensity Value'], value_vars= pheno_selection).rename(columns={'variable':'Phenotype'})
         # Only keep cells positive for the chosen phenotypes. Cells with multiple phenotypes are split into different rows here (this is fine)
         mdf = mdf.loc[mdf['value'] ==1].drop(columns=['value'])
-        print("\nmelted data here\n")
-        print(mdf)
         # kwargs = {'palette':pal,'multiple':mult,'fill':fill,'bins':b,'element':e,'linewidth':l }
         viewer.status = "Done - displaying violinplot in live viewer"
 
@@ -3093,27 +3005,27 @@ class GView:
 
                 # Only do the following if the user wants to plot the position of a single reference cell on a violin
                 if cell_id is not None:
-                    cname = f'{singlecell_df.iloc[0]["Analysis Region"]} {singlecell_df.iloc[0]["Object Id"]}' if self.data.analysisRegionsInData else str(singlecell_df.iloc[0]["Object Id"])
-                    if cname in self.session.current_cells.keys():
-                        print(self.session.current_cells[cname])
-                        print(sc_phen)
+                    cname = singlecell_df.name
+                    if cname in self.session.current_cells.index:
+                        # print(self.session.current_cells.loc[cname])
+                        # print(sc_phen)
                         try:
                             if pheno_choice == 'All validation':
-                                val = self.session.current_cells[cname]['validation_call']
+                                val = self.session.current_cells[cname]['Validation']
                                 facet = sc_phen.replace("Validation | ",'')
                                 on_phenotype_facet = True if val == facet else False
                             elif pheno_choice =='All custom':
-                                on_phenotype_facet = bool(singlecell_df.iloc[0][sc_phen])
+                                on_phenotype_facet = bool(singlecell_df[sc_phen])
                             else: #Unreachable case? Should'nt be faceting if user chose single column
                                 raise Exception("Executing faceted violinplot code even though user requested a single column")
                         except KeyError: # Probably triggered
                             on_phenotype_facet = False
                         print(f"on_phenotype_facet = {on_phenotype_facet}")
                     else:
-                        on_phenotype_facet = bool(singlecell_df.iloc[0][sc_phen])
+                        on_phenotype_facet = bool(singlecell_df[sc_phen])
                         print(f"Not in current cells. on_phenotype_facet = {on_phenotype_facet}")
                     for tick, lab in enumerate(labs):
-                        y = singlecell_df.iloc[0][lab._text]
+                        y = singlecell_df[lab._text]
 
                         ax.add_line(lines.Line2D([tick-.46, tick+.46], [y, y],lw=2, color='white'))
                         ax.add_line(lines.Line2D([tick-.46, tick+.46], [y, y],lw=2, color='black', ls= (0,(5,5)) ))
@@ -3173,19 +3085,6 @@ class GView:
             self.session.view_settings[key] = viewsettings[key]
         return True
 
-    def record_notes_and_intensities(self, cell_row, intensity_col_names):
-        '''Grab notes and intensities for each cell in the list and save to global dicts'''
-        if self.data.analysisRegionsInData:
-            ID = str(cell_row['Analysis Region']) + ' ' + str(cell_row['Object Id'])
-        else:
-            ID = str(cell_row['Object Id'])
-        self.session.saved_notes[ID] = cell_row['Notes']
-        # Find out which columns are present in the Series and subset to those
-        present_intensities = sorted(list(set(list(cell_row.index)).intersection(set(intensity_col_names))))
-        cell_row = cell_row.loc[present_intensities]
-        self.saved_intensities[ID] = cell_row
-        # self.session.session_cells[ID]["intensities"] = cell_row
-
     '''Get object data from csv and parse.''' 
     def extract_phenotype_xldata(self, page_size=None, phenotypes=None,annotations = None, page_number = 1, 
                                 specific_cell = None, sort_by_intensity = None, combobox_widget = None):
@@ -3204,6 +3103,7 @@ class GView:
         if annotations is None: annotations=list(self.data.annotation_mappings.keys())  # Name of phenotype of interest
         # print(f'ORDERING PARAMS: id start: {cell_id_start}, page size: {page_size}, direction: {direction}, change?: {change_startID}')
         halo_export = self.data.objectDataFrame.copy()
+        print(f"HALO export info {halo_export.info()}")
 
         # Check for errors:
         for ph in phenotypes:
@@ -3212,16 +3112,6 @@ class GView:
         if len(annotations) >0 and ('Analysis Region' not in list(halo_export.columns)):
             raise KeyError
 
-        # Add columns w/defaults if they aren't there to avoid runtime issues
-        if "Validation | Unseen" not in halo_export.columns:
-            for call_type in reversed(self.data.statuses.keys()):
-                if call_type == 'Unseen':
-                    halo_export.insert(8,f"Validation | {call_type}", 1)
-                else:
-                    halo_export.insert(8,f"Validation | {call_type}", 0)     
-        if "Notes" not in halo_export.columns:
-            halo_export.insert(8,"Notes","-")
-            halo_export.fillna("")
 
         # Get relevant columns for intensity sorting
         # TODO make this conditional, and in a try except format
@@ -3236,7 +3126,7 @@ class GView:
         v = list(self.data.statuses.keys())
         validation_cols = [f"Validation | " + s for s in v]
         self.session.validation_columns = validation_cols
-        cols_to_keep = ["Object Id","Analysis Region", "Notes", "XMin","XMax","YMin", "YMax"] + phenotypes + all_possible_intensities + validation_cols
+        cols_to_keep = ["gvid", "Validation","Object Id", "Analysis Region", "Notes", "XMin","XMax","YMin", "YMax"] + phenotypes + all_possible_intensities + validation_cols
         cols_to_keep = halo_export.columns.intersection(cols_to_keep)
         halo_export = halo_export.loc[:, cols_to_keep]
 
@@ -3251,17 +3141,20 @@ class GView:
                 #   Label somewhere in the name.
                 self.data.global_sort = [x for x in all_possible_intensities if all(y in x for y in self.data.global_sort.replace("Cell Intensity",""))]
                 self.data.global_sort = [x for x in self.data.global_sort if "Cell Intensity" in x][0]
-                halo_export = halo_export.sort_values(by = self.data.global_sort, ascending = False, kind = 'mergesort')
+                _sort = self.data.global_sort
+                _asc = False
             except:
                 print('Global sort failed. Will sort by Cell Id instead.')
                 self.data.global_sort = None
                 global_sort_status = False
                 self.viewer.status = 'Global sort failed. Will sort by Cell Id instead.'
-                if annotations:
-                    halo_export = halo_export.sort_values(by = ["Analysis Region","Object Id"], ascending = True, kind = 'mergesort')
+                
+                _sort =  ["Analysis Region","Object Id"] if annotations else 'Object Id'
+                _asc = True
         else:
-            if annotations:
-                halo_export = halo_export.sort_values(by = ["Analysis Region","Object Id"], ascending = True, kind = 'mergesort')
+            _sort =  ["Analysis Region","Object Id"] if annotations else 'Object Id'
+            _asc = True
+        halo_export = halo_export.sort_values(by = _sort, ascending = _asc, kind = 'mergesort')
 
         # Helper to construct query string that will subset dataframe down to cells that 
         #   are positive for a phenotype in the list, or a member of an annotation layer in the list
@@ -3270,7 +3163,7 @@ class GView:
             for anno in anno_list:
                 query += f"(`Analysis Region` == '{anno}') | "
             for pheno in pheno_list:
-                query += f"(`{pheno}` == 1) |"
+                query += f"(`Validation` == {pheno}) |"
             # print(query)
             return query.rstrip(" |")
         ''' Helper function to create a query that will filter by intensity'''
@@ -3293,18 +3186,18 @@ class GView:
         # print('page code start')
         # Apply filters here
         if annotations or phenotypes:
-            phen_only_df = halo_export.query(_create_anno_pheno_query(annotations,phenotypes)).reset_index()
+            phen_only_df = halo_export.query(_create_anno_pheno_query(annotations,phenotypes))
         else:
-            phen_only_df = halo_export.reset_index()
+            phen_only_df = halo_export
         if self.data.filters:
-            phen_only_df = phen_only_df.query(_create_filter_query(self.data.filters)).reset_index()
+            phen_only_df = phen_only_df.query(_create_filter_query(self.data.filters))
 
 
         # Assign page numbers to each cell in the table now. These cells can appear in the viewer during this session
-        phen_only_df["Page"] = (phen_only_df.index // page_size)+1
+        phen_only_df["Page"] = (np.array(range(1, len(phen_only_df) + 1))  // page_size)+1
 
         # Figure out which range of cells to get based on page number and size
-        last_page = (len(phen_only_df.index) // page_size)+1
+        last_page = (len(phen_only_df) // page_size)+1
         combobox_widget =  self.session.widget_dictionary['page combobox']
         # combobox_widget.addItem('Page 1')
         # If page numbers haven't been added to the widget, do it now   
@@ -3317,29 +3210,25 @@ class GView:
         print(f"testing if specific cell {specific_cell} and type {type(specific_cell)}")
         if specific_cell is not None:
             try:
-                specific_cid = specific_cell['ID']
-                specific_layer = specific_cell['Annotation Layer']
+                cid = specific_cell['ID']
+                if self.data.analysisRegionsInData:
+                    cid = f"{specific_cell['Annotation Layer']} {cid}"
                 
                 #TODO fix this
-                if self.data.analysisRegionsInData and specific_layer:
-                    singlecell_df = phen_only_df[(phen_only_df['Object Id']==int(specific_cid)) & (phen_only_df['Analysis Region']==str(specific_layer))]
-                else:
-                    singlecell_df = phen_only_df[phen_only_df['Object Id']==int(specific_cid)]
+                singlecell_df = phen_only_df.loc[cid]
                 page_number = singlecell_df.iloc[0]["Page"] # Converts single row dataframe to series and fetches the page value
 
-                print("I will now print the 'page number' which should be a number, not a series")
+                print("This 'page number' should be a number, not a series")
                 print(page_number)
                 #TODO set the combobox widget to the current page number
             except (KeyError,IndexError, ValueError):
-                print(f'The cell ID {specific_layer} {specific_cid} is not in my list of cells. Loading default page instead')
-                self.viewer.status = f'The cell ID {specific_layer} {specific_cid} is not in my list of cells. Loaded default page instead'
+                print(f'The cell ID {cid} is not in my list of cells. Loading default page instead')
+                self.viewer.status = f'The cell ID {cid} is not in my list of cells. Loaded default page instead'
 
         # set widget to current page number 
         combobox_widget.setCurrentIndex(page_number-1)
-        self.session.saved_notes['page'] = combobox_widget.currentText()
+        self.session.current_page = str(page_number)
         
-        
-
         # Save cells that form ALL pages for this session. They could appear in Context Mode.
         self.session.session_cells = phen_only_df
         self.session.session_cells["center_x"] = ((self.session.session_cells['XMax']+self.session.session_cells['XMin'])/2).astype(int)
@@ -3361,51 +3250,26 @@ class GView:
         if sort_by_intensity is not None: # should never be none
             try:    
                 if sort_by_intensity == "Object Id":
-                    if self.data.analysisRegionsInData:
-                        cell_set = cell_set.sort_values(by = ["Analysis Region", sort_by_intensity], ascending = False, kind = 'mergesort')
-                    else:
-                        cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = False, kind = 'mergesort')
-
+                    _sort = ["Analysis Region",'Object Id'] if self.data.analysisRegionsInData else 'Object Id'
+                    _asc = True
                 else:
                     # First, check if a custom name was used.
                     sort_by_intensity = [x for x in all_possible_intensities if all(y in x for y in sort_by_intensity.split(" "))][0]
-                    cell_set = cell_set.sort_values(by = sort_by_intensity, ascending = True, kind = 'mergesort')
+                    _sort = sort_by_intensity
+                    _asc = False
             except (KeyError, IndexError):
-                #  
                 if global_sort_status:
                     self.viewer.status = f"Unable to sort this page by '{sort_by_intensity}', will use ID instead. Check your data headers."
                 else:
                     self.viewer.status = f"Unable to sort everything by '{sort_by_intensity}', will use ID instead. Check your data headers."
-                if self.data.analysisRegionsInData:
-                    cell_set = cell_set.sort_values(by = ["Analysis Region",'Object Id'], ascending = False, kind = 'mergesort')
-                else:
-                    cell_set = cell_set.sort_values(by = 'Object Id', ascending = False, kind = 'mergesort')
-        cell_information = {}
-
-        # Iterate over rows to create dictionary entries for each cell.
-        #TODO just keep the information in a pandas DataFrame. It will be faster and easier to work with than doing this.
-        for index,row in cell_set.iterrows():
-            cid = row["Object Id"]
-            layer = row["Analysis Region"] if self.data.analysisRegionsInData else None
-            ckey = f'{layer} {cid}' if self.data.analysisRegionsInData else str(cid)
-            self.record_notes_and_intensities(row, all_possible_intensities)
-            center_x = row['center_x']
-            center_y = row['center_y']
-            vals = row[validation_cols]
-            try:
-                validation_call = str(vals[vals == 1].index.values[0]).replace(f"Validation | ", "")
-            except IndexError:
-                # row has no validation call (all zeroes). Assign to Unseen
-                validation_call = "Unseen"
-
-            cell_information[ckey] = {'Layer':layer,"cid": cid,"center_x": center_x,'center_y': center_y,
-                                    'validation_call': validation_call, 'XMax' : row['XMax'],'XMin':row['XMin'],
-                                    'YMax' : row['YMax'],'YMin':row['YMin'], 'Page':row["Page"]}
-
-        self.session.current_cells = copy.copy(cell_information)
-        self.session.page_cells = copy.copy(cell_information)
-        self.session.cell_under_mouse = next(iter(cell_information.values())) # Set first cell in list as "current" to avoid exceptions
-        return cell_information
+                _sort = ["Analysis Region",'Object Id'] if self.data.analysisRegionsInData else 'Object Id'
+                _asc = True
+            cell_set = cell_set.sort_values(by = _sort, ascending = _asc, kind = 'mergesort')
+        
+        self.session.current_cells = cell_set.copy()
+        self.session.page_cells = cell_set.copy()
+        self.session.cell_under_mouse = cell_set.iloc[0] # Set first cell in list as "current" to avoid exceptions
+        return 'pass'
 
     def replace_note(self, cell_widget, note_widget):
         cellID = cell_widget.text(); note = note_widget.text()
@@ -3419,8 +3283,7 @@ class GView:
         #     self.viewer.status = 'Error recording note: non-numeric Cell Id given'
         #     return None 
         try:
-            self.session.saved_notes[str(cellID)] # to trigger exception
-            self.session.saved_notes[str(cellID)] = note
+            self.session.current_cells.loc[str(cellID), "Notes"] = note
             cell_widget.clear(); note_widget.clear()
             self.viewer.status = "Note recorded! Press 's' to save to file."
         except KeyError as e:
@@ -3450,8 +3313,7 @@ class XeniumView(GView):
 ######------------------------- Remote Execution + Main ---------------------######
 
 def gui_execute(gvui):
-    user = storage_classes.loadObject('profiles/active.gvconfig')
-    gvdata = user.current_data
+    gvdata = gvui.gvdata
     match gvui.UI_mode:
         case "HALO":
             gv = HaloView(gvdata, gvui)
@@ -3461,6 +3323,8 @@ def gui_execute(gvui):
             gv = CosMxView(gvdata, gvui)
         case "Xenium":
             gv = XeniumView(gvdata, gvui)
+        case _:
+            gvdata.log_exception(ValueError(f"{gvui.mode} mode is not supported"), error_type="viewer-initialization")
     napari.run() # Start the event loop
 
 #TODO either make this work headlessly, or get rid of it. 
