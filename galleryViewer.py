@@ -30,6 +30,7 @@ from math import ceil
 from re import sub
 import os
 import dask.array as da
+import dask 
 # import zarr
 import scipy.spatial as spatial
 from seaborn import histplot, violinplot, FacetGrid
@@ -743,9 +744,9 @@ class GView:
 
         if "Composite" in self.data.active_channels or len(active_fluors_only) == len(self.data.channels): # Reference list has 'Composite' in it
             # Want to show everything in this case. Use the full image.
-            for fluor in self.data.channels:
+            for pos,fluor in enumerate(self.data.channels):
                 if fluor == "Composite": continue
-                self.viewer.layers[f"Multichannel {fluor}"].data = copy.copy(self.session.multichannel_page_images[fluor])
+                self.viewer.layers[f"Multichannel {fluor}"].data = self.session.multichannel_page_images[pos].copy()
                 self.viewer.layers[f"Multichannel Nuclei Boxes"].data = copy.copy(self.session.multichannel_nuclei_box_coords)
             return True
 
@@ -760,12 +761,12 @@ class GView:
 
         fullpage_col = 1
         collapsed_col = 1
-        for fluor in self.data.channels:
+        for pos, fluor in enumerate(self.data.channels):
             if fluor not in all_fluors: continue
             # print(f"looping on {fluor},{pos}  ||| {fullpage_col} {collapsed_col}")
             if fluor in active_fluors_only:
                 collapsed_image = np.zeros(page_shape)
-                fluor_im = copy.copy(self.session.multichannel_page_images[fluor][:,((fullpage_col-1)*imsize)+1 : (fullpage_col*imsize)-1])
+                fluor_im = self.session.multichannel_page_images[pos,:,((fullpage_col-1)*imsize)+1 : (fullpage_col*imsize)-1].copy()
                 # Set individual column
                 collapsed_image[:,((collapsed_col-1)*imsize)+1 : (collapsed_col*imsize)-1] = fluor_im
                 if num_active_channels >1:
@@ -890,6 +891,7 @@ class GView:
                 # elif "Absorption" in layer.name:
                 #     layer.visible = False
                 #     continue
+                if not isinstance(layer, ImageLayer): continue
                 sess = layer.name.split()[0] + " "
                 layer.colormap = custom_color_functions.retrieve_cm(self.data.channelColors[layer.name.replace(sess,"")])
                 layer.blending = 'Additive' 
@@ -1520,10 +1522,13 @@ class GView:
 
     def black_background(self, color_space, mult, CPR):
         if color_space == 'RGB':
-            return da.zeros((ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR, 4), dtype=np.uint16, chunks=self.data.chunks)
+            #shape is (channels, y, x)
+            return np.zeros((len(self.data.channels),ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR, 4), 
+                    dtype=self.session.dask_high_res.dtype)
             
         elif color_space == 'Luminescence':
-            return da.zeros((ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR), dtype = np.uint16, chunks = self.data.chunks)
+            return np.zeros((len(self.data.channels), ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR), 
+                    dtype=self.session.dask_high_res.dtype)
             
 
     ''' Overload in CosMxView to add other layers. '''
@@ -1541,95 +1546,85 @@ class GView:
         cpr_m = self.session.cells_per_row["Multichannel"]
 
         # print(f"Shapes are {self.session.page_status_layers['Multichannel'].shape}  || {self.session.page_status_layers['Gallery'].shape}")
-        page_image_multichannel = {} ; page_image_gallery = {}
+
         for chn in self.data.channels:
             if chn == 'Composite': continue
-            page_image_gallery[chn] = self.black_background('Luminescence', 1, self.data.cells_per_row)
-            page_image_multichannel[chn] = self.black_background('Luminescence', cpr_m, cpr_m)
+            page_image_gallery = self.black_background('Luminescence', 1, self.data.cells_per_row)
+            page_image_multichannel = self.black_background('Luminescence', cpr_m, cpr_m)
 
         # page_image = self.black_background('RGB',size_multiplier)
 
-        print(f'Adding {len(cells)} cells to viewer... Channels are{self.data.channels}')
+        print(f'Slicing {len(cells)} cells out of image')
+        results = []
+        for _, cell in cells.iterrows(): # coords left
+            cell_x = cell['center_x']; cell_y = cell['center_y']
+            # Create array of channel indices in image data. Will use to fetch from the dask array
+            positions = [self.data.channelOrder[chn] for chn in self.data.channels if chn != 'Composite' ]
+            ''' Slice image -- DO NOT compute until actually adding images later'''
+            cell_punchout = self.session.dask_high_res[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset]  
+            results.append(cell_punchout)
+        print("Computing image wiht dask")
+        img = dask.compute(*results)
+
+
         col_g = 0 
         row_g = 0 ; row_m = 0
         self.session.grid_to_ID = {"Gallery":{}, "Multichannel":{}} # Reset this since we could be changing to multichannel mode
-    
-
-        for _, cell in cells.iterrows(): # coords left
-            print(cell.name)
+        print("Inserting images into page")
+        for pos, (_, cell) in enumerate(cells.iterrows()): # coords left
             col_g = (col_g%cpr_g)+1 
             if col_g ==1: row_g+=1
-            col_m = 1 ;  row_m+=1 
+            row_m+=1     
+            for col_m in range(len(self.data.channels)): # loop through channels
+                cell_id = cell.name
+                # multichannel mode: individual image
+                page_image_multichannel[col_m, (row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
+                            col_m*(self.data.imageSize+2)+1:(col_m+1)*(self.data.imageSize+2)-1] = img[pos][col_m]
+                # multichannel mode: composite image
+                page_image_multichannel[col_m, (row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
+                            (cpr_m-1)*(self.data.imageSize+2)+1:cpr_m*(self.data.imageSize+2)-1] = img[pos][col_m]
+                self.session.grid_to_ID["Multichannel"][f'{row_m},{col_m+1}'] = cell_id
+            self.session.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cell_id
+                
+            # Gallery images 
+            self.session.grid_to_ID["Gallery"][f'{row_g},{col_g}'] = cell_id
+            page_image_gallery[:, (row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = img[pos]
 
-            cell_id = cell.name
-            cell_x = cell['center_x']; cell_y = cell['center_y']
+            self.session.multichannel_page_images = page_image_multichannel.copy()
 
-
-            # Create array of channel indices in image data. Will use to fetch from the dask array
-            positions = []
-            for fluor in self.data.channels: # loop through channels
-                if fluor in self.data.channels and fluor != 'Composite':
-                    positions.append(self.data.channelOrder[fluor]) # channelOrder dict holds mappings of fluors to position in image data
-
-            # Slice image
-            # cell_punchout = [da.from_zarr(self.session.zarr_store, n)[positions] for n in range(6)] #TODO how to know how many pyramid layers?
-            cell_punchout = self.session.dask_high_res[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
-            # print(cell_punchout)
-            fluor_index = 0
-            for fluor in self.data.channels: # loop through channels
-                if fluor != 'Composite':
-                    # multichannel mode: individual image
-                    page_image_multichannel[fluor][(row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
-                                (col_m-1)*(self.data.imageSize+2)+1:col_m*(self.data.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
-                    # multichannel mode: composite image
-                    page_image_multichannel[fluor][(row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
-                                (cpr_m-1)*(self.data.imageSize+2)+1:cpr_m*(self.data.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
-                    self.session.grid_to_ID["Multichannel"][f'{row_m},{col_m}'] = cell_id
-                    self.session.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cell_id
-                    # if col_m ==1:
-                    #     self.session.page_status_layers["Multichannel"][(row_m-1)*(self.data.imageSize+2):row_m*(self.data.imageSize+2),:] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Multichannel")
-                    col_m+=1 # so that next luminescence image is tiled 
-                    
-                    # Gallery images 
-                    self.session.grid_to_ID["Gallery"][f'{row_g},{col_g}'] = cell_id
-                    page_image_gallery[fluor][(row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = cell_punchout[fluor_index,:,:]
-                    # self.session.page_status_layers["Gallery"][(row_g-1)*(self.data.imageSize+2):row_g*(self.data.imageSize+2), (col_g-1)*(self.data.imageSize+2):col_g*(self.data.imageSize+2)] = generate_status_box(cell_status, cell_anno +' '+ str(cell_id), "Gallery")
-                    fluor_index+=1
-            self.session.multichannel_page_images = copy.copy(page_image_multichannel)
-
-
-        print(f"\nMy scale is {self.session.image_scale}")
         sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
 
-        for fluor in list(page_image_gallery.keys()):
+        ''' NOT channel order in source image. Dask image we have created has reordered the fluors.'''
+        for pos, fluor in enumerate(self.data.channels):
             # Passing gamma is currently bugged. Suggested change is to remove the validation in the _on_gamma_change 
             #   (now located at napari/_vispy/layers/image.py
             # See https://github.com/napari/napari/issues/1866
+            # To get around this, the gamma is adjusted later by calling a function that sets all viewsettings params
+
             fluor_gamma = self.session.view_settings[fluor+" gamma"]
             fluor_contrast = [self.session.view_settings[fluor+" black-in"],self.session.view_settings[fluor+" white-in"]]
-            print(f"Adding layers now. fluor is {fluor}, view settings are gamma {fluor_gamma}, contrast {fluor_contrast}")
+            print(f"Adding layers to napari. fluor is {fluor}, view settings are gamma {fluor_gamma}, contrast {fluor_contrast}")
             if fluor == 'Composite':
                 continue # The merged composite consists of each layer's pixels blended together, so there is no composite layer itself
             if self.session.absorption_mode:
-                viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'minimum',
+                viewer.add_image(page_image_gallery[pos], name = f"Gallery {fluor}", blending = 'minimum',
                     colormap = custom_color_functions.retrieve_cm(self.data.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
                     gamma=fluor_gamma, contrast_limits=fluor_contrast)
-                viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'minimum',
+                viewer.add_image(page_image_multichannel[pos], name = f"Multichannel {fluor}", blending = 'minimum',
                     colormap = custom_color_functions.retrieve_cm(self.data.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
                     gamma=fluor_gamma, contrast_limits=fluor_contrast, visible = False)
                 
             else:
-                viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'additive',
+                viewer.add_image(page_image_gallery[pos], name = f"Gallery {fluor}", blending = 'additive',
                     colormap = custom_color_functions.retrieve_cm(self.data.channelColors[fluor]), scale = sc, interpolation="linear",
                     gamma=fluor_gamma, contrast_limits=fluor_contrast)
-                viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
+                viewer.add_image(page_image_multichannel[pos], name = f"Multichannel {fluor}", blending = 'additive',
                     colormap = custom_color_functions.retrieve_cm(self.data.channelColors[fluor]), scale = sc, interpolation="linear",
                     gamma=fluor_gamma, contrast_limits=fluor_contrast, visible = False)
         
 
-                
-        
-        # Adding boxes around cells , text labels, and colored boxes for Gallery and Multichannel modes. 
+
+        print('''Adding boxes around cells , text labels, and colored boxes for Gallery and Multichannel modes. ''')
 
         cells['g_col'] = range(len(cells))
         cells['g_col'] %=cpr_g
@@ -1693,9 +1688,6 @@ class GView:
         viewer.add_shapes(status_box_coords_m, name="Multichannel Status Numbers", shape_type="rectangle", edge_width=0, 
                                                 features=features, text = nb_text, face_color = "#00000000",
                                                 scale=sc, opacity=1, visible = False)
-        # viewer.add_image(self.session.page_status_layers["Gallery"].astype(np.uint8), name='Gallery Status Layer', interpolation='linear', scale = sc, visible=gal_vis)
-        # viewer.add_image(self.session.page_status_layers["Multichannel"].astype(np.uint8), name='Multichannel Status Layer', interpolation='linear', scale = sc, visible=mult_vis)
-        # viewer.layers.selection.active = viewer.layers["Status Layer"]
         
         # Add other layers
         self.add_extras(cXg, cYg)
