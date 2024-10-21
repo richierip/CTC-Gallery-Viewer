@@ -149,7 +149,7 @@ class GVData:
     with values I have chosen (can modify these in the init below, or with certain global 
     variables above.) '''
 
-    def __init__(self, user_data: UserData, channels = copy.copy(CHANNELS_STR), qptiff_path = None, 
+    def __init__(self, user_data: UserData, channels = copy.copy(CHANNELS_STR), colors = None, image_path = None, 
                 imageSize = 100, specific_cell = None, page_size = 56, global_sort = "Sort object table by Cell Id",
                 cells_per_row = 8):
         self.user = user_data
@@ -176,20 +176,21 @@ class GVData:
         self.other_cols_in_data = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
                   'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
         self.phenotypes = []
-        self.qptiff_path = qptiff_path # String - image path
+        self.image_path = image_path # String - image path
 
         self.last_system_folder_visited = "C:/"
         self.last_image_save_folder = "C:/"
         self.objectDataPath = '' # String - object data path
         self.objectDataFrame = None # Pandas DataFrame created using read_csv. Storing this saves time when wanting the df later
         self.available_colors = list(colormap.keys())
-        self.channelColors = dict(zip(channels, list(colormap.keys())[:len(channels)] )) #String array - Order of multichannel data found in the image
+        self.channelColors = dict(zip(channels, list(colormap.keys())[:len(channels)] )) if colors is None else colors # dict - channels to semantic name for colors. 
         self.channelOrder = dict(zip(channels,range(len(channels))))
         self.statuses_rgba = {key: ImageColor.getcolor(val, "RGBA") for key,val in self.statuses_hex.items()} # Dict of statuses and RGBA tuples color mappings, e.g. {'status A':(255,0,0,255)}
         self.available_statuses_keybinds = ["q","w","e","t","y","u","o","p","d","f","g","j","l","z","x",",",".","/","[","]",";","'"]
         self.view_settings = self.remake_viewsettings(pass_value=True) # Dict of view settings. Will NOT change after reading from file. ex: {fluor A gamma: 0.5}
         self.view_settings_path = '' # Path to .viewsettings file. The file is a type of HALO export and will use XML formatting
         self.imported_view_settings = None
+        self.contrastRanges = {chn: (0.0,255.0) for chn in self.channels}
 
 
     ''' Restore viewsettings to [chn] gamma : 0.5, [chn] whitein:255, [chn] blackin:0
@@ -346,7 +347,7 @@ class GVData:
             print(f"Caught {error_type} exception in viewer runtime. Will write to file")
             logpath = os.path.normpath(os.path.join(folder, datetime.today().strftime(f'%Y-%m-%d_{error_type}_%H%M%S.txt')))
         
-        params = f"\nImage path: {self.qptiff_path} \nData path: {self.objectDataPath}\n"
+        params = f"\nImage path: {self.image_path} \nData path: {self.objectDataPath}\n"
         params += f"Punchout size: {self.imageSize} \nUser selected channels: {self.channels}\n"
         params += f"Available colors: {self.available_colors} \n"
         params += f"Batch/page size: {self.page_size} \nSort: {self.global_sort}\n"
@@ -365,16 +366,31 @@ class GVData:
 class HaloData(GVData):
     def __init__(self, parent):
         super().__init__(parent)
+        self.idcol = "Object Id"
+        self.extra_columns = []
+        self.chunks = 512
         # self.user = parent
 
 class CosMxData(GVData):
     def __init__(self, parent):
-        super().__init__(parent)
+        super().__init__(parent, channels=['DAPI','PanCK','CD3','Membrane','CD45'],
+                         colors={'DAPI': 'gray', "PanCK" :"green", "CD3" : "yellow", "Membrane":"darkcyan", "CD45": "red"})
+        self.channelFolders = {'DAPI': 'U', "PanCK" :"B", "CD3" : "G", "Membrane":"Y", "CD45": "R"}
+        self.idcol = "cell"
+        self.transcripts = ["LINE1_ORF1"]
+        self.extra_columns = ['fov','fovX','fovY']
+        self.chunks = 2**13
+
+    def _save_validation(self, to_disk = False):
+        print("COSMX SAVE")
+        return True
         # self.user = parent
 
 class XeniumData(GVData):
     def __init__(self, parent):
         super().__init__(parent)
+        self.idcol = ''
+        self.extra_columns = []
         # self.user = parent
 
 def storeObject(obj : UserData, filename : str):

@@ -17,6 +17,9 @@ import warnings
 warnings.filterwarnings("ignore")
 import pandas as pd
 import numpy as np
+import anndata as ad
+import pyarrow.dataset as ds
+import zarr
 import copy
 import pathlib
 
@@ -28,7 +31,7 @@ import webbrowser # for opening github
 import warnings
 warnings.catch_warnings
 
-from custom_qt_classes import ScoringDialog, ChannelDialog, StatusCombo, ColorfulComboBox, ModeCombo
+from custom_qt_classes import ScoringDialog, HaloChannelDialog,CosMxChannelDialog, StatusCombo, ColorfulComboBox, ModeCombo
 from custom_color_functions import colormap_titled as rgbcd
 
 VERSION_NUMBER = '1.3.5'
@@ -143,15 +146,16 @@ class WindowTracker():
 ''' This class contains the whole dialog box that the user interacts with and all it's widgets. Also contains
     an instance of the GVData class, which will be passed to the viewer code. '''
 class GVUI(QDialog):
-    def __init__(self, app: QApplication, tracker: WindowTracker, gvdata: storage_classes.GVData | None = None):
+    def __init__(self, app: QApplication, tracker: WindowTracker, gvdata: storage_classes.GVData | None = None, add_annotations = True):
         super().__init__()
         self.tracker = tracker
         self.app = app
         self.gvdata = gvdata
+        self.add_annotations = add_annotations
         self.init_window_defaults()
         self.init_top_layout()
-        self.createTopLeftGroupBox()
-        self.createTopRightGroupBox()
+        self.createLeftGroupBox()
+        self.createRightGroupBox(add_annotations)
         self.init_filter_readouts()
         self.init_status_load_area()
         self.connect_buttons()
@@ -196,13 +200,13 @@ class GVUI(QDialog):
         self.UI_combo = ModeCombo(self,self.gvdata)
         self.UI_combo.currentTextChanged.connect(self.change_UI_mode)
         # entry box for .qptiff        
-        self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
+        self.imageEntry = QLineEdit()  # Put retrieved previous answer here
         # Want to do this in any case
-        self.qptiffEntry.setPlaceholderText('Enter path to .qptiff')
-        self.qptiffEntry.setFixedWidth(800)
-        # qptiffEntry.setAlignment(Qt.AlignLeft)
+        self.imageEntry.setPlaceholderText('Enter path to .qptiff')
+        self.imageEntry.setFixedWidth(800)
+        # imageEntry.setAlignment(Qt.AlignLeft)
         # entryLabel = QLabel("Image: ")
-        # entryLabel.setBuddy(self.qptiffEntry)
+        # entryLabel.setBuddy(self.imageEntry)
         # entryLabel.setAlignment(Qt.AlignCenter)
         # entryLabel.setMaximumWidth(600)
 
@@ -265,7 +269,7 @@ class GVUI(QDialog):
 
     def connect_buttons(self):
         self.findDataButton.pressed.connect(self.loadGallery)
-        self.qptiffEntry.textEdited.connect(self.saveQptiff)
+        self.imageEntry.textEdited.connect(self.saveQptiff)
         self.dataEntry.textEdited.connect(self.saveObjectData)
         self.getViewsettingsPathButton.pressed.connect(self.fetchViewsettingsPath)
         self.previewObjectDataButton.pressed.connect(self.prefillObjectData)
@@ -306,7 +310,7 @@ class GVUI(QDialog):
         self.topLayout.addWidget(self.titleLabel,0,1, 1,3, Qt.AlignLeft)
         self.topLayout.addWidget(self.UI_combo, 0, 3,1,2,Qt.AlignRight)
         self.topLayout.setSpacing(20)
-        self.topLayout.addWidget(self.qptiffEntry,1,1,)
+        self.topLayout.addWidget(self.imageEntry,1,1,)
         self.topLayout.addWidget(self.previewImageDataButton,1,2,1,2)
         self.topLayout.addWidget(self.dataEntry,2,1)
         self.topLayout.addWidget(self.previewObjectDataButton,2,2,1,2)
@@ -332,10 +336,10 @@ class GVUI(QDialog):
 
     def insert_previous_hints(self):
         # preprocess things if user has entered paths in a previous session
-        if self.gvdata.qptiff_path is not None:
-            self.qptiffEntry.insert(pathlib.Path(self.gvdata.qptiff_path).name)
+        if self.gvdata.image_path is not None:
+            self.imageEntry.insert(pathlib.Path(self.gvdata.image_path).name)
             # self.prefillImageData(fetch=False)
-        if self.gvdata.objectDataPath is not None and  self.gvdata.qptiff_path is not None:
+        if self.gvdata.objectDataPath is not None and  self.gvdata.image_path is not None:
             self.dataEntry.insert(pathlib.Path(self.gvdata.objectDataPath).name)
             self.prefillObjectData(fetch=False)
         if self.gvdata.view_settings_path is not None:
@@ -347,7 +351,7 @@ class GVUI(QDialog):
     #################################
 
     ''' Construct widgets for channel checkboxes and color dropdowns'''
-    def createTopLeftGroupBox(self, layout: None|QGridLayout = None, groupbox: None|QGroupBox = None ):
+    def createLeftGroupBox(self, layout: None|QGridLayout = None, groupbox: None|QGroupBox = None ):
         self.topLeftGroupBox = groupbox if groupbox is not None else QGroupBox("Channels and Colors")
         self.myColors = [] # Holds color selection comboboxes for the channel selection widgets
         self.mycheckbuttons = []
@@ -381,7 +385,7 @@ class GVUI(QDialog):
         return self.topLeftGroupLayout, self.topLeftGroupBox
     
     ''' Construct widgets for cell filters area'''
-    def createTopRightGroupBox(self):
+    def createRightGroupBox(self, add_annotations = True):
         self.topRightGroupBox = QGroupBox("Cells to Read")
 
         explanationLabel2 = QLabel("Gallery image size <b>(px)</b>")
@@ -390,24 +394,25 @@ class GVUI(QDialog):
         explanationLabel5 = QLabel("Load page with <b>Cell ID<b>")
         
         #------------------ Annotation widgets
-        self.annotationButton = QPushButton("Add Annotation")
-        self.annotationButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
-        self.annotationButton.pressed.connect(self.addAnnotation)
+        if add_annotations:
+            self.annotationButton = QPushButton("Add Annotation")
+            self.annotationButton.setStyleSheet(f"QPushButton {{ font-size: 22px}}")
+            self.annotationButton.pressed.connect(self.addAnnotation)
 
-         # Annotation layer select
-        self.annotationEdit = QLineEdit(self.topRightGroupBox)
-        self.annotationEdit.setPlaceholderText('Single layer only')
-        self.annotationEdit.setFixedWidth(220)
-        self.annotationCombo = QComboBox(self.topRightGroupBox)
-        self.annotationCombo.setVisible(False)
-        self.annotationStatuses = StatusCombo(self.topRightGroupBox, self.gvdata)
+            # Annotation layer select
+            self.annotationEdit = QLineEdit(self.topRightGroupBox)
+            self.annotationEdit.setPlaceholderText('Single layer only')
+            self.annotationEdit.setFixedWidth(220)
+            self.annotationCombo = QComboBox(self.topRightGroupBox)
+            self.annotationCombo.setVisible(False)
+            self.annotationStatuses = StatusCombo(self.topRightGroupBox, self.gvdata)
 
-        # Pheno selection display label
-        self.annotationDisplay = QLabel(self.topRightGroupBox)
-        self.annotationDisplay.setText(self.gvdata.annotation_mappings_label)
-        self.annotationDisplay.setAlignment(Qt.AlignTop)
-        # self.annotationDisplay.setStyleSheet("line-height:1.5; padding-left:15px; padding-right:15px; padding-top:0px")
-        self.annotationDisplay.setContentsMargins(15,0,15,0)
+            # Anno selection display label
+            self.annotationDisplay = QLabel(self.topRightGroupBox)
+            self.annotationDisplay.setText(self.gvdata.annotation_mappings_label)
+            self.annotationDisplay.setAlignment(Qt.AlignTop)
+            # self.annotationDisplay.setStyleSheet("line-height:1.5; padding-left:15px; padding-right:15px; padding-top:0px")
+            self.annotationDisplay.setContentsMargins(15,0,15,0)
 
         #---------- Phenotype widgets
         self.phenotypeButton = QPushButton("Add Phenotype")
@@ -468,16 +473,17 @@ class GVUI(QDialog):
         self.specificCellChoice.textEdited.connect(self.saveSpecificCell)
 
         # Widgets to select annotation layer
-        self.specificCellAnnotationEdit = QLineEdit(self.topRightGroupBox)
-        self.specificCellAnnotationEdit.setPlaceholderText('Annotation layer')
-        if self.gvdata.specific_cell is not None:
-            self.specificCellAnnotationEdit.insert(self.gvdata.specific_cell['Annotation Layer'])
-        self.specificCellAnnotationEdit.setFixedWidth(220)
-        self.specificCellAnnotationEdit.textEdited.connect(self.saveSpecificCell)
+        if add_annotations:
+            self.specificCellAnnotationEdit = QLineEdit(self.topRightGroupBox)
+            self.specificCellAnnotationEdit.setPlaceholderText('Annotation layer')
+            if self.gvdata.specific_cell is not None:
+                self.specificCellAnnotationEdit.insert(self.gvdata.specific_cell['Annotation Layer'])
+            self.specificCellAnnotationEdit.setFixedWidth(220)
+            self.specificCellAnnotationEdit.textEdited.connect(self.saveSpecificCell)
 
-        self.specificCellAnnotationCombo = QComboBox(self.topRightGroupBox)
-        self.specificCellAnnotationCombo.setVisible(False)
-        self.specificCellAnnotationCombo.activated.connect(self.saveSpecificCell)
+            self.specificCellAnnotationCombo = QComboBox(self.topRightGroupBox)
+            self.specificCellAnnotationCombo.setVisible(False)
+            self.specificCellAnnotationCombo.activated.connect(self.saveSpecificCell)
 
         self.page_size_widget = QSpinBox(self.topRightGroupBox)
         self.page_size_widget.setRange(5,4000)
@@ -508,9 +514,9 @@ class GVUI(QDialog):
         layout.addWidget(self.phenotypeButton,1,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel0,0,0)
         layout.addWidget(self.phenotypeToGrab,1,1,Qt.AlignTop) ; layout.addWidget(self.phenotypeCombo,1,1,Qt.AlignTop)
         layout.addWidget(self.phenotypeStatuses,1,2,1,2,Qt.AlignTop)
-        layout.addWidget(self.annotationButton,2,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel1,1,0)
-        layout.addWidget(self.annotationEdit,2,1,Qt.AlignTop); layout.addWidget(self.annotationCombo,2,1,Qt.AlignTop)
-        layout.addWidget(self.annotationStatuses,2,2,1,2,Qt.AlignTop)
+        if add_annotations: layout.addWidget(self.annotationButton,2,0,Qt.AlignTop)#;layout.addWidget(self.explanationLabel1,1,0)
+        if add_annotations: layout.addWidget(self.annotationEdit,2,1,Qt.AlignTop); layout.addWidget(self.annotationCombo,2,1,Qt.AlignTop)
+        if add_annotations: layout.addWidget(self.annotationStatuses,2,2,1,2,Qt.AlignTop)
         layout.addWidget(explanationLabel2,3,0,Qt.AlignTop)
         layout.addWidget(self.imageSize,3,1,Qt.AlignTop)
         layout.addWidget(self.resetButton,3,2,1,2,Qt.AlignTop)
@@ -520,11 +526,11 @@ class GVUI(QDialog):
         layout.addWidget(self.row_size_widget,5,1,Qt.AlignTop)
         layout.addWidget(explanationLabel5,6,0,Qt.AlignTop)
         layout.addWidget(self.specificCellChoice,6,1,Qt.AlignTop)
-        layout.addWidget(self.specificCellAnnotationEdit,6,2,1,2,Qt.AlignTop)
-        layout.addWidget(self.specificCellAnnotationCombo,6,2,1,2,Qt.AlignTop)
+        if add_annotations: layout.addWidget(self.specificCellAnnotationEdit,6,2,1,2,Qt.AlignTop)
+        if add_annotations: layout.addWidget(self.specificCellAnnotationCombo,6,2,1,2,Qt.AlignTop)
         layout.addWidget(self.global_sort_widget,7,0,1,2)
         layout.addWidget(self.phenoDisplay,0,4,7,1)
-        layout.addWidget(self.annotationDisplay,0,5,7,1)
+        if add_annotations: layout.addWidget(self.annotationDisplay,0,5,7,1)
         layout.addWidget(self.filterDisplay,0,6,7,1)
         # layout.setColumnStretch(3,6)
         # layout.setColumnStretch(4,6)
@@ -556,11 +562,6 @@ class GVUI(QDialog):
     def change_scoring_decisions(self):
         scoring = ScoringDialog(self, self.app, self.gvdata, {"pheno_widget":self.phenotypeStatuses,"anno_widget": self.annotationStatuses})
         scoring.exec()
-
-    ''' Summon dialog box for changing image data channel order / fluorophore names'''
-    def change_channels(self):
-        channels = ChannelDialog(self, self.app, self.gvdata, self.topLeftGroupLayout, self.topLeftGroupBox , self.createTopLeftGroupBox)
-        channels.exec()
 
     ''' Called when a menu bar option is selected'''
     def process_menu_action(self,q):
@@ -633,11 +634,11 @@ class GVUI(QDialog):
 
     ''' Anachronistic. Switched to only checking input when Preview button is clicked'''
     def saveQptiff(self):
-        cleanpath = os.path.normpath(self.qptiffEntry.text().strip('"')).strip('.')
+        cleanpath = os.path.normpath(self.imageEntry.text().strip('"')).strip('.')
         if os.path.exists(cleanpath):
             pass
-            # self.gvdata.qptiff_path = cleanpath
-        # if (".qptiff" in self.qptiffEntry.text()) or (".tif" in self.qptiffEntry.text()):
+            # self.gvdata.image_path = cleanpath
+        # if (".qptiff" in self.imageEntry.text()) or (".tif" in self.imageEntry.text()):
         #     self.previewImageDataButton.setEnabled(True)
         # else:
         #     self.previewImageDataButton.setEnabled(False)
@@ -827,20 +828,24 @@ class GVUI(QDialog):
         self.gvdata.phenotype_mappings_label = '<u>Phenotypes</u><br>All'
         self.phenoDisplay.setText('<u>Phenotypes</u><br>All')
         #Annotations
-        self.gvdata.annotation_mappings = {}
-        self.gvdata.annotation_mappings_label = '<u>Annotations</u><br>All'
-        self.annotationDisplay.setText('<u>Annotations</u><br>All')
+        if self.add_annotations:
+            self.gvdata.annotation_mappings = {}
+            self.gvdata.annotation_mappings_label = '<u>Annotations</u><br>All'
+            self.annotationDisplay.setText('<u>Annotations</u><br>All')
         #Filters
         self.gvdata.filters = []
         self.gvdata.filters_label = '<u>Filters</u><br>None'
         self.filterDisplay.setText('<u>Filters</u><br>None')
 
         # Refresh comboboxes
-        if self.phenotypeCombo.isVisible() or self.annotationCombo.isVisible():
+        if self.phenotypeCombo.isVisible():
             self.phenotypeCombo.clear() 
-            self.annotationCombo.clear() 
             self.filterMarkerCombo.clear()
-            self.specificCellAnnotationCombo.clear()
+        if self.add_annotations:
+            if self.annotationCombo.isVisible():
+                self.specificCellAnnotationCombo.clear()
+                self.annotationCombo.clear()
+
         if examine_object_data:
             self.prefillObjectData(fetch=False)
 
@@ -871,7 +876,7 @@ class GVUI(QDialog):
 
         print(f"path {path}")
         current_entry = self.dataEntry.text().strip('"').strip("' ")
-        if os.path.exists(current_entry) and (current_entry.lower().endswith(".qptiff") or current_entry.lower().endswith(".tif")):
+        if os.path.exists(current_entry) and (current_entry.lower().endswith(".csv")):
             fileName = current_entry
         else:
             fileName, _ = QFileDialog.getOpenFileName(self,"Select a HALO Object Data file", path,"HALO Object Data (*.csv)")
@@ -992,14 +997,14 @@ class GVUI(QDialog):
             # Do it this way since some people use a mapped drive path, some use CIFS, some use UNC path with IP address
             im_name_csv = pathlib.Path(im_location_csv).name
         
-            if im_name_csv != pathlib.Path(self.gvdata.qptiff_path).name:
+            if im_name_csv != pathlib.Path(self.gvdata.image_path).name:
                 return 'name conflict'
         except ValueError: 
             try: # Attempt to check the alternative column name that might be present
                 im_location_csv = pd.read_csv(self.gvdata.objectDataPath, index_col=False, nrows=1, usecols=['Image File Name']).iloc[0,0]
                 im_name_csv = pathlib.Path(im_location_csv).name
                 
-                if im_name_csv != pathlib.Path(self.gvdata.qptiff_path).name:
+                if im_name_csv != pathlib.Path(self.gvdata.image_path).name:
                     return 'name conflict'
             except ValueError:
                 pass 
@@ -1018,16 +1023,16 @@ class GVUI(QDialog):
             the OS file system.'''
     def fetchImagePath(self):
         path = self.gvdata.last_system_folder_visited
-        current_entry = self.qptiffEntry.text().strip('"').strip("' ")
+        current_entry = self.imageEntry.text().strip('"').strip("' ")
         if os.path.exists(current_entry) and (current_entry.lower().endswith(".qptiff") or current_entry.lower().endswith(".tif")):
             fileName = current_entry
         else:
             fileName, _ = QFileDialog.getOpenFileName(self,"Select an image to load", path,"Akoya QPTIFF (*.qptiff);;Akoya QPTIFF (*.QPTIFF)")  
         
         self.gvdata.last_system_folder_visited = os.path.normpath(pathlib.Path(fileName).parent)
-        self.gvdata.qptiff_path = os.path.normpath(fileName)
-        self.qptiffEntry.clear()
-        self.qptiffEntry.insert(pathlib.Path(fileName).name)
+        self.gvdata.image_path = os.path.normpath(fileName)
+        self.imageEntry.clear()
+        self.imageEntry.insert(pathlib.Path(fileName).name)
 
     ''' Called on UI init and button click. Read a valid image file to parse the metadata and inform the user of the results'''
     def prefillImageData(self, fetch = True):
@@ -1041,16 +1046,16 @@ class GVUI(QDialog):
                 self.status_label.setText(status)
                 # self.previewImageDataButton.setEnabled(False)
                 # self.previewImageDataButton.setStyleSheet(f"color: #4c9b8f")
-                self.setWidgetColorBackground(self.qptiffEntry, "#55ff55")
-                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.qptiffEntry, "#ffffff"))
+                self.setWidgetColorBackground(self.imageEntry, "#55ff55")
+                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.imageEntry, "#ffffff"))
             elif res == 'name conflict':
                 #TODO something here
-                self.setWidgetColorBackground(self.qptiffEntry, "#ef881a")
-                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.qptiffEntry, "#ffffff"))
+                self.setWidgetColorBackground(self.imageEntry, "#ef881a")
+                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.imageEntry, "#ffffff"))
         except Exception as e:
             print(e)
-            self.setWidgetColorBackground(self.qptiffEntry, "#ff5555")
-            QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.qptiffEntry, "#ffffff"))
+            self.setWidgetColorBackground(self.imageEntry, "#ff5555")
+            QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.imageEntry, "#ffffff"))
 
             self._log_problem(e, error_type="image-metadata-warning")
             # Inform user of possible issue
@@ -1066,7 +1071,7 @@ class GVUI(QDialog):
         ''' Get pixel per um value for the image'''
         try:
             # return None
-            path = self.gvdata.qptiff_path
+            path = self.gvdata.image_path
             with tifffile.TiffFile(path) as tif:
                 description = tif.pages[0].tags['ImageDescription'].value
             root = ET.fromstring(description)
@@ -1083,7 +1088,7 @@ class GVUI(QDialog):
             Looking for channel names, order in multichannel image, and color mappings
             Also configure checkboxes and dropdowns to '''
     def _prefillImageData(self):
-        path = self.gvdata.qptiff_path
+        path = self.gvdata.image_path
         # Parse annoying TIF metadata
         # It seems to be stored in XML format under the 'ImageDescription' TIF tag. 
         with tifffile.TiffFile(path) as tif:
@@ -1258,10 +1263,10 @@ class GVUI(QDialog):
     
     def add_global_id(self, df:pd.DataFrame):
         if self.gvdata.analysisRegionsInData:
-            df['gvid'] = df['Analysis Region'].astype(str) +' '+ df['Object Id'].astype(str)
+            df['gvid'] = df['Analysis Region'].astype(str) +' '+ df[self.gvdata.idcol].astype(str)
         else:
             # df.drop(columns=['Analysis Region'], inplace=True)
-            df['gvid'] = df['Object Id'].astype(str)    
+            df['gvid'] = df[self.gvdata.idcol].astype(str)    
         return df.set_index('gvid', drop=True)
 
     '''Read in the object data file and assign user chosen validation calls to the data, if needed'''
@@ -1313,6 +1318,9 @@ class GVUI(QDialog):
             Store .gvconfig object to disk
             Set some final session parameters
             Call GUI_execute '''
+    def beforeLoad(self):
+        pass
+
     def loadGallery(self):
         # self.status_label.setVisible(True)
         # self.app.processEvents()
@@ -1337,7 +1345,6 @@ class GVUI(QDialog):
             return None
 
         storage_classes.storeObject(self.gvdata.user, 'profiles/active.gvconfig')
-        self.gvdata.user.session.image_display_name = pathlib.Path(self.gvdata.qptiff_path).name # save name of image for display later
         self.gvdata.user.session.image_scale = self._retrieve_image_scale()
         # If user fetched metadata, save changes to color mappings
         # self.saveColors()
@@ -1347,6 +1354,8 @@ class GVUI(QDialog):
         print(f'CHANNELS ORDER : {self.gvdata.channelOrder}')
         print(f'CHANNELS colors : {self.gvdata.channelColors}')
 
+
+        self.beforeLoad() # class-specific extras. Empty in this parent class
         try:
             print('Calling GUI execute...')
             # Reset stylesheet
@@ -1374,16 +1383,29 @@ class GVUI_Halo(GVUI):
         super().__init__(app, tracker, gvdata)
         self.UI_mode = "HALO"
 
+    ''' Summon dialog box for changing image data channel order / fluorophore names'''
+    def change_channels(self):
+        channels = HaloChannelDialog(self, self.app, self.gvdata, self.topLeftGroupLayout, self.topLeftGroupBox , self.createLeftGroupBox)
+        channels.exec()
+
 class GVUI_Halo_MI(GVUI):
     def __init__(self, app: QApplication, tracker = None, gvdata: storage_classes.GVData | None = None):
         super().__init__(app, tracker, gvdata)
         self.UI_mode = "HALO Multi-Image"
 
+    def beforeLoad(self):
+        self.gvdata.user.session.image_display_name = pathlib.Path(self.gvdata.image_path).name # save name of image for display later
+
 class GVUI_CosMx(GVUI):
     def __init__(self, app: QApplication, tracker = None, gvdata: storage_classes.GVData | None = None):
-        super().__init__(app, tracker, gvdata)
+        super().__init__(app, tracker, gvdata, add_annotations=False)
         self.UI_mode = "CosMx"
         # self.init_top_layout()
+
+    ''' Summon dialog box for changing image data channel order / fluorophore names'''
+    def change_channels(self):
+        channels = CosMxChannelDialog(self, self.app, self.gvdata, self.topLeftGroupLayout, self.topLeftGroupBox , self.createLeftGroupBox)
+        channels.exec()
 
     def init_top_layout(self):
         self.titleLabel = QLabel(f'Tumor Cartography Core <font color="#033b96">Gallery</font><font color="#009ca6">Viewer</font> <font size=12pt>v{VERSION_NUMBER}</font>')
@@ -1396,10 +1418,10 @@ class GVUI_CosMx(GVUI):
         self.UI_combo = ModeCombo(self,self.gvdata)
         self.UI_combo.currentTextChanged.connect(self.change_UI_mode)
         # entry box for .qptiff        
-        self.qptiffEntry = QLineEdit()  # Put retrieved previous answer here
+        self.imageEntry = QLineEdit()  # Put retrieved previous answer here
         # Want to do this in any case
-        self.qptiffEntry.setVisible(False)
-        self.qptiffEntry.setEnabled(False)
+        self.imageEntry.setVisible(False)
+        self.imageEntry.setEnabled(False)
 
         self.dataEntry = QLineEdit()  # Put retrieved previous answer here
         self.dataEntry.setPlaceholderText('Enter path to viewer-compatible folder')
@@ -1419,6 +1441,200 @@ class GVUI_CosMx(GVUI):
 
         self.getViewsettingsPathButton = QPushButton("Import viewsettings")
         # self.getViewsettingsPathButton.setMaximumWidth(220)
+
+
+        ''' Called on button click. Read a valid object data file and inform the user of the results'''
+    
+        ''' Called on button click'''
+    
+    def fetchObjectDataPath(self):
+        path = self.gvdata.last_system_folder_visited
+
+        print(f"path {path}")
+        current_entry = self.dataEntry.text().strip('"').strip("' ")
+        if os.path.exists(current_entry) and os.path.isdir():
+            folder = current_entry
+        else:
+            folder = QFileDialog.getExistingDirectory(self,"Select a folder containing formatted CosMx data", path)
+        self.gvdata.last_system_folder_visited = os.path.normpath(pathlib.Path(folder).parent)
+        self.gvdata.objectDataPath = pathlib.Path(os.path.normpath(folder))
+        self.dataEntry.clear()
+        self.dataEntry.insert(pathlib.Path(folder).name)
+
+    
+
+    def _prefillObjectData(self):
+        self.status_label.setText("Checking compatibility...")
+        self.gvdata.cosmx_folder = self.gvdata.objectDataPath
+        contents = [c.name for c in list(self.gvdata.cosmx_folder.iterdir())]
+
+        if ('counts.h5ad' not in contents) or ('transcripts.parquet' not in contents) or ('images' not in contents): 
+            return 'missing'
+        imagecontents = [c.name for c in self.gvdata.cosmx_folder.joinpath("images").iterdir()]
+
+        if ('.zattrs' not in imagecontents) or ('.zgroup' not in imagecontents):
+            return 'not zarr'
+        if 'labels' not in imagecontents:
+            return 'no mask'
+        
+        imagecontents.remove('.zattrs') ; imagecontents.remove('.zgroup') ; imagecontents.remove('labels') 
+        if any([x not in self.gvdata.channelFolders.values() for x in imagecontents]):
+            return 'request reconfigure'
+        
+
+        
+        self.gvdata.adata_path = self.gvdata.cosmx_folder.joinpath('counts.h5ad')
+        self.gvdata.pqds = ds.dataset(self.gvdata.cosmx_folder.joinpath('transcripts.parquet'))
+
+        self.gvdata.image_path = self.gvdata.cosmx_folder.joinpath('images')
+        self.gvdata.cmeta = zarr.open(self.gvdata.image_path, mode = 'r+',).attrs['CosMx']
+        self.gvdata.mm_per_px = self.gvdata.cmeta['scale_um'] / 1000
+        self.gvdata.px_per_mm = 1 / self.gvdata.mm_per_px
+        self.gvdata.px_per_um = self.gvdata.cmeta['scale_um']
+        self.gvdata.fov_offsets = pd.DataFrame.from_dict(self.gvdata.cmeta['fov_offsets'])
+        
+        return 'pass'
+
+    def prefillObjectData(self, fetch = True):
+
+        try:
+            if fetch: 
+                self.fetchObjectDataPath()
+                # Have to reset the widgets here since these widgets could be filled out already
+                self.reset_mappings(examine_object_data=False)
+            # Now get information and pass to widgets
+            res = self._prefillObjectData()
+            phenos = self.phenotypeCombo.count()
+            self.status_label.setVisible(True)
+            
+            if res != 'pass':
+                match res:
+                    case 'missing':
+                        status = 'The folder is missing required components'
+                    case 'not zarr':
+                        status = 'The images folder does not appear to be zarr format'
+                    case 'request reconfigure':
+                        status = 'Detected unfamiliar names in the images folder. Will assume they are fluor names.'
+                    case 'no mask':
+                        status = 'The images folder is missing cell masks'
+                self.status_label.setText(status)
+                self.setWidgetColorBackground(self.dataEntry, "#4c9b8f")
+                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
+            else:
+                status = 'Pass'
+                self.status_label.setText(status)
+                self.setWidgetColorBackground(self.dataEntry, "#55ff55")
+                QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
+
+        
+        except Exception as e:
+            self._log_problem(e, error_type="cosmx-metadata-warning")
+            # Inform user of possible issue
+            self.status_label.setVisible(True)
+            status = '<font color="#ffa000">Unknown issue -- failed to properly ingest the folder\'s data.\
+              The viewer expects a folder called <br> \'images\' created by the stitching tool, a transcripts<i>.parquet</i> generated by the stitching tool,<br>\
+              and a counts.h5ad file (AnnData format). It might have problems with this data.<br> Check the error logs.</font>'
+            self.status_label.setText(status)
+            self.setWidgetColorBackground(self.dataEntry, "#ffa000")
+            QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
+
+        '''Read in the object data file and assign user chosen validation calls to the data, if needed'''
+    
+    def process_cell_table(self):
+        self._replace_status('Reading AnnData... ')
+        try:
+            adata  = ad.read_h5ad(self.gvdata.adata_path)
+        except FileNotFoundError:
+            return "No file"
+        self._append_status('<font color="#7dbc39">  Done. </font>')
+        self._append_status_br('Validating chosen phenotypes...')
+        
+        try:
+            adata.obs["gvid"] = (adata.obs['cell_ID'].astype(int) + (adata.obs['fov'].astype(int) * 25_000)).astype(str)
+            adata.obs.set_index('gvid', inplace = True)
+            df = adata.obs
+            df = self.assign_phenotype_statuses_to_sheet(df)
+            self._append_status('<font color="#7dbc39">  Done. </font>')
+
+            def tryall(a,b,c, m='min'):
+                import math
+                r1 = (a + b+c).min()
+                r2 = (a + b-c).min()
+                r3 = (a - b+c).min()
+                r4 = (a - b-c).min()
+                r5 = (-a + b+c).min()
+                r6 = (-a + b-c).min()
+                r7 = (-a - b+c).min()
+                r8 = (-a - b-c).min()
+                if m =='min':
+                    n = 1_000_000
+                    p = 1
+                    for i,e in enumerate([r1,r2,r3,r4,r5,r6,r7,r8]):
+                        if e < 0: 
+                            continue
+                        if n <=e:
+                            continue
+                        n = e
+                        p = i
+                    return(n,p)
+                else:
+                    n = 0
+                    p = 1
+                    for i,e in enumerate([r1,r2,r3,r4,r5,r6,r7,r8]):
+                        if e < 0: 
+                            continue
+                        if n >=e:
+                            continue
+                        n = e
+                        p = i
+                    return (n,p)
+
+            
+            # I hate them for making me do this.
+            self.gvdata.fov_offsets = pd.DataFrame.from_dict(self.gvdata.cmeta['fov_offsets'])
+            self.gvdata.fov_offsets['fov'] = self.gvdata.fov_offsets['FOV'].astype(str)
+            topleft = (min(self.gvdata.fov_offsets['Y_mm']), -max(self.gvdata.fov_offsets['X_mm']))
+            #TODO put this stuff where it belongs
+            df = pd.merge(df.reset_index(), self.gvdata.fov_offsets[['fov',"X_mm","Y_mm"]], on='fov').set_index('gvid')
+
+            df['Validation'] = 'Unseen'
+            df['Notes'] = '-'
+            df['center_x'] = df['CenterY_local_px'] - (df['X_mm']* self.gvdata.px_per_mm) - (topleft[1]*self.gvdata.px_per_mm)
+            df['center_y'] = df['CenterX_local_px'] + (df['Y_mm']*self.gvdata.px_per_mm) - (topleft[0]*self.gvdata.px_per_mm)
+
+            df['XMin'] = df['center_x'] - (df['Width'] //2)
+            df['XMax'] = df['center_x'] + (df['Width'] //2)
+            df['YMin'] = df['center_y'] - (df['Height'] //2)
+            df['YMax'] = df['center_y'] + (df['Height'] //2)
+            df.rename(columns = {'CenterX_local_px' : 'fovY', 'CenterY_local_px': 'fovX'}, inplace=True) # Coord flip again.
+            adata.obs = df
+            self.gvdata.objectDataFrame = df
+            self.gvdata.adata = adata
+
+            return 'Passed'
+        except PermissionError:
+            return 'PermissionError'
+    
+    def beforeLoad(self):
+        if self.gvdata.view_settings_path:
+            pass
+        else:
+            for chn, folder in self.gvdata.channelFolders.items():
+                metadata = zarr.open(self.gvdata.image_path, mode = 'r+',)[folder].attrs
+                limits = metadata['omero']['channels'][0]['window']
+                self.gvdata.view_settings[f'{chn} black-in'] = limits['start']
+                self.gvdata.view_settings[f'{chn} white-in'] = limits['end']
+                self.gvdata.contrastRanges[chn] = limits['min'],limits['max']
+        print("Contrast ranges")
+        print(self.gvdata.view_settings)
+                
+
+
+
+    ''' Helper function to attempt to get the TIF tag for PixelSizeMicrons'''
+    def _retrieve_image_scale(self):
+        ''' Get pixel per um value for the image'''
+        return self.gvdata.px_per_um
 
 class GVUI_Xenium(GVUI):
     def __init__(self, app: QApplication, tracker = None, gvdata: storage_classes.GVData | None = None):

@@ -7,7 +7,8 @@ Peter Richieri
 # import IPython
 import tifffile
 import napari
-from napari.types import ImageData
+from napari.layers import Points as PointsLayer
+from napari.layers import Image as ImageLayer
 from napari.settings import get_settings
 from qtpy.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, QFileDialog, QSpinBox,
                         QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton, QScrollArea, QDockWidget, QToolTip)
@@ -34,6 +35,24 @@ import scipy.spatial as spatial
 from seaborn import histplot, violinplot, FacetGrid
 from itertools import chain
 from functools import wraps as fwrap
+
+#CosMx
+import pyarrow.dataset as ds
+import zarr
+from skimage.segmentation import find_boundaries
+from skimage.morphology import binary_dilation, disk
+from skimage.transform import resize
+from skimage.exposure import rescale_intensity
+from vispy.color.colormap import Colormap
+import scipy.stats as st
+
+# Single cell processing
+import scanpy as sc
+import anndata as ad
+from scipy.sparse import csr_matrix
+from pathlib import Path
+from napari.utils.color import transform_color
+from napari.utils.colormaps import AVAILABLE_COLORMAPS, label_colormap, color_dict_to_colormap
 
 
 # For clipboard
@@ -82,10 +101,8 @@ class GView:
         self.scoring_tab_groups = []
         self.session.side_dock_groupboxes = {}
         self.session.radiogroups = {} # Probably not necessary
-
-        #Trackers. Should move elsewhere (to session, maybe)
-        self.updated_checkboxes = []
-        self.raw_pyramid = None
+        self.channel_buttons = []
+        
         self.viewer = None
 
         self.init_global_sort()
@@ -115,52 +132,27 @@ class GView:
         else:
             self.data.global_sort = self.data.global_sort.replace("Sort object table by ","")
 
+    def _read_image(self):
+        with tifffile.imread(self.data.image_path, aszarr=True) as zs:
+            self.session.dask_list = [[da.from_zarr(zs, n)[pos] for n in range(len(zs._data))] for pos in self.data.channelOrder.values()]
+            self.session.dask_high_res = da.from_zarr(zs, 0) # Saves a path to the image data that can be used later
+
     def read_image(self):
         self.gvui.status_label.setVisible(True)
         self.gvui._append_status_br("Checking data pipe to image...")
         start_time = time.time()
-        print(f'\nChecking if image can be lazily loaded with dask / zarr {self.data.qptiff_path}...\n')
+        print(f'\nChecking if image can be lazily loaded with dask / zarr {self.data.image_path}...\n')
         try:
-            with tifffile.imread(self.data.qptiff_path, aszarr=True) as zs:
-                self.session.dask_array =  da.from_zarr(zs, 0) # Saves a path to the image data that can be used later
-
-            
-            pyramid = None
+            self._read_image()
             self.gvui._append_status('<font color="#7dbc39">  Done.</font>')
             self.gvui._append_status_br('Sorting object data...')
         except:
-            self.gvui._append_status('<font color="#f5551a">  Failed.</font> Attempting to load image as memory-mapped object...')
-            try:
-                pyramid = tifffile.memmap(self.data.qptiff_path)
-                self.gvui._append_status('<font color="#7dbc39">  Done. </font>')
-                self.gvui._append_status_br('Sorting object data...')
-            except:
-                self.gvui._append_status('<font color="#f5551a">  Failed.</font> Attempting to load raw image, this will take a while ...')
-                try:
-                    pyramid = tifffile.imread(self.data.qptiff_path) # print(f'\nFinal pyramid levels: {[p.shape for p in pyramid]}\n')
-                    # Find location of channels in np array. Save that value, and subset the rest (one nparray per channel)
-                    print(f'pyramid array as np array shape is {pyramid.shape}\n')
-                    arr = np.array(pyramid.shape)
-                    channels = min(arr)
-                    channel_index = np.where(arr == channels)[0][0]
-                    # have to grab the first to instantiate napari viewer
-                    if channel_index == 0:
-                        # Added this because the high quality layer of my sample QPTIFF data seemed to be flipped
-                        # i.e. array looks like (channels, y, x)
-                        pyramid = np.transpose(pyramid,(2,1,0))
-                        # firstLayer = pyramid[:,:,0]
-                    else:
-                        pass #firstLayer = pyramid[:,:,0]
-                    self.gvui._append_status('<font color="#7dbc39">  Done.</font>')
-                    self.gvui._append_status_br('Sorting object data...')
-                except:
-                    self.gvui._append_status('<font color="#f5551a">  Failed.</font><br> Aborting startup, please contact Peter.')
-                    raise Exception("There was a problem reading the image data. Expecting a regular or memory-mapped tif/qptiff. Got something else.")
+            self.gvui._append_status('<font color="#f5551a">  Failed.</font><br> Aborting startup, please contact Peter.')
+            raise Exception("There was a problem reading the image data. Expecting an Akoya .qptiff. Got something else.")
         finally:
             end_time = time.time()
             print(f'... completed in {end_time-start_time} seconds')
-        self.raw_pyramid=pyramid 
-
+        
     def override_napari_defaults(self):
         # Get rid of problematic bindings before starting napari viewer
         # See file at napari\utils\shortcuts.py
@@ -629,33 +621,33 @@ class GView:
 
         # Create bottom bar widgets
         for box in self.check_creator2(self.data.active_channels):
-            self.updated_checkboxes.append(box)
-        self.viewer.window.add_dock_widget(self.updated_checkboxes + [absorption_widget, open_vs],area='bottom')
+            self.channel_buttons.append(box)
+        self.viewer.window.add_dock_widget(self.channel_buttons + [absorption_widget, open_vs],area='bottom')
         # right_dock.adjustSize()
 
     def ingest_cell_data(self): 
         # Now process object data and fetch images
-        try:
-            local_sort = self.data.global_sort
-            self.extract_phenotype_xldata(specific_cell=self.data.specific_cell, sort_by_intensity=local_sort)
-        except KeyError as e:
-            print(e)
-            # If the user has given bad input, the function will raise a KeyError. Fail gracefully and inform the user
-            self.gvui._append_status('<font color="#f5551a">  Failed.</font>')
-            if list(self.data.phenotype_mappings.keys()):
-                self.gvui._append_status(f'<br><font color="#f5551a">The phenotype(s) {", ".join(str(x) for x in list(self.data.phenotype_mappings.keys()))} might not exist in the data, or other column names may have changed!</font>')
-            if list(self.data.annotation_mappings.keys()):
-                self.gvui._append_status(f'<br><font color="#f5551a">The annotations(s) {", ".join(str(x) for x in list(self.data.annotation_mappings.keys()))} might not exist in the data, or other column names may have changed!</font>')
-            self.viewer.close()
-            return None # allows the input GUI to continue running
+        # try:
+        local_sort = self.data.global_sort
+        self.extract_phenotype_xldata(specific_cell=self.data.specific_cell, sort_by_intensity=local_sort)
+        # except KeyError as e:
+        #     print(e)
+        #     # If the user has given bad input, the function will raise a KeyError. Fail gracefully and inform the user
+        #     self.gvui._append_status('<font color="#f5551a">  Failed.</font>')
+        #     if list(self.data.phenotype_mappings.keys()):
+        #         self.gvui._append_status(f'<br><font color="#f5551a">The phenotype(s) {", ".join(str(x) for x in list(self.data.phenotype_mappings.keys()))} might not exist in the data, or other column names may have changed!</font>')
+        #     if list(self.data.annotation_mappings.keys()):
+        #         self.gvui._append_status(f'<br><font color="#f5551a">The annotations(s) {", ".join(str(x) for x in list(self.data.annotation_mappings.keys()))} might not exist in the data, or other column names may have changed!</font>')
+        #     self.viewer.close()
+        #     return None # allows the input GUI to continue running
         
-        except StopIteration as e:
-            print("StopIteration raised in self.extract_phenotype_xldata")
-            # Triggered by the next(cell_set.values()) call. If there are no cells to show, this happens
-            self.gvui._append_status('<font color="#f5551a">  Failed.</font>')
-            self.gvui._append_status(f'<br><font color="#f5551a">There are no cells to show. This could be a result of a phenotype with no positive calls, or a strict filter</font>')
-            self.viewer.close()
-            return None # allows the input GUI to continue running
+        # except StopIteration as e:
+        #     print("StopIteration raised in self.extract_phenotype_xldata")
+        #     # Triggered by the next(cell_set.values()) call. If there are no cells to show, this happens
+        #     self.gvui._append_status('<font color="#f5551a">  Failed.</font>')
+        #     self.gvui._append_status(f'<br><font color="#f5551a">There are no cells to show. This could be a result of a phenotype with no positive calls, or a strict filter</font>')
+        #     self.viewer.close()
+        #     return None # allows the input GUI to continue running
         
     def ingest_images(self):
 
@@ -664,34 +656,33 @@ class GView:
         self.set_initial_adjustment_parameters(self.data.view_settings) # set defaults: 0.5 gamma, 0 black in, 255 white in
         self.attach_functions_to_viewer(self.viewer)
 
-
         # record initial counts for each scoring label
         self.set_initial_scoring_tally(self.data.objectDataFrame, self.session.session_cells, page_only=False)
         self.set_scoring_label(self.session.widget_dictionary["scoring label"])
 
         # try:
-        self.add_layers(self.viewer,self.raw_pyramid,self.session.page_cells, int(self.data.imageSize/2))
-
+        start_time = time.time()
+        self.add_layers(self.viewer, self.session.page_cells, int(self.data.imageSize/2))
+        end_time = time.time()
+        print('\nAdding images took: ')
+        print(end_time - start_time)
         #Enable scale bar
         if self.session.image_scale:
             self.viewer.scale_bar.visible = True
             self.viewer.scale_bar.unit = "um"
 
         # Lazy load full size images as dask array
-        with tifffile.imread(self.data.qptiff_path, aszarr=True) as zs:
-            self.session.zarr_store = zs
-            sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
-            for fluor in self.data.channels:
-                if fluor == 'Composite':
-                    continue
-                pos = self.data.channelOrder[fluor]
-                print(f"\nAdding full size {fluor} image")
-                pyramid = [da.from_zarr(zs, n)[pos] for n in range(6) ] #TODO how to know how many pyramid layers?
-                self.viewer.add_image(pyramid, name = f'Context {fluor}', 
-                            blending = 'additive', colormap = custom_color_functions.retrieve_cm(self.data.channelColors[fluor]),
-                            interpolation = "linear", scale=sc, multiscale=True, visible = True) 
-                # Adding these images with visible = True allows viewsettings changes to be applied to them when the user loads into gallery mode at first.
-                # Otherwise, it seems that they only display the changes after they have been visible for some small period of time in the viewer. 
+        sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
+        for fluor in self.data.channels:
+            if fluor == 'Composite':
+                continue
+            pos = self.data.channelOrder[fluor]
+            print(f"\nAdding full size {fluor} image")
+            self.viewer.add_image(self.session.dask_list[pos], name = f'Context {fluor}', 
+                        blending = 'additive', colormap = custom_color_functions.retrieve_cm(self.data.channelColors[fluor]),
+                        interpolation = "linear", scale=sc, multiscale=True, visible = False) 
+            # Adding these images with visible = True allows viewsettings changes to be applied to them when the user loads into gallery mode at first.
+            # Otherwise, it seems that they only display the changes after they have been visible for some small period of time in the viewer. 
     
     def finish_init(self):
         #TODO set custom theme?
@@ -840,8 +831,10 @@ class GView:
             # viewer.layers[f"{session.mode} Absorption"].visible = session.absorption_mode
         try:
             if session.mode == "Context":
+                viewer.layers[f"Context LINE1_ORF1"].visible =True
                 show_boxes = True if session.nuclei_boxes_vis["Context"] =="Show" else False
             else:
+                viewer.layers[f"Gallery LINE1_ORF1"].visible =True
                 show_boxes = session.nuclei_boxes_vis["Gallery/Multichannel"]
             viewer.layers[f"{session.mode} Nuclei Boxes"].visible = show_boxes
         except KeyError:
@@ -920,6 +913,7 @@ class GView:
                 #         im[:,:] = [255,255,255,255]
                 #         layer.data = im.astype(np.uint8)
                 #     continue
+                if not isinstance(layer, ImageLayer): continue # only change colormapping for images. Can have Points or others in CosMx mode
                 sess = layer.name.split()[0] + " "
                 layer.colormap = custom_color_functions.retrieve_cm(self.data.channelColors[layer.name.replace(sess,"")]+' inverse')
                 layer.blending = 'Minimum'
@@ -931,7 +925,7 @@ class GView:
             # change_statuslayer_color(copy.copy(self.session.current_cells))
         
         # Change colors and widget styles
-        for toggle in self.updated_checkboxes:
+        for toggle in self.channel_buttons:
             name = str(toggle.objectName())
             toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(self.data.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), self.session.absorption_mode))
             
@@ -946,7 +940,7 @@ class GView:
     def fluor_button_toggled(self, outdated_fluors: list | None = None):
         '''keep track of visible channels in global list and then toggle layer visibility'''
         self.data.active_channels = []
-        for toggle in self.updated_checkboxes:
+        for toggle in self.channel_buttons:
             name = str(toggle.objectName())
             print(f"{name}  is checked? {toggle.isChecked()}")
         # print(f"{checkbox_name} has been clicked and will try to remove from {self.data.active_channels}")
@@ -1240,7 +1234,7 @@ class GView:
                     self.viewer.layers.selection.add(layer)
             self.viewer.layers.remove_selected()
             # self.viewer.layers.clear()
-            self.add_layers(self.viewer,self.raw_pyramid, self.session.page_cells, int(self.data.imageSize/2))
+            self.add_layers(self.viewer, self.session.page_cells, int(self.data.imageSize/2))
 
         # Update scoring tally for this page
         self.set_initial_scoring_tally(self.data.objectDataFrame, self.session.session_cells)
@@ -1435,7 +1429,7 @@ class GView:
     def set_cell_description_label(self, ID, display_text_override = None):
         # Instead of showing a cell's info, display this text
         if display_text_override is not None:
-            description = f'{self.session.current_page}<br>' + display_text_override
+            description = f'Page {self.session.current_page}<br>' + display_text_override
             self.session.widget_dictionary['cell description label'].setText(description)
             self.session.widget_dictionary['notes label'].setVisible(False)
             self.viewer.window._qt_viewer.setFocus()
@@ -1526,26 +1520,25 @@ class GView:
 
     def black_background(self, color_space, mult, CPR):
         if color_space == 'RGB':
-            return da.zeros((ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR, 4), dtype=np.uint16, chunks=2**14)
-            return np.zeros((ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR, 4))
+            return da.zeros((ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR, 4), dtype=np.uint16, chunks=self.data.chunks)
+            
         elif color_space == 'Luminescence':
-            return da.zeros((ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR), dtype = np.uint16, chunks = 2**14)
-            return np.zeros((ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR))
+            return da.zeros((ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR), dtype = np.uint16, chunks = self.data.chunks)
+            
 
-    ''' Add images layers for Gallery and Multichannel modes. Only make visible the layers for the active mode'''
-    def add_layers(self, viewer: napari.Viewer, pyramid, cells:pd.DataFrame, offset: int, new_page=True):
-        print(f'\n---------\n \n Entering the add_layers function')
-        if pyramid is not None: print(f"pyramid shape is {pyramid.shape}")
+    ''' Overload in CosMxView to add other layers. '''
+    def add_extras(self, *args, **kwargs):
+        pass
     
-        self.session.cells_per_row["Multichannel"] = len(self.data.channels) + 1
+    ''' Add images layers for Gallery and Multichannel modes. Only make visible the layers for the active mode'''
+    def add_layers(self, viewer: napari.Viewer, cells:pd.DataFrame, offset: int, new_page=True):
+        print(f'\n---------\n \n Entering the add_layers function')
+
+        # Update cells per row / gallery
         self.session.cells_per_row["Gallery"] = self.data.cells_per_row
+        self.session.cells_per_row["Multichannel"] = len(self.data.channels) + 1
         cpr_g = self.session.cells_per_row["Gallery"]
         cpr_m = self.session.cells_per_row["Multichannel"]
-
-
-        # Starting to add
-        # self.session.page_status_layers["Gallery"] = self.black_background('RGB', 1, self.data.cells_per_row)
-        # self.session.page_status_layers["Multichannel"] = self.black_background('RGB',cpr_m, cpr_m)
 
         # print(f"Shapes are {self.session.page_status_layers['Multichannel'].shape}  || {self.session.page_status_layers['Gallery'].shape}")
         page_image_multichannel = {} ; page_image_gallery = {}
@@ -1556,42 +1549,20 @@ class GView:
 
         # page_image = self.black_background('RGB',size_multiplier)
 
-        nuclei_box_coords_g = []
-        nuclei_box_coords_m = []
         print(f'Adding {len(cells)} cells to viewer... Channels are{self.data.channels}')
         col_g = 0 
         row_g = 0 ; row_m = 0
         self.session.grid_to_ID = {"Gallery":{}, "Multichannel":{}} # Reset this since we could be changing to multichannel mode
-
-        cid_list = []
-        edge_col_list = []
-        status_box_coords_g = [] ; status_box_flags_g = []
-        status_box_coords_m = [] ; status_box_flags_m = []
+    
 
         for _, cell in cells.iterrows(): # coords left
+            print(cell.name)
             col_g = (col_g%cpr_g)+1 
             if col_g ==1: row_g+=1
             col_m = 1 ;  row_m+=1 
 
             cell_id = cell.name
             cell_x = cell['center_x']; cell_y = cell['center_y']
-            cell_status = cell['Validation']
-            cid_list.append(cell_id)
-            edge_col_list.append(self.data.statuses_hex[cell_status])
-
-
-            x1 = int(cell["XMin"] + offset - cell_x) ; x2 = int(cell["XMax"] + offset - cell_x)
-            y1 = int(cell["YMin"] + offset - cell_y) ; y2 = int(cell["YMax"] + offset - cell_y)
-            cXg = (row_g-1)*(self.data.imageSize+2) ; cYg = (col_g-1)*(self.data.imageSize+2)
-            cXm = (row_m-1)*(self.data.imageSize+2) ; cYm = len(self.data.channels)*(self.data.imageSize+2)
-
-            nuclei_box_coords_g.append([[cXg+y1, cYg+x1], [cXg+y2, cYg+x2]]) # x and y are actually flipped between napari and the object data
-            nuclei_box_coords_m.append([[cXm+y1, cYm+x1], [cXm+y2, cYm+x2]]) 
-
-            status_box_coords_g.append([[cXg, cYg], [cXg+(self.data.imageSize+1), cYg+(self.data.imageSize+1)]]) 
-            status_box_coords_m.append([[cXm, 0], [cXm+(self.data.imageSize+1), cYm+(self.data.imageSize+1)]]) 
-            status_box_flags_g.append([[cXg, cYg], [cXg+int(self.data.imageSize/8), cYg+int(self.data.imageSize/8)]]) 
-            status_box_flags_m.append([[cXm, 0], [cXm+int(self.data.imageSize/8), int(self.data.imageSize/8)]]) 
 
 
             # Create array of channel indices in image data. Will use to fetch from the dask array
@@ -1600,16 +1571,10 @@ class GView:
                 if fluor in self.data.channels and fluor != 'Composite':
                     positions.append(self.data.channelOrder[fluor]) # channelOrder dict holds mappings of fluors to position in image data
 
-            if self.raw_pyramid is None:
-                # print("Using zarr/dask")
-                # cell_punchout = [da.from_zarr(self.session.zarr_store, n)[positions] for n in range(6)] #TODO how to know how many pyramid layers?
-                cell_punchout = self.session.dask_array[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
-            else:
-                print("Using full size (raw) image. DANGER. DEPRECATED!")
-                # dask / zarr lazy reading didn't work, so entire image should be in memory as np array
-                # This method is deprecated at this point. Probably won't work.
-                # cell_punchout = pyramid[cell_x-offset:cell_x+offset,cell_y-offset:cell_y+offset,pos].astype(np.uint8)
-
+            # Slice image
+            # cell_punchout = [da.from_zarr(self.session.zarr_store, n)[positions] for n in range(6)] #TODO how to know how many pyramid layers?
+            cell_punchout = self.session.dask_high_res[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
+            # print(cell_punchout)
             fluor_index = 0
             for fluor in self.data.channels: # loop through channels
                 if fluor != 'Composite':
@@ -1651,7 +1616,7 @@ class GView:
                     gamma=fluor_gamma, contrast_limits=fluor_contrast)
                 viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'minimum',
                     colormap = custom_color_functions.retrieve_cm(self.data.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
-                    gamma=fluor_gamma, contrast_limits=fluor_contrast)
+                    gamma=fluor_gamma, contrast_limits=fluor_contrast, visible = False)
                 
             else:
                 viewer.add_image(page_image_gallery[fluor], name = f"Gallery {fluor}", blending = 'additive',
@@ -1659,8 +1624,49 @@ class GView:
                     gamma=fluor_gamma, contrast_limits=fluor_contrast)
                 viewer.add_image(page_image_multichannel[fluor], name = f"Multichannel {fluor}", blending = 'additive',
                     colormap = custom_color_functions.retrieve_cm(self.data.channelColors[fluor]), scale = sc, interpolation="linear",
-                    gamma=fluor_gamma, contrast_limits=fluor_contrast)
-        # if composite_only:
+                    gamma=fluor_gamma, contrast_limits=fluor_contrast, visible = False)
+        
+
+                
+        
+        # Adding boxes around cells , text labels, and colored boxes for Gallery and Multichannel modes. 
+
+        cells['g_col'] = range(len(cells))
+        cells['g_col'] %=cpr_g
+        cells['g_row'] = range(len(cells))
+        cells['g_row'] =  cells['g_row'] // cpr_g
+
+        x1 = (cells["XMin"] +offset-cells['center_x']).astype(int).to_numpy() 
+        x2 = (cells["XMax"] +offset-cells['center_x']).astype(int).to_numpy()
+        y1 = (cells["YMin"] +offset-cells['center_y']).astype(int).to_numpy()
+        y2 = (cells["YMax"] +offset-cells['center_y']).astype(int).to_numpy()
+
+        cid_list = list(cells.index)
+        cXg = cells['g_row'].to_numpy()*(self.data.imageSize+2)
+        cYg = cells['g_col'].to_numpy()*(self.data.imageSize+2)
+        cXm = np.array(range(len(cells))) *(self.data.imageSize+2)
+        cYm = len(self.data.channels)*(self.data.imageSize+2)
+
+        a = [list(x) for x in zip(cXg+y1, cYg+x1)]
+        b = [list(x) for x in zip(cXg+y2, cYg+x2)]
+        nuclei_box_coords_g = [list(x) for x in zip(a,b)]
+        a = [list(x) for x in zip(cXm+y1, cYm+x1)]
+        b = [list(x) for x in zip(cXm+y2, cYm+x2)]
+        nuclei_box_coords_m = [list(x) for x in zip(a,b)]
+        a = [list(x) for x in zip(cXg, cYg)]
+        b = [list(x) for x in zip(cXg+(self.data.imageSize+1), cYg+(self.data.imageSize+1))]
+        status_box_coords_g = [list(x) for x in zip(a,b)]
+        a = [list(x) for x in zip(cXm, np.zeros(len(cells)))]
+        b = [list(x) for x in zip(cXm+(self.data.imageSize+1), np.repeat(cYm+101, len(cells)))]
+        status_box_coords_m = [list(x) for x in zip(a,b)]        
+        a = [list(x) for x in zip(cXg, cYg)]
+        b = [list(x) for x in zip(cXg+int(self.data.imageSize/8), cYg+int(self.data.imageSize/8))]
+        status_box_flags_g = [list(x) for x in zip(a,b)]
+        a = [list(x) for x in zip(cXm, np.zeros(len(cells)))]
+        b = [list(x) for x in zip(cXm+int(self.data.imageSize/8), np.repeat(int(self.data.imageSize/8), len(cells)))]
+        status_box_flags_m = [list(x) for x in zip(a,b)]
+
+        edge_col_list = [self.data.statuses_hex[s] for s in cells["Validation"]]
 
         features = {'cid': cid_list}
         nb_color_str = edge_col_list #'black' if self.session.absorption_mode else 'white'
@@ -1672,30 +1678,27 @@ class GView:
         nb_text = {'string':'{cid}', 'anchor':'lower_left', 'size' : 8,'translation':[-(self.data.imageSize),int(tl*1.3)], 'color':nb_color_str}
         self.session.status_text_object = nb_text
         viewer.add_shapes(nuclei_box_coords_g, name="Gallery Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
-                                            face_color='#00000000', scale=sc)
+                                            face_color='#00000000', scale=sc, visible = False)
         viewer.add_shapes(nuclei_box_coords_m, name="Multichannel Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
-                                            face_color='#00000000', scale=sc)
+                                            face_color='#00000000', scale=sc, visible = False)
         self.session.multichannel_nuclei_box_coords = nuclei_box_coords_m
 
-        # Defunct borders around each cell image. Don't think it's necessary, and definitely adds more visual clutter
-        # viewer.add_shapes(status_box_coords_g, name="Gallery Status Edges", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
-        #                                     face_color='#00000000', scale=sc, visible=False, opacity=1)
-        # viewer.add_shapes(status_box_coords_m, name="Multichannel Status Edges", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
-        #                                     face_color='#00000000', scale=sc, visible=False, opacity=1)
         viewer.add_shapes(status_box_flags_g, name="Gallery Status Squares", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
-                                            face_color=edge_col_list, scale=sc, opacity=1)
+                                            face_color=edge_col_list, scale=sc, opacity=1, visible = False)
         viewer.add_shapes(status_box_flags_m, name="Multichannel Status Squares", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
-                                            face_color=edge_col_list, scale=sc, opacity=1)
+                                            face_color=edge_col_list, scale=sc, opacity=1, visible = False)
         viewer.add_shapes(status_box_coords_g, name="Gallery Status Numbers", shape_type="rectangle", edge_width=0, face_color='#00000000',
                                                 features=features, text = nb_text,
-                                                scale=sc,  opacity=1)
+                                                scale=sc,  opacity=1, visible = False)
         viewer.add_shapes(status_box_coords_m, name="Multichannel Status Numbers", shape_type="rectangle", edge_width=0, 
                                                 features=features, text = nb_text, face_color = "#00000000",
-                                                scale=sc, opacity=1)
+                                                scale=sc, opacity=1, visible = False)
         # viewer.add_image(self.session.page_status_layers["Gallery"].astype(np.uint8), name='Gallery Status Layer', interpolation='linear', scale = sc, visible=gal_vis)
         # viewer.add_image(self.session.page_status_layers["Multichannel"].astype(np.uint8), name='Multichannel Status Layer', interpolation='linear', scale = sc, visible=mult_vis)
         # viewer.layers.selection.active = viewer.layers["Status Layer"]
         
+        # Add other layers
+        self.add_extras(cXg, cYg)
         self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]  
         #TODO make a page label... 
         # Exiting add_layers function
@@ -1914,11 +1917,13 @@ class GView:
                     self.session.cell_under_mouse = None
                     return False 
                 
-                if cell is not None:
+                if cell is not None :
                     cid = cell.name
                     
-                    
-                    if cid != self.session.cell_under_mouse.name: self.session.cell_under_mouse_changed = True
+                    # Check for same id
+                    if self.session.cell_under_mouse is not None:
+                        if cid != self.session.cell_under_mouse.name: 
+                            self.session.cell_under_mouse_changed = True
                 
                     
                     self.session.current_cells.loc[cid] = cell
@@ -2553,8 +2558,6 @@ class GView:
         cell_y = singlecell_df["center_y"]
         # Get images from dask in chosen channels
 
-        # if self.raw_pyramid is None:
-        #     # print("Using zarr/dask")
 
         sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
         # Need to know this for multichannel mode
@@ -2574,7 +2577,7 @@ class GView:
             position = self.data.channelOrder[fluor]
             if self.session.mode in ("Gallery","Context"):
                 offset = self.data.imageSize // 2
-                cell_image = self.session.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
+                cell_image = self.session.dask_high_res[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
                 imsize = self.data.imageSize
             elif self.session.mode == "Multichannel":
                 if borders != "No borders":
@@ -2583,7 +2586,7 @@ class GView:
                     imsize = self.data.imageSize
                 offset = imsize // 2
                 cell_image = np.zeros((imsize, imsize*(num_channels+1)))
-                cell_punchout = self.session.dask_array[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute()
+                cell_punchout = self.session.dask_high_res[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute()
                 # if borders != "No borders":
                 start = pos * imsize
                 end = (pos+1) * imsize
@@ -2599,7 +2602,7 @@ class GView:
                 viewer.status = "Ran into a problem: unexpected viewer mode"
                 raise ValueError(f"Unexpected session mode given: {self.session.mode}")
 
-            # self.session.dask_array[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
+            # self.session.dask_high_res[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
             if self.session.absorption_mode:
                 viewer.add_image(cell_image, name = f"Screenshot {fluor}", blending = 'minimum',
                     colormap = custom_color_functions.retrieve_cm(self.data.channelColors[fluor]+' inverse'), scale = sc, interpolation="linear",
@@ -2825,8 +2828,7 @@ class GView:
         ymin = singlecell['YMin'] ; ymax = singlecell['YMax'] 
         cname = singlecell.name
         
-        if self.raw_pyramid is None:
-            reference_pixels = self.session.dask_array[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
+        reference_pixels = self.session.dask_high_res[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
     
         plt.close() # Close a plot if it was there already
         # Assemble kwargs conditionally to pass to plotting function
@@ -2849,8 +2851,7 @@ class GView:
                 xmin = cell['XMin'] ; xmax = cell['XMax'] 
                 ymin = cell['YMin'] ; ymax = cell['YMax']
                 
-                if self.raw_pyramid is None:
-                    cell_punchout = self.session.dask_array[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
+                cell_punchout = self.session.dask_high_res[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
                 cflat = [cell_punchout[x,:,:].flatten() for x in tuple(range(len(self.data.channels)))]
                 collected = np.concatenate((collected,cflat),axis=1) if count !=0 else cflat
                 count +=1
@@ -3066,7 +3067,7 @@ class GView:
             @viewer.bind_key(str(position+1), overwrite=True)
             def toggle_channel_visibility(viewer,pos=position,chn=channel):
                 
-                widget_obj = self.updated_checkboxes[pos]
+                widget_obj = self.channel_buttons[pos]
                 if widget_obj.isChecked():
                     widget_obj.setChecked(False)
                 else:
@@ -3075,7 +3076,7 @@ class GView:
                 viewer.window._qt_viewer.setFocus()
             return toggle_channel_visibility
 
-        for pos, chn in enumerate(self.updated_checkboxes):
+        for pos, chn in enumerate(self.channel_buttons):
             binding_func_name = f'{chn}_box_func'
             exec(f'globals()["{binding_func_name}"] = create_fun({pos},"{chn}")')
             
@@ -3091,31 +3092,29 @@ class GView:
         
         # None means 'don't do it', while a channel name means 'put highest at the top'
         if sort_by_intensity is None:
-            sort_by_intensity = "Object Id"
+            sort_by_intensity = self.data.idcol
         else:
             sort_by_intensity = sort_by_intensity
     
-        print(f"SORTBYINTENSITY IS {sort_by_intensity}")
 
         # get defaults from global space
         if page_size is None: page_size=self.data.page_size # Number of cells to be shown
         if phenotypes is None: phenotypes=list(self.data.phenotype_mappings.keys())
         if annotations is None: annotations=list(self.data.annotation_mappings.keys())  # Name of phenotype of interest
         # print(f'ORDERING PARAMS: id start: {cell_id_start}, page size: {page_size}, direction: {direction}, change?: {change_startID}')
-        halo_export = self.data.objectDataFrame.copy()
-        print(f"HALO export info {halo_export.info()}")
-
+        df = self.data.objectDataFrame.copy()
+        
         # Check for errors:
         for ph in phenotypes:
-            if ph not in list(halo_export.columns):
+            if ph not in list(df.columns):
                 raise KeyError
-        if len(annotations) >0 and ('Analysis Region' not in list(halo_export.columns)):
+        if len(annotations) >0 and ('Analysis Region' not in list(df.columns)):
             raise KeyError
 
 
         # Get relevant columns for intensity sorting
         # TODO make this conditional, and in a try except format
-        headers = pd.read_csv(self.data.objectDataPath, index_col=False, nrows=0).columns.tolist() 
+        headers = self.data.objectDataFrame.columns.tolist() 
         possible_fluors = self.data.possible_fluors_in_data
         suffixes = ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity']
         all_possible_intensities = [x for x in headers if (any(s in x for s in suffixes) and (any(f in x for f in possible_fluors)))]
@@ -3126,9 +3125,10 @@ class GView:
         v = list(self.data.statuses.keys())
         validation_cols = [f"Validation | " + s for s in v]
         self.session.validation_columns = validation_cols
-        cols_to_keep = ["gvid", "Validation","Object Id", "Analysis Region", "Notes", "XMin","XMax","YMin", "YMax"] + phenotypes + all_possible_intensities + validation_cols
-        cols_to_keep = halo_export.columns.intersection(cols_to_keep)
-        halo_export = halo_export.loc[:, cols_to_keep]
+        cols_to_keep = ["gvid", "Validation",self.data.idcol, "Analysis Region", "Notes", "XMin","XMax","YMin", "YMax"] \
+            + phenotypes + all_possible_intensities + validation_cols + self.data.extra_columns
+        cols_to_keep = df.columns.intersection(cols_to_keep)
+        df = df.loc[:, cols_to_keep]
 
         #TODO Need to generalize this better. Should do the work to place candidate values in the dropdown menu in the user GUI
         #   Then, user can pick and we don't have to consider anything else here since we know that the sort column passed is valid and the user
@@ -3149,12 +3149,12 @@ class GView:
                 global_sort_status = False
                 self.viewer.status = 'Global sort failed. Will sort by Cell Id instead.'
                 
-                _sort =  ["Analysis Region","Object Id"] if annotations else 'Object Id'
+                _sort =  ["Analysis Region",self.data.idcol] if annotations else self.data.idcol
                 _asc = True
         else:
-            _sort =  ["Analysis Region","Object Id"] if annotations else 'Object Id'
+            _sort =  ["Analysis Region",self.data.idcol] if annotations else self.data.idcol
             _asc = True
-        halo_export = halo_export.sort_values(by = _sort, ascending = _asc, kind = 'mergesort')
+        df = df.sort_values(by = _sort, ascending = _asc, kind = 'mergesort')
 
         # Helper to construct query string that will subset dataframe down to cells that 
         #   are positive for a phenotype in the list, or a member of an annotation layer in the list
@@ -3186,9 +3186,9 @@ class GView:
         # print('page code start')
         # Apply filters here
         if annotations or phenotypes:
-            phen_only_df = halo_export.query(_create_anno_pheno_query(annotations,phenotypes))
+            phen_only_df = df.query(_create_anno_pheno_query(annotations,phenotypes))
         else:
-            phen_only_df = halo_export
+            phen_only_df = df
         if self.data.filters:
             phen_only_df = phen_only_df.query(_create_filter_query(self.data.filters))
 
@@ -3216,7 +3216,7 @@ class GView:
                 
                 #TODO fix this
                 singlecell_df = phen_only_df.loc[cid]
-                page_number = singlecell_df.iloc[0]["Page"] # Converts single row dataframe to series and fetches the page value
+                page_number = singlecell_df["Page"] # Converts single row dataframe to series and fetches the page value
 
                 print("This 'page number' should be a number, not a series")
                 print(page_number)
@@ -3249,8 +3249,8 @@ class GView:
         # Reorder cells in the page according to user input
         if sort_by_intensity is not None: # should never be none
             try:    
-                if sort_by_intensity == "Object Id":
-                    _sort = ["Analysis Region",'Object Id'] if self.data.analysisRegionsInData else 'Object Id'
+                if sort_by_intensity == self.data.idcol:
+                    _sort = ["Analysis Region",self.data.idcol] if self.data.analysisRegionsInData else self.data.idcol
                     _asc = True
                 else:
                     # First, check if a custom name was used.
@@ -3262,10 +3262,11 @@ class GView:
                     self.viewer.status = f"Unable to sort this page by '{sort_by_intensity}', will use ID instead. Check your data headers."
                 else:
                     self.viewer.status = f"Unable to sort everything by '{sort_by_intensity}', will use ID instead. Check your data headers."
-                _sort = ["Analysis Region",'Object Id'] if self.data.analysisRegionsInData else 'Object Id'
+                _sort = ["Analysis Region",self.data.idcol] if self.data.analysisRegionsInData else self.data.idcol
                 _asc = True
             cell_set = cell_set.sort_values(by = _sort, ascending = _asc, kind = 'mergesort')
-        
+        print("WRITING")
+        self.session.session_cells.to_csv("sc.csv")
         self.session.current_cells = cell_set.copy()
         self.session.page_cells = cell_set.copy()
         self.session.cell_under_mouse = cell_set.iloc[0] # Set first cell in list as "current" to avoid exceptions
@@ -3291,6 +3292,64 @@ class GView:
             self.viewer.status = 'Error recording note: Cell Id not found in list'
 
 
+
+from matplotlib.widgets import LassoSelector
+from matplotlib.path import Path
+
+class SelectFromCollection:
+    """
+    Select indices from a matplotlib collection using `LassoSelector`.
+
+    Selected indices are saved in the `ind` attribute. This tool fades out the
+    points that are not part of the selection (i.e., reduces their alpha
+    values). If your collection has alpha < 1, this tool will permanently
+    alter the alpha values.
+
+    Note that this tool selects collection objects based on their *origins*
+    (i.e., `offsets`).
+
+    Parameters
+    ----------
+    ax : `~matplotlib.axes.Axes`
+        Axes to interact with.
+    collection : `matplotlib.collections.Collection` subclass
+        Collection you want to select from.
+    alpha_other : 0 <= float <= 1
+        To highlight a selection, this tool sets all selected points to an
+        alpha value of 1 and non-selected points to *alpha_other*.
+    """
+
+    def __init__(self, ax, collection, alpha_other=0.3):
+        self.canvas = ax.figure.canvas
+        self.collection = collection
+        self.alpha_other = alpha_other
+
+        self.xys = collection.get_offsets()
+        self.Npts = len(self.xys)
+
+        # Ensure that we have separate colors for each object
+        self.fc = collection.get_facecolors()
+        if len(self.fc) == 0:
+            raise ValueError('Collection must have a facecolor')
+        elif len(self.fc) == 1:
+            self.fc = np.tile(self.fc, (self.Npts, 1))
+
+        self.lasso = LassoSelector(ax, onselect=self.onselect)
+        self.ind = []
+
+    def onselect(self, verts):
+        path = Path(verts)
+        self.ind = np.nonzero(path.contains_points(self.xys))[0]
+        self.fc[:, -1] = self.alpha_other
+        self.fc[self.ind, -1] = 1
+        self.collection.set_facecolors(self.fc)
+        self.canvas.draw_idle()
+
+    def disconnect(self):
+        self.lasso.disconnect_events()
+        self.fc[:, -1] = 1
+        self.collection.set_facecolors(self.fc)
+        self.canvas.draw_idle()
 ###################################################
 #                 Viewer Subclasses
 ###################################################
@@ -3302,8 +3361,558 @@ class HaloView(GView):
 
 class CosMxView(GView):
     def __init__(self, gvdata: storage_classes.GVData, gvui):
-        super().__init__(gvdata, gvui)
         self.gvmode = "CosMx"
+        self.fov_offsets = gvdata.fov_offsets
+        self.cmeta = gvdata.cmeta
+        self.mm_per_px = gvdata.mm_per_px
+        self.px_per_mm = gvdata.px_per_mm
+        self.pqds = gvdata.pqds
+        super().__init__(gvdata, gvui)
+
+
+
+    def get_dask_array(self):
+        dask_list = []
+        for _, folder in self.data.channelFolders.items():
+            metadata = zarr.open(self.data.image_path, mode = 'r+',)[folder].attrs
+            datasets = metadata["multiscales"][0]["datasets"]
+            im = [da.from_zarr(os.path.join(self.data.image_path,folder), component=d["path"]) for d in datasets]
+            dask_list.append(im)
+        return dask_list
+    
+    def get_dask_high_res(self):
+        dask_list = []
+        for _, folder in self.data.channelFolders.items():
+            metadata = zarr.open(self.data.image_path, mode = 'r+',)[folder].attrs
+            im = da.from_zarr(os.path.join(self.data.image_path,folder), component=metadata["multiscales"][0]["datasets"][0]["path"]) 
+            dask_list.append(im)
+        return dask_list
+    
+    ''' Overridden GView functions'''
+    def _read_image(self):
+        self.session.dask_high_res = da.stack(self.get_dask_high_res(), axis = 0) # Saves a path to the image data that can be used later
+        self.session.dask_list = self.get_dask_array()
+
+    def add_extras(self, x, y):
+        for tx in self.data.transcripts:
+            self.get_gallery_tx(self.session.page_cells, tx, self.data.imageSize//2,x, y)
+            self.add_slide_tx(tx)
+
+
+    ''' FOV stuff '''
+    def get_offsets(self, fov):
+        """Get offsets for given FOV
+
+        Args:
+            fov (int): FOV number
+
+        Returns:
+            tuple: x and y offsets in mm
+        """
+        offset = self.fov_offsets[self.fov_offsets['FOV'] == fov]
+        if offset.empty:
+            raise ValueError(f"FOV {fov} is not in the data")
+        x_offset = offset.iloc[0, ]["Y_mm"]
+        y_offset = -offset.iloc[0, ]["X_mm"]
+        return (x_offset, y_offset)
+
+    def rect_for_fov(self, fov):
+        fov_height = self.cmeta['fov_height']* self.mm_per_px
+        fov_width = self.cmeta['fov_width']* self.mm_per_px
+        rect = np.array([
+            list(self.get_offsets(fov)),
+            list(map(sum, zip(self.get_offsets(fov), (fov_height, 0)))),
+            list(map(sum, zip(self.get_offsets(fov), (fov_height, fov_width)))),
+            list(map(sum, zip(self.get_offsets(fov), (0, fov_width))))
+        ])
+        topleft = (min(self.fov_offsets['Y_mm']), -max(self.fov_offsets['X_mm']))
+        y_offset = topleft[0]
+        x_offset = topleft[1]
+        return [[i[0] - y_offset, i[1] - x_offset] for i in rect]
+
+    def add_fov_labels(self, view: napari.Viewer, tx_names = [], limits:tuple | None = None, cm = "inferno"):
+        topleft = (min(self.fov_offsets['Y_mm']), -max(self.fov_offsets['X_mm']))
+        rects = [self.rect_for_fov(i) for i in self.fov_offsets['FOV']]
+
+        text_parameters = {
+            'text': 'label',
+            'size': 12,
+            'color': 'white'
+        }
+
+        if tx_names != []:
+            pts = self.pqds.to_table(filter= (ds.field('target').isin(tx_names)), columns=['fov']).to_pandas()
+            values = pts.fov.value_counts().sort_index().to_numpy()
+            if limits is not None:
+                if len(limits) != 2:
+                    raise ValueError("Limits should be a tuple of two numbers")
+                values = np.clip(values,*limits)
+
+            shape_properties = {
+                'label': self.fov_offsets['FOV'].to_numpy(),
+                'n_transcripts' : values
+            }
+            shapes_layer = view.add_shapes(rects,
+                face_color='n_transcripts',
+                face_colormap= cm,
+                edge_color='white',
+                edge_width=0.02,
+                properties=shape_properties,
+                text = text_parameters,
+                name = 'FOV labels',
+                # translate=self._top_left_mm(),
+                # rotate=self.rotate
+            )
+        else:
+            shape_properties = {
+                'label': self.fov_offsets['FOV'].to_numpy()
+            }
+            shapes_layer = view.add_shapes(rects,
+                face_color='#90ee90',
+                edge_color='white',
+                edge_width=0.02,
+                properties=shape_properties,
+                text = text_parameters,
+                name = 'FOV labels',
+                # translate=self._top_left_mm(),
+                # rotate=self.rotate
+            )
+        shapes_layer.opacity = 0.5
+        shapes_layer.editable = False
+        return shapes_layer
+
+    def center_fov(self, view: napari.Viewer, fov:int, buffer:float=1.0):
+        """Center FOV in canvas and zoom to fill
+
+        Args:
+            fov (int): FOV number
+            buffer (float): Buffer size for zoom. < 1 equals zoom out.
+        """        
+        # topleft = (min(fov_offsets['Y_mm']), -max(fov_offsets['X_mm'])) This is dumb???
+        topleft = 0
+        extent = [np.min(self.rect_for_fov(fov), axis=0) + topleft,
+            np.max(self.rect_for_fov(fov), axis=0) + topleft]
+        size = extent[1] - extent[0]
+        view.camera.center = np.add(extent[0], np.divide(size, 2))
+        view.camera.zoom = np.min(np.array(view._canvas_size) / size) * buffer
+
+    ''' Image functions '''
+
+    def slice_fov_dask(self, dask_list, fov):
+        top_origin_px = min(self.fov_offsets['Y_mm'])*self.px_per_mm - self.cmeta['fov_height']
+        left_origin_px = max(self.fov_offsets['X_mm'])*self.px_per_mm
+        y = round((self.fov_offsets[self.fov_offsets['FOV'] == fov].iloc[0, ]["Y_mm"]*self.px_per_mm - self.cmeta['fov_height']) - top_origin_px)
+        x = round(left_origin_px - self.fov_offsets[self.fov_offsets['FOV'] == fov].iloc[0, ]["X_mm"]*self.px_per_mm)
+        fov_shrink_factors = [2**i for i in range(len(dask_list))]
+        return [layer[y//sf:(y//sf) + (self.cmeta['fov_height']//sf), x//sf:(x//sf) + (self.cmeta['fov_width'] // sf)] for sf, layer in zip(fov_shrink_factors,dask_list) ]
+
+    def add_cell_leiden(self, view:napari.Viewer, layername = "leiden",colname = "Selected",colvalues = [True], filled = True, fov = None):
+        adata = self.adata
+        leiden_color = {k:transform_color(v).ravel().tolist() for k,v in enumerate(adata.uns['leiden_colors'])}
+        cell_colors = {cid: leiden_color[l] for cid, l in zip(adata.obs.global_ID.tolist(), adata.obs.leiden.astype(int).tolist())}
+        background =  {0:[0,0,0,0]}
+        background.update(cell_colors)
+        cell_colors = background
+        if colname is not None:
+            assert(colname in adata.obs.columns)
+            exclude = {cid: [0,0,0,0] for cid in adata.obs.loc[~adata.obs["Selected"].isin(colvalues), "global_ID"].tolist()}
+            cell_colors.update(exclude)
+
+        metadata = zarr.open(self.data.imagepath, mode = 'r+',)["labels"].attrs
+        datasets = metadata["multiscales"][0]["datasets"]
+        im = [da.from_zarr(os.path.join(self.data.imagepath,"labels"), component=d["path"]) for d in datasets]
+        if fov is not None:
+            im = self.slice_fov_dask(im, fov)
+        if not filled:
+            def _keep_labels_erosion(labels):
+                borders = find_boundaries(labels)
+                return borders * labels
+            im = [x.map_blocks(_keep_labels_erosion) for x in im]
+        return view.add_labels(im,name=layername, color = cell_colors, scale = (self.mm_per_px, self.mm_per_px), metadata=metadata)
+
+    ''' Method in gemini.py, designed by nanostring'''
+    def add_cell_leiden2(self, view:napari.Viewer, layername = "leiden",colname = "Selected",colvalues = [True], filled = True, fov = None):
+        adata = self.adata
+        leiden_color = {k:transform_color(v).ravel().tolist() for k,v in enumerate(adata.uns['leiden_colors'])}
+        cell_colors = {cid: leiden_color[l] for cid, l in zip(adata.obs.global_ID.tolist(), adata.obs.leiden.astype(int).tolist())}
+        # cell_leiden = cell_colors = {cid: l for cid, l in zip(adata.obs.global_ID.tolist(), adata.obs.leiden.astype(int).tolist())}
+        background =  {0:[0,0,0,0]}
+        background.update(cell_colors)
+        cell_colors = background
+        if colname is not None:
+            assert(colname in adata.obs.columns)
+            exclude = {cid: [0,0,0,0] for cid in adata.obs.loc[~adata.obs["Selected"].isin(colvalues), "global_ID"].tolist()}
+            cell_colors.update(exclude)
+
+        metadata = zarr.open(self.data.imagefolder, mode = 'r+',)["labels"].attrs
+        datasets = metadata["multiscales"][0]["datasets"]
+        im = [da.from_zarr(os.path.join(self.data.imagefolder,"labels"), component=d["path"]) for d in datasets]
+
+
+        def color_labels(labels, cell_dict, fill):
+
+            if not fill:
+                borders = find_boundaries(labels)
+                labels = borders * labels
+
+            u, inv = np.unique(labels, return_inverse = True)
+            image = np.array(
+            [cell_dict[x] if x in cell_dict else 0 for x in u
+            ])[inv].reshape(labels.shape)
+            
+            return image
+        
+
+        if fov is not None:
+            im = self.slice_fov_dask(im, fov)
+
+        custom_colormap, color_mappings = color_dict_to_colormap(cell_colors)
+
+        im = [x.map_blocks(lambda x: color_labels(x, color_mappings, filled)) for x in im]
+        return  view.add_image(im, name = layername,
+                blending="translucent",
+                opacity = 0.75,
+                contrast_limits=(0,1),
+                colormap=custom_colormap,
+                cache=True,
+                scale = (self.mm_per_px, self.mm_per_px),
+                rgb=False)
+
+    def add_cell_leiden3(self, view:napari.Viewer, layername = "leiden",colname = "Selected",colvalues = [True], filled = True, fov = None):
+        adata = self.adata
+        metadata = zarr.open(self.data.imagefolder, mode = 'r+',)["labels"].attrs
+        datasets = metadata["multiscales"][0]["datasets"]
+        im = [da.from_zarr(os.path.join(self.data.imagefolder,"labels"), component=d["path"]) for d in datasets]
+
+        def _remove_bg_cells_and_fill(_labels, _population, _filled ):
+            _labels[~np.isin(_labels, _population)] = 0 # Cells not in population will be treated as background and not colored
+            if not _filled:
+                borders = find_boundaries(_labels)
+                return borders * _labels
+            else:
+                return _labels
+
+        if fov is not None:
+            im = self.slice_fov_dask(im, fov)
+            population = adata.obs.loc[(adata.obs[colname].isin(colvalues)) & (adata.obs['fov'] == str(fov)), "global_ID"].to_numpy() 
+        else:
+            population = adata.obs.loc[adata.obs[colname].isin(colvalues), "global_ID"].to_numpy() 
+
+            leiden_color = {k:transform_color(v).ravel().tolist() for k,v in enumerate(adata.uns['leiden_colors'])}
+        if colname is not None:
+            assert colname in adata.obs.columns, f"Column {colname} not in adata"
+            cell_colors = {cid: leiden_color[l] for cid, l in zip(adata.obs.loc[adata.obs[colname].isin(colvalues), "global_ID"].tolist(), adata.obs.leiden.astype(int).tolist())}
+        else:
+            pass
+        cell_colors = {cid: leiden_color[l] for cid, l in zip(population, adata.obs.leiden.astype(int).tolist())}
+        cell_colors = {cid: leiden_color[l] for cid, l in zip(population, adata.obs.leiden.astype(int).tolist())}
+        # Add bg color 
+        background =  {0:[0,0,0,0]}
+        background.update(cell_colors)
+        cell_colors = background
+
+        im = [x.map_blocks(lambda: _remove_bg_cells_and_fill(x, population, filled)) for x in im]
+        return view.add_labels(im,name=layername, color = cell_colors, scale = (self.mm_per_px, self.mm_per_px), metadata=metadata)
+
+    def add_cell_metadata_labels(self, view:napari.Viewer,meta: pd.DataFrame,colname = "Selected",colvalues = [True], layername = "Custom", cm = "gray", filled = True, fov = None):
+        metadata = zarr.open(self.data.imagefolder, mode = 'r+',)["labels"].attrs
+        datasets = metadata["multiscales"][0]["datasets"]
+
+        def _filter_labels(labels, _population, _filled):
+            labels[~np.isin(labels, _population)] = 0
+            if _filled:
+                return rescale_intensity(labels, out_range = (0,(2**8)-1)).astype(np.uint8)
+            else:
+                return find_boundaries(labels)
+            
+        im = [da.from_zarr(os.path.join(self.data.imagefolder,"labels"), component=d["path"]) for d in datasets]
+        # im = da.from_zarr(os.path.join(self.data.imagefolder,"labels"), 
+        #     component=datasets[0]["path"])
+        
+        # fov_im = slice_fov_dask(im,fov)
+        if fov is not None:
+            im = self.slice_fov_dask(im, fov)
+            population = meta.loc[(meta[colname].isin(colvalues)) & (meta['fov'] == str(fov)), "global_ID"].to_numpy() 
+        else:
+            population = meta.loc[meta[colname].isin(colvalues), "global_ID"].to_numpy() 
+        
+        im = [x.map_blocks(lambda x: _filter_labels(x, population, filled)) for x in im]
+        # cm = Colormap(['transparent', cm], controls = [0.0, 1.0])
+        # scaled = rescale_intensity(im, out_range = (0,(2**8)-1)).astype(np.uint8)
+        layer = view.add_image(im, name=layername, multiscale=True,
+            colormap=cm, 
+            blending="additive",
+            opacity = 0.5,
+            scale = (self.mm_per_px,self.mm_per_px),
+            rgb=False,
+            metadata=metadata)
+        return layer
+
+    def add_cell_labels(self, view:napari.Viewer, layername = "outlines", cm = "gray", fov = None):
+        metadata = zarr.open(self.data.imagefolder, mode = 'r+',)["labels"].attrs
+        datasets = metadata["multiscales"][0]["datasets"]
+        im = [da.from_zarr(os.path.join(self.data.imagefolder,"labels"), component=d["path"]).map_blocks(find_boundaries)
+            for d in datasets]
+        if fov is not None:
+            im = self.slice_fov_dask(im, fov)
+        cm = Colormap(['transparent', cm], controls = [0.0, 1.0])
+        layer = view.add_image(im, name=layername, multiscale=True,
+            colormap=cm, 
+            blending="translucent",
+            opacity = 0.5,
+            scale = (self.mm_per_px,self.mm_per_px),
+            rgb=False,
+            metadata=metadata)
+        return layer
+
+    def add_zarr_layer(self, view: napari.Viewer,name = 'U', layername = "DAPI", cm = "blue", fov = None):
+        if(name == "labels"):
+            return self.add_cell_labels(view,layername, cm,fov)
+        metadata = zarr.open(self.data.imagefolder, mode = 'r+',)[name].attrs
+        # track updates to contrast limits and colormap
+        
+
+        datasets = metadata["multiscales"][0]["datasets"]
+        im = [da.from_zarr(os.path.join(self.data.imagefolder,name), component=d["path"]) for d in datasets]
+        
+        if fov is not None:
+            im = self.slice_fov_dask(im, fov)
+
+        window = metadata['omero']['channels'][0]['window']
+        layer = view.add_image(im, name=layername, multiscale=True,
+            colormap=cm, blending="additive",
+            contrast_limits = (window['start'],window['end']),
+            scale = (self.mm_per_px,self.mm_per_px),
+            # translate=self._top_left_mm(), 
+            # rotate=self.rotate,
+            rgb=False,
+            metadata=metadata)
+        layer.contrast_limits_range = window['min'],window['max']
+        return layer
+
+    def update_viewer(self, view, lparams, fov = None):
+        layers = [self.add_zarr_layer(view, *args, fov = fov) for args in lparams]
+        return layers
+    
+    ''' Transcript functions '''
+
+    def get_gallery_tx(self, cells:pd.DataFrame, tx_name: str, offset: int, yadj:int, xadj:int, color: str = 'white', psize:int = 12):
+        pts = None
+        #TODO it's wrong
+        for i, (_, cell) in enumerate(cells.iterrows()):
+            # 
+            cx = cell['fovX']
+            cy = cell['fovY']
+            cfov = cell['fov']
+            cpts = self.pqds.to_table(filter= (ds.field('target') == tx_name) & (ds.field('fov') == int(cfov)) & (ds.field('x') < cx+offset) & (ds.field('x') > cx-offset) & (ds.field('y') < cy+offset) & (ds.field('y') > cy-offset), columns=['y', 'x']).to_pandas().to_numpy()
+            cpts[:,0] = cpts[:,0] - (cy-offset) + yadj[i] 
+            cpts[:,1] = cpts[:,1] - (cx-offset) + xadj[i]
+            pts = np.concatenate([pts, cpts]) if pts is not None else cpts
+        sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
+        return self.viewer.add_points(pts, name=f'Gallery {tx_name}', face_color= color, size = psize, scale= sc)
+            
+
+    def get_tx(self, tx_name, fov = None, extra_columns = []):
+        topleft = (min(self.fov_offsets['Y_mm']), -max(self.fov_offsets['X_mm']))
+        if fov:
+            ec = [col for col in extra_columns if col not in ['x','y']]
+            pts = self.pqds.to_table(filter= (ds.field('target') == tx_name) & (ds.field('fov') == fov), columns=['x','y']+ec ).to_pandas()
+            yx = np.array([pts.y.to_numpy(), pts.x.to_numpy()]).transpose()
+        else:
+            ec = [col for col in extra_columns if col not in ['fov','x','y']]  
+            pts = self.pqds.to_table(filter= (ds.field('target') == tx_name), columns=['fov','x', 'y'] + ec ).to_pandas()
+            pts = pd.merge(pts, self.fov_offsets[["FOV","X_mm","Y_mm"]], left_on='fov',right_on='FOV', how='left')
+            yx = np.array([pts.y.to_numpy() + pts.Y_mm.to_numpy()*(1/self.mm_per_px) - topleft[0]*(1/self.mm_per_px),
+                    pts.x.to_numpy() - pts.X_mm.to_numpy()*(1/self.mm_per_px) - topleft[1]*(1/self.mm_per_px)]).transpose()
+        if extra_columns:
+            return yx, pts[extra_columns]
+        else:
+            return yx
+
+    def add_slide_tx(self, tx_name, fov = None, col = 'white',cm = 'viridis', psize = 20):
+        view = self.viewer
+        sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
+        if col in self.pqds.schema.names:
+            pts, feat = self.get_tx(tx_name, fov, extra_columns=[col])
+            if feat[col].dtype == "object":
+                feat = feat.transform(lambda x: pd.CategoricalIndex(x).codes + 1)
+            feat = feat[[col]].to_numpy().ravel() # Flatten to 1D
+                                            
+            ptprops = {col : rescale_intensity(feat, out_range = (0,1.0))} # Scale 0 to 1 is expected for colors.
+            return view.add_points(pts, name=f'Context {tx_name}', face_color=col, face_colormap= cm, properties=ptprops,  edge_color="white",
+                        size = psize, scale= sc) 
+        else:
+            return view.add_points(self.get_tx(tx_name, fov),
+                    name=f'Context {tx_name}', face_color= col, size = psize, scale= sc)
+
+    def add_tx_heatmap(self, view: napari.Viewer, tx_name, imshape, fov=None, kind = ["contour"], scale_kde = True,
+                    scale_kde_limits = (25, 500),
+                    kdekws = {"colormap" : "magma", "blending":"translucent", "opacity" : 0.4}, 
+                    contourkws = {"colormap":"magma","blending":"additive", "linewidth":5, "pcts" : [0.25,0.5,0.6,0.7,0.8,0.9]}, 
+                    vectorkws = {"edge_colormap":"turbo", "vector_style":"arrow","edge_width":10,"blending":"translucent","opacity":0.85,
+                                    "step_size" : 20, "magnitude_scalar" : 0.85}):
+        if fov == None:
+            print("Can't do a kde for the full CosMx stitched image")
+            return None
+
+        return_layers = tuple() # add pointers to layers created and return to caller
+        # Peform the kernel density estimate
+        pts = self.get_tx(tx_name, fov)
+        x = pts[:,0]
+        y = pts[:,1]
+        xmin, xmax = 0, imshape[0]
+        ymin, ymax = 0, imshape[1]
+
+        xx, yy = np.mgrid[xmin:xmax:100j, ymin:ymax:100j]
+        positions = np.vstack([xx.ravel(), yy.ravel()])
+        values = np.vstack([x, y])
+        kernel = st.gaussian_kde(values)
+        f = np.reshape(kernel(positions).T, xx.shape)
+
+        scaled = resize(f,(imshape[0]//2, imshape[1]//2) )
+        kde = rescale_intensity(scaled, out_range = (0,(2**16)-1)).astype(np.uint16)
+        grad = np.gradient(kde)
+        # Method: scale the KDE image to a range where the highest value represents the number of transcripts that you would find in 
+        #   the FOV if the whole FOV had the density of the top 90%
+        #   Then, set contrast limits equal to the user defined transcripts per FOV density. 
+        if scale_kde:
+            thresh = 0.9 * ((2**16)-1)
+            lbl = kde.copy()
+            lbl[lbl < thresh] = 0
+            lbl[lbl >=thresh] = 1
+            coords_int = np.round(pts/2).astype(int)
+            tx_by_containing_region = lbl[tuple(coords_int.T)]
+            region_tx = np.unique(tx_by_containing_region, return_counts = True)[1][1]
+            region_size_px = np.unique(lbl, return_counts = True)[1][1]
+            region_size_um = region_size_px * self.mm_per_px * 1_000
+            tx_per_um = region_tx / region_size_um
+            tx_per_fov = region_tx * (kde.shape[0]*kde.shape[1] /region_size_px)
+            # 0.0015 tx per pixel is high? number for Line1 in FOV 127 
+            # 0.00013 is low? FOXP3 in 127
+            low = scale_kde_limits[0]
+            high = scale_kde_limits[1]
+            # kde = (kde * min(1, max(tx_per_um,low) / high)).astype(np.uint16)
+            kde_range = (0,tx_per_fov)
+            kde = rescale_intensity(kde, out_range = kde_range).astype(np.uint16)
+            tx_name = f'{tx_name} scaled'
+            cl = scale_kde_limits
+            magnitude_scalar = min(1, tx_per_fov/scale_kde_limits[1]) 
+        else:
+            kde_range = (0, (2**16)-1)
+            cl = None
+
+        if "kde" in kind:
+            kdekws = copy.copy(kdekws)
+            out = view.add_image(kde, name = f"{tx_name} kde",scale = (self.mm_per_px*2,self.mm_per_px*2),contrast_limits=cl, **kdekws)
+            return_layers += tuple([out])
+
+        if "contour" in kind:
+            contourkws = copy.copy(contourkws)
+            pcts = contourkws.pop("pcts")
+            linewidth = contourkws.pop("linewidth")
+            contours = np.zeros(kde.shape, kde.dtype)
+            for thresh in pcts:
+                thresh = thresh * kde.max()
+                lbl = kde.copy()
+                lbl[lbl < thresh] = 0
+                lbl[lbl >=thresh] = 1
+                bord = find_boundaries(lbl).astype(kde.dtype)
+                contours = np.bitwise_or(contours,kde * binary_dilation(bord, footprint = disk(linewidth)))
+            out = view.add_image(contours, name = f"{tx_name} contour", scale = (self.mm_per_px*2,self.mm_per_px*2),contrast_limits=cl, **contourkws)
+            return_layers += tuple([out])
+        
+        if "vector" in kind:
+            vectorkws = copy.copy(vectorkws)
+            step_size = vectorkws.pop("step_size")
+            if scale_kde:
+                magnitude_scalar = magnitude_scalar 
+                vectorkws.pop("magnitude_scalar")
+            else:
+                magnitude_scalar = vectorkws.pop("magnitude_scalar")
+            
+            mgrad  =  np.stack((grad[0],grad[1]),axis=2) * -1 * magnitude_scalar
+            step = mgrad.shape[0] // step_size
+            vector_grid = mgrad[step:-step:step, step:-step:step] # samples points in a step x step grid. Don't include the border samples (prevent edge effects)
+            distances = vector_grid.reshape(vector_grid.shape[0]**2, 2)
+            grid_coords = []
+            steps = range(step,len(mgrad)-step, step)
+            for x in steps:
+                for y in steps:
+                    grid_coords.append([x,y])
+            grid_coords = np.array(grid_coords)
+            #loop
+            # grid_coords = np.array([[x,y] for x in steps for y in steps])
+            vectors = np.stack((grid_coords,distances),axis=1)
+            vprops = {"magnitude" : np.linalg.norm(distances, axis = 1)}
+            cl = (0,step) if scale_kde else None # Color scale the vectors if needed. KDE scaling already controls the magnitudes.
+            out = view.add_vectors(vectors,name = f"{tx_name} vectors",properties = vprops, 
+                    edge_contrast_limits= cl, scale = (self.mm_per_px*2,self.mm_per_px*2), **vectorkws)
+            return_layers += tuple([out])
+        
+        if not return_layers:
+            # Caller did not specify a valid kind of plot
+            raise ValueError("Argument 'kind' needs to be one of ['kde','contour', 'vector']")
+        else:
+            return return_layers
+
+    def interactive_umap(self, adata, figure_color = "leiden", alpha_for_nonselected = 0.3):
+        fig = sc.pl.umap(adata,color=figure_color,wspace=0.4,legend_loc = 'on data',legend_fontoutline = 2, size = 15,return_fig = True )
+        ax = fig.get_axes()[0]
+
+        selector = SelectFromCollection(ax, ax.collections[0], alpha_other = alpha_for_nonselected)
+
+        def accept(event):
+            if event.key == "enter":
+                print("Selection made.")
+                adata.obs["Selected"] =  False
+                adata.obs.iloc[selector.ind, adata.obs.columns.get_loc("Selected")] = True
+                # selector.disconnect() # Not doing this allows for re-selection
+                ax.set_title(f"Selected {len(selector.ind)} cells.")
+                fig.canvas.draw()
+        fig.canvas.mpl_connect("key_press_event", accept)
+        ax.set_title("Press enter to accept selected points.")
+        plt.show()
+
+    def auto_interactive_umap(self, view: napari.Viewer, adata: ad.AnnData, fov = 1, figure_color = "leiden", labels_color = 'cyan', alpha_for_nonselected = 0.1, borders_only = False,psize = 15, method = 1):
+        if isinstance(adata.obs.dtypes.loc[figure_color] , pd.CategoricalDtype):
+            fig = sc.pl.umap(adata,color=figure_color,wspace=0.4,legend_loc = 'on data',legend_fontoutline = 2, size = psize,return_fig = True )
+        else:
+            fig = sc.pl.umap(adata,color=figure_color,wspace=0.4, size = psize,return_fig = True ) # Can't get opacity to work for non-categorical data
+        ax = fig.get_axes()[0]
+        selector = SelectFromCollection(ax, ax.collections[0], alpha_other = alpha_for_nonselected)
+
+        def accept(event):
+            if event.key == "enter":
+                print("Selection made.")
+                adata.obs["Selected"] =  False
+                adata.obs.iloc[selector.ind, adata.obs.columns.get_loc("Selected")] = True
+                # selector.disconnect() # Not doing this allows for re-selection
+
+                # If layer is already here, delete
+
+                if labels_color == 'leiden':
+                    try:
+                        view.layers.remove(view.layers["leiden"])
+                    except KeyError:
+                        pass
+                    if method ==2:
+                        self.add_cell_leiden2(view, adata, fov=fov, filled = not borders_only)
+                    else:
+                        self.add_cell_leiden(view, adata, fov=fov, filled = not borders_only)
+                else:
+                    try:
+                        view.layers.remove(view.layers["Custom"])
+                    except KeyError:
+                        pass
+                    self.add_cell_metadata_labels(view, adata.obs, cm = labels_color, fov = fov, filled = not borders_only)
+                
+                ax.set_title(f"Selected {len(selector.ind)} cells.")
+                fig.canvas.draw()
+        fig.canvas.mpl_connect("key_press_event", accept)
+        ax.set_title("Press enter to accept selected points.")
+        plt.show()
+
+
 
 class XeniumView(GView):
     def __init__(self, gvdata: storage_classes.GVData, gvui):

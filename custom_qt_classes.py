@@ -77,7 +77,7 @@ class StatusCombo(QComboBox):
 
 ''' A QDialog that the user can interact with to select scoring decision names, color values,
     and keybindings. Loads with defaults initialized in the user data class'''
-class ChannelDialog(QDialog):
+class HaloChannelDialog(QDialog):
     def __init__(self, parent, app: QApplication, gvdata: GVData, 
                  check_layout : QGridLayout, check_group : QGroupBox, check_group_create: Callable):
         super().__init__(parent)
@@ -217,6 +217,170 @@ class ChannelDialog(QDialog):
         self.gvdata.channelColors = self.channelColors
         self.gvdata.channels = list(self.channelColors.keys())
         self.gvdata.channelOrder = dict(zip(self.gvdata.channels,range(len(self.gvdata.channels))))
+        self.gvdata.remake_viewsettings()
+
+        # self.gvdata.remake_channelOrder()
+        #TODO set channel widgets in main UI
+
+        for i in reversed(range(self.check_layout.count())): 
+            self.check_layout.itemAt(i).widget().setParent(None)
+        self.check_layout, self.check_group = self.check_group_create(self.check_layout, self.check_group)
+        self.check_group.update()
+        self.app.processEvents()
+        self.close()
+
+
+''' A QDialog that the user can interact with to select scoring decision names, color values,
+    and keybindings. Loads with defaults initialized in the user data class'''
+class CosMxChannelDialog(QDialog):
+    def __init__(self, parent, app: QApplication, gvdata: GVData, 
+                 check_layout : QGridLayout, check_group : QGroupBox, check_group_create: Callable):
+        super().__init__(parent)
+        self.app = app
+        self.gvdata = gvdata
+        self.channelColors = copy.copy(gvdata.channelColors)
+        self.channelFolders = copy.copy(gvdata.channelFolders)
+        self.check_layout = check_layout
+        self.check_group = check_group
+        self.check_group_create = check_group_create
+       
+        # Arrange title bar buttons
+        self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowTitleHint,False)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint,False)
+        self.setWindowTitle('Select Channels')
+        self.setWindowIcon(QIcon('data/mghiconwhite.png'))   
+        # self.setStyleSheet("background-color: '#daeef0'")     
+
+        self.save_button = QPushButton("Save and exit")
+        self.add_button = QPushButton("Add new")
+        self.remove_button = QPushButton("Remove")
+        self.add_button.pressed.connect(self.add_channel)
+        self.remove_button.pressed.connect(self.remove_channel)
+        self.save_button.pressed.connect(self.save)
+        self.channel_entry = QLineEdit(); self.channel_entry.setPlaceholderText("Channel name")
+        self.folder_entry = QLineEdit(); self.folder_entry.setPlaceholderText("Folder name")
+        self.remove_combo = QComboBox()
+        self.remove_combo.addItems(list(self.channelFolders.keys()))
+
+
+
+        self.buttonGroup = QGroupBox()
+        # self.buttonGroup.setStyleSheet("background-color: '#ededed'")
+        self.buttonBoxLayout = QGridLayout()
+        self.buttonBoxLayout.addWidget(self.channel_entry,0,0)
+        self.buttonBoxLayout.addWidget(self.folder_entry,0,1)
+        self.buttonBoxLayout.addWidget(self.add_button, 0,2)
+        self.buttonBoxLayout.addWidget(self.remove_combo,1,0)
+        self.buttonBoxLayout.addWidget(self.remove_button, 1,1,1,2)
+        self.buttonBoxLayout.addWidget(self.save_button, 2,0,1,3)
+        self.buttonGroup.setLayout(self.buttonBoxLayout)
+
+        
+        # Dynamically assemble channel names labels
+        self.channelGroup = QGroupBox("Channel name and its name in the images folder")
+        # self.channelGroup.setStyleSheet("background-color: '#ededed'")
+        self.channelBoxLayout = QGridLayout()
+        self.make_labels()
+
+        # Make top area
+        self.overrideGroup = QGroupBox("Override Viewer detected metadata?")
+        # self.overrideGroup.setStyleSheet("background-color: '#ededed'")
+        self.radio1 = QRadioButton("Yes, use the selections below")
+        self.radio2 = QRadioButton("No, let the Viewer pick")
+
+        # self.radio1.setStyleSheet(open("data/style.css").read())
+        self.overrideLayout = QHBoxLayout()
+        self.overrideLayout.addWidget(self.radio1)
+        self.overrideLayout.addWidget(self.radio2)
+        self.overrideGroup.setLayout(self.overrideLayout)
+        self.radio2.setChecked(True)
+        
+        self.layout = QGridLayout()
+        self.layout.addWidget(self.overrideGroup,0,0)
+        self.layout.addWidget(self.channelGroup, 1,0)
+        self.layout.addWidget(self.buttonGroup, 2,0)
+        self.layout.setSizeConstraint(QLayout.SetFixedSize) # Allows window to resize to shrink when widgets are removed
+        self.setLayout(self.layout)
+        self.show()
+    
+    def make_labels(self):
+        for i in reversed(range(self.channelBoxLayout.count())): 
+            self.channelBoxLayout.itemAt(i).widget().setParent(None)
+        row=0
+        for chn, foldername in  self.channelFolders.items():
+            c = QLabel(str(chn))
+            f = QLineEdit()
+            f.insert(foldername)
+            self.channelBoxLayout.addWidget(c,row,0 )
+            self.channelBoxLayout.addWidget(f,row,1 )
+            row+=1
+        # self.decision_label.setText(display_str)
+        self.channelGroup.setLayout(self.channelBoxLayout)
+        self.channelBoxLayout.update()
+        self.app.processEvents()
+    
+    def add_channel(self):
+        def _setWidgetColorBackground(widg, color):
+            widg.setStyleSheet(f"background-color: {color}")
+
+        new_chn = self.channel_entry.text()
+        self.channel_entry.clear()
+        new_folder = self.folder_entry.text()
+
+        if len(new_chn) <1:
+            return None
+
+        if new_chn in self.channelFolders.keys():
+            _setWidgetColorBackground(self.channel_entry, "#ff5555")
+            QTimer.singleShot(800, lambda:_setWidgetColorBackground(self.channel_entry, ""))
+            
+            # Won't add if it's already there. 
+            for i in range(self.channelBoxLayout.count()):
+                widg = self.channelBoxLayout.itemAt(i).widget()
+                if widg.text() == new_chn:
+                    _setWidgetColorBackground(widg, "#ff5555")
+                    QTimer.singleShot(800, lambda: _setWidgetColorBackground(widg, ""))
+                    widg2 = self.channelBoxLayout.itemAt(i+1).widget()
+                    _setWidgetColorBackground(widg2, "#ff5555")
+                    QTimer.singleShot(800, lambda: _setWidgetColorBackground(widg2, ""))
+                    break
+            return None
+        
+
+        unused_colors = copy.copy(self.gvdata.available_colors)
+        for col in self.channelColors.values():
+            if col in unused_colors:
+                unused_colors.remove(col)
+
+        # For this new fluor, give it a color
+        if len(unused_colors) < 1:
+            random_color = choice(self.gvdata.available_colors)
+        else:
+            random_color = choice(unused_colors)
+
+        # Add new channel to dictionary
+        self.channelColors[new_chn] = random_color
+        self.channelFolders[new_chn] = self.folder_entry.text()
+        self.make_labels()
+
+
+    def remove_channel(self):
+        if len(self.channelColors) <=1:
+            return False
+        
+        x = self.remove_combo.currentText()
+        self.remove_combo.removeItem(self.remove_combo.findText(x))
+        self.channelFolders.pop(x)
+        self.channelColors.pop(x)
+        self.make_labels()
+
+    def save(self):
+        self.gvdata.channelColors = self.channelColors
+        self.gvdata.channels = list(self.channelColors.keys())
+        self.gvdata.channelOrder = dict(zip(self.gvdata.channels,range(len(self.gvdata.channels))))
+        self.gvdata.channelFolders = self.channelFolders
         self.gvdata.remake_viewsettings()
 
         # self.gvdata.remake_channelOrder()
@@ -461,8 +625,8 @@ class ViewSettingsDialog(QDialog):
                     self.vsLayout.addWidget(self.ccbs[fluor], row, col+1)
                     col+=2
                 case "black-in" | "white-in":
-                    s = DoubleSlider(0,255)
-                    d.setRange(0,255)
+                    s = DoubleSlider(*self.gvdata.contrastRanges[fluor])
+                    d.setRange(*self.gvdata.contrastRanges[fluor])
             sname = f'{fluor} {setting}'
             
             self.spin_boxes[sname] = d
