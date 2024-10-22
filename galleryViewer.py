@@ -292,7 +292,7 @@ class GView:
 
         mode_entry_layout = QHBoxLayout()
         mode_switch_combo = QComboBox()
-        mode_switch_combo.addItems(["Gallery","Multichannel","Context"])
+        mode_switch_combo.addItems(["Gallery","Multichannel","Slide"])
         mode_switch_cell = QLineEdit() ; mode_switch_cell.setPlaceholderText("Cell ID (optional)")
         mode_entry_layout.addWidget(mode_switch_combo)
         mode_entry_layout.addWidget(mode_switch_cell)
@@ -332,18 +332,18 @@ class GView:
 
         nuc_boxes_show = QRadioButton("Show nuclei boxes"); nuc_boxes_show.setChecked(False)
         nuc_boxes_hide = QRadioButton("Hide nuclei boxes"); nuc_boxes_hide.setChecked(True)
-        nuc_boxes_context = QRadioButton("Show box under mouse"); nuc_boxes_context.setChecked(False); nuc_boxes_context.setVisible(False)
+        nuc_boxes_slide = QRadioButton("Show box under mouse"); nuc_boxes_slide.setChecked(False); nuc_boxes_slide.setVisible(False)
         
         
-        nuc_boxes_layout = QHBoxLayout(); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide); nuc_boxes_layout.addWidget(nuc_boxes_context)
-        nuc_boxes_group = QButtonGroup(); nuc_boxes_group.addButton(nuc_boxes_show) ; nuc_boxes_group.addButton(nuc_boxes_hide) ; nuc_boxes_group.addButton(nuc_boxes_context)
-        nuc_boxes_show.setFont(self.data.user.fonts.small); nuc_boxes_hide.setFont(self.data.user.fonts.small); nuc_boxes_context.setFont(self.data.user.fonts.small)
+        nuc_boxes_layout = QHBoxLayout(); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide); nuc_boxes_layout.addWidget(nuc_boxes_slide)
+        nuc_boxes_group = QButtonGroup(); nuc_boxes_group.addButton(nuc_boxes_show) ; nuc_boxes_group.addButton(nuc_boxes_hide) ; nuc_boxes_group.addButton(nuc_boxes_slide)
+        nuc_boxes_show.setFont(self.data.user.fonts.small); nuc_boxes_hide.setFont(self.data.user.fonts.small); nuc_boxes_slide.setFont(self.data.user.fonts.small)
 
-        # Context mode marker tool group
+        # Slide mode marker tool group
         marker_layout = QHBoxLayout()
         # Create a combobox
         marker_combo = StatusCombo(show_hide_group ,self.data, color_mode = 'dark')
-        marker_combo.setVisible(False) # Will be shown when context mode is enabled
+        marker_combo.setVisible(False) # Will be shown when slide mode is enabled
         marker_combo.setDisabled(True)
         self.session.widget_dictionary["marker combo"] = marker_combo
         # Create a button
@@ -357,11 +357,11 @@ class GView:
         show_hide_layout.addLayout(marker_layout)
 
         # nuc_boxes_show.tog
-        nuc_boxes_group.buttonToggled[QAbstractButton, bool].connect(self.toggle_nuclei_boxes)
+        nuc_boxes_group.buttonToggled[QAbstractButton, bool].connect(self.toggle_cell_labels)
         self.session.radiogroups['Cell boxes group'] = nuc_boxes_group
         self.session.widget_dictionary['show boxes']=nuc_boxes_show
         self.session.widget_dictionary['hide boxes']=nuc_boxes_hide
-        self.session.widget_dictionary['mouse boxes']=nuc_boxes_context
+        self.session.widget_dictionary['mouse boxes']=nuc_boxes_slide
         show_hide_layout.addLayout(nuc_boxes_layout)
         self.session.side_dock_groupboxes['hide'] = show_hide_group
         self.scoring_tab_groups.append(show_hide_group)
@@ -661,17 +661,22 @@ class GView:
         self.set_initial_scoring_tally(self.data.objectDataFrame, self.session.session_cells, page_only=False)
         self.set_scoring_label(self.session.widget_dictionary["scoring label"])
 
-        # try:
         start_time = time.time()
         self.add_layers(self.viewer, self.session.page_cells, int(self.data.imageSize/2))
         end_time = time.time()
-        print('\nAdding images took: ')
-        print(end_time - start_time)
+        print('\nAdding gallery images took: ')
+        print(round(end_time - start_time, 4))
         #Enable scale bar
         if self.session.image_scale:
             self.viewer.scale_bar.visible = True
             self.viewer.scale_bar.unit = "um"
+        self.add_slide_images()
+        self._add_slide_extras()
 
+    def _add_slide_extras(self, *args, **kwargs):
+        pass
+
+    def add_slide_images(self):
         # Lazy load full size images as dask array
         sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
         for fluor in self.data.channels:
@@ -679,12 +684,13 @@ class GView:
                 continue
             pos = self.data.channelOrder[fluor]
             print(f"\nAdding full size {fluor} image")
-            self.viewer.add_image(self.session.dask_list[pos], name = f'Context {fluor}', 
+            self.viewer.add_image(self.session.dask_list[pos], name = f'Slide {fluor}', 
                         blending = 'additive', colormap = custom_color_functions.retrieve_cm(self.data.channelColors[fluor]),
                         interpolation = "linear", scale=sc, multiscale=True, visible = False) 
             # Adding these images with visible = True allows viewsettings changes to be applied to them when the user loads into gallery mode at first.
             # Otherwise, it seems that they only display the changes after they have been visible for some small period of time in the viewer. 
     
+
     def finish_init(self):
         #TODO set custom theme?
         self.viewer.theme = "dark"
@@ -747,7 +753,7 @@ class GView:
             for pos,fluor in enumerate(self.data.channels):
                 if fluor == "Composite": continue
                 self.viewer.layers[f"Multichannel {fluor}"].data = self.session.multichannel_page_images[pos].copy()
-                self.viewer.layers[f"Multichannel Nuclei Boxes"].data = copy.copy(self.session.multichannel_nuclei_box_coords)
+                self.viewer.layers[f"Multichannel Labels"].data = copy.copy(self.session.multichannel_nuclei_box_coords)
             return True
 
         # Something is missing. need to remake images
@@ -776,13 +782,6 @@ class GView:
                 self.viewer.layers[f"Multichannel {fluor}"].data = collapsed_image
             fullpage_col +=1
 
-            # x1 = int(cell["XMin"] + offset - cell_x) ; x2 = int(cell["XMax"] + offset - cell_x)
-            # y1 = int(cell["YMin"] + offset - cell_y) ; y2 = int(cell["YMax"] + offset - cell_y)
-            # cXg = (row_g-1)*(self.data.imageSize+2) ; cYg = (col_g-1)*(self.data.imageSize+2)
-            # cXm = (row_m-1)*(self.data.imageSize+2) ; cYm = len(self.data.channels)*(self.data.imageSize+2)
-
-            # nuclei_box_coords_g.append([[cXg+y1, cYg+x1], [cXg+y2, cYg+x2]]) # x and y are actually flipped between napari and the object data
-            # nuclei_box_coords_m.append([[cXm+y1, cYm+x1], [cXm+y2, cYm+x2]]) 
         
         # Horizontally adjust nuclei boxes 
         adjust_amount = num_channels - num_active_channels
@@ -791,7 +790,7 @@ class GView:
         hdist = adjust_amount * imsize
         mbc = copy.copy(self.session.multichannel_nuclei_box_coords)
         mbc = [ [[x[0][0], x[0][1]-hdist], [x[1][0], x[1][1]-hdist]]  for x in mbc]
-        self.viewer.layers[f"Multichannel Nuclei Boxes"].data = mbc
+        self.viewer.layers[f"Multichannel Labels"].data = mbc
 
     def restore_viewsettings_from_cache(self, arrange_multichannel = False, single_setting_change = False):
         vs = self.session.view_settings
@@ -799,7 +798,7 @@ class GView:
         session = self.session
         '''Change settings for all modes, whether or not they are displayed right now.'''
         def _modify_images_in_modes(f, setting = "both"):
-            for mode in ("Gallery ", "Multichannel ", "Context "):
+            for mode in ("Gallery ", "Multichannel ", "Slide "):
                 match setting:
                     case "both":
                         self.adjust_composite_gamma(viewer.layers[mode+f],vs[f+" gamma"])
@@ -825,19 +824,19 @@ class GView:
         for layer in viewer.layers:
             layer.visible = False
         # Toggle back on overlays if applicable
-        if session.mode != "Context":
+        if session.mode != "Slide":
             # viewer.layers[f"{session.mode} Status Edges"].visible = session.status_layer_vis
             viewer.layers[f"{session.mode} Status Squares"].visible = session.status_layer_vis
             viewer.layers[f"{session.mode} Status Numbers"].visible = session.status_layer_vis
             # viewer.layers[f"{session.mode} Absorption"].visible = session.absorption_mode
         try:
-            if session.mode == "Context":
-                viewer.layers[f"Context LINE1_ORF1"].visible =True
-                show_boxes = True if session.nuclei_boxes_vis["Context"] =="Show" else False
+            if session.mode == "Slide":
+                viewer.layers[f"Slide LINE1_ORF1"].visible =True
+                show_boxes = True if session.cell_labels_vis["Slide"] =="Show" else False
             else:
                 viewer.layers[f"Gallery LINE1_ORF1"].visible =True
-                show_boxes = session.nuclei_boxes_vis["Gallery/Multichannel"]
-            viewer.layers[f"{session.mode} Nuclei Boxes"].visible = show_boxes
+                show_boxes = session.cell_labels_vis["Gallery/Multichannel"]
+            viewer.layers[f"{session.mode} Labels"].visible = show_boxes
         except KeyError:
             pass
 
@@ -854,7 +853,7 @@ class GView:
             _modify_images_in_modes(fluor)
 
     def set_layer_colors(self, modified_fluors):
-        for mode in ("Gallery ", "Multichannel ", "Context "):
+        for mode in ("Gallery ", "Multichannel ", "Slide "):
             for fluor, color in self.data.channelColors.items():
                 if (fluor not in self.data.active_channels) or (fluor not in modified_fluors): 
                     continue
@@ -875,17 +874,17 @@ class GView:
             self.session.VSDialog.activateWindow()
 
     def toggle_absorption(self):
-        #TODO make absorption work for context more?
-        # if self.session.mode == "Context": return None
+        #TODO make absorption work for slide more?
+        # if self.session.mode == "Slide": return None
         if self.session.absorption_mode ==True:
             self.session.absorption_mode = False
             for layer in self.viewer.layers:
                 
-                if 'Status' in layer.name or layer.name == "Context Nuclei Boxes":
-                    # Don't want to change the color of the context mode boxes
+                if 'Status' in layer.name or layer.name == "Slide Labels":
+                    # Don't want to change the color of the slide mode boxes
                     #   those colors are used to indicate status
                     continue
-                elif "Nuclei Boxes" in layer.name or layer.name == "Context Closest Cell Box":
+                elif "Labels" in layer.name:
                     layer.edge_color = '#ffffff'
                     continue
                 # elif "Absorption" in layer.name:
@@ -901,11 +900,11 @@ class GView:
             self.session.absorption_mode = True
             for layer in self.viewer.layers:
                 
-                if 'Status' in layer.name or layer.name == "Context Nuclei Boxes":
-                    # Don't want to change the color of the context mode boxes
+                if 'Status' in layer.name or layer.name == "Slide Labels":
+                    # Don't want to change the color of the slide mode boxes
                     #   those colors are used to indicate status
                     continue 
-                elif "Nuclei Boxes" in layer.name or layer.name == "Context Closest Cell Box":
+                elif "Labels" in layer.name :
                     layer.edge_color="#000000"
                     continue
                 # elif "Absorption" in layer.name:
@@ -921,7 +920,7 @@ class GView:
                 layer.blending = 'Minimum'
             self.session.widget_dictionary['imsave_cell_borders'].setCurrentText("Black borders")
             self.session.widget_dictionary['imsave_page_borders'].setCurrentText("Black borders")
-        if not self.session.mode == "Context":
+        if not self.session.mode == "Slide":
             #TODO
             pass
             # change_statuslayer_color(copy.copy(self.session.current_cells))
@@ -964,7 +963,7 @@ class GView:
         # Make visible all channels according to rules
         self.restore_viewsettings_from_cache(arrange_multichannel=True if self.session.mode == "Multichannel" else False)
         # for fluor in self.data.channels:
-        #     # Different set of layers if we are in context mode
+        #     # Different set of layers if we are in slide mode
         #     lname = f'{self.session.mode} {fluor}'
         #     if fluor == "Composite":
         #         continue
@@ -990,12 +989,16 @@ class GView:
 
     ## --- Side bar functions and GUI elements 
 
+    ''' Definition per-subclass'''
+    def toggle_cell_labels(self):
+        pass
+
     def toggle_session_mode_catch_exceptions(self, target_mode, from_mouse = True):
         # try:
         self.toggle_session_mode(target_mode, from_mouse)
         # except (ValueError,TypeError) as e:
         #     print(e)
-        #     # Might trigger when self.session.cell_under_mouse holds information on a cell from context mode
+        #     # Might trigger when self.session.cell_under_mouse holds information on a cell from slide mode
         #     self.viewer.status = f"Can't enter {target_mode} Mode right now. Move your mouse around a bit first please"
 
     def toggle_session_mode(self, target_mode, from_mouse: bool):
@@ -1009,17 +1012,17 @@ class GView:
                 viewer.status = f'{Mode} Mode enabled. But, there was a problem saving your scoring     decisions. Close your data file?'
                 return False
 
-        if self.session.mode != "Context" and from_mouse:
+        if self.session.mode != "Slide" and from_mouse:
             _, coords, _ = self.session.find_mouse_func(self.viewer.cursor.position)
             if coords is None: # User has clicked outside the grid area with the chage mode hotkey pressed. Alert and do nothing.
-                if target_mode == "Context" and self.session.mode == "Multichannel" and from_mouse:
-                    pass #TODO
+                if target_mode == "Slide" and self.session.mode == "Multichannel" and from_mouse:
+                    pass #TODO some issues here sometimes 
                 self.viewer.status = f"Invalid cell selection: cannot change mode to {target_mode}"
                 return False
 
         # Change widget display
         self.session.widget_dictionary['switch mode combo'].setCurrentText(target_mode)
-        if self.session.nuclei_boxes_vis["Context"]=="Mouse": self.session.widget_dictionary['hide boxes'].setChecked(True)
+        if self.session.cell_labels_vis["Slide"]=="Mouse": self.session.widget_dictionary['hide boxes'].setChecked(True)
         self.session.widget_dictionary['page cell id'].clear() #This can only cause issues if not cleared.
         # Do nothing in these cases
         if target_mode==self.session.mode: return None
@@ -1033,7 +1036,7 @@ class GView:
             self.session.last_multichannel_camera_coordinates["center"] = self.viewer.camera.center
             self.session.last_multichannel_camera_coordinates["z"] = self.viewer.camera.zoom
         
-        if target_mode=="Context":
+        if target_mode=="Slide":
             if not from_mouse:
                 try:
                     cid = self.session.widget_dictionary['switch mode cell'].text()
@@ -1052,7 +1055,7 @@ class GView:
                 target_cell_info = self.session.cell_under_mouse
                 # print(target_cell_info)
 
-            self.session.context_target = target_cell_info
+            self.session.slide_target = target_cell_info
             cell_num = str(target_cell_info.name)
             sc = 1 if self.session.image_scale is None else self.session.image_scale # Scale factor necessary.
 
@@ -1076,12 +1079,6 @@ class GView:
             self.viewer.camera.center = ((target_cell_info["center_y"]+offsetY)*sc,(target_cell_info["center_x"]+offsetX)*sc) # these values seem to work best
             # viewer.camera.zoom = 1.2 / sc
 
-            # try to remove any previous box layers if there are any
-            try:
-                self.viewer.layers.selection.active = self.viewer.layers["Context Nuclei Boxes"]
-                self.viewer.layers.remove_selected()
-            except KeyError:
-                pass
             self.session.widget_dictionary['mouse boxes'].setVisible(True) # Enable these widget
             self.session.widget_dictionary["marker combo"].setVisible(True)
             self.session.widget_dictionary["marker button"].setVisible(True)
@@ -1104,11 +1101,11 @@ class GView:
 
             # Will trigger this function with the appropriate input to box and color the nearest
             #   100 cells around the target cell 
-            if self.session.nuclei_boxes_vis["Gallery/Multichannel"]:
+            if self.session.cell_labels_vis["Gallery/Multichannel"]:
                 radio = self.session.widget_dictionary['show boxes']
             else:
                 radio = self.session.widget_dictionary['hide boxes']
-            self.toggle_nuclei_boxes(radio, True, 
+            self.toggle_cell_labels(radio, True, 
                 [target_cell_info["center_x"],target_cell_info["center_y"]])
 
             print(f"target mode is {target_mode} but actual mode is {self.session.mode}")
@@ -1131,7 +1128,7 @@ class GView:
             self.session.widget_dictionary['show status layer radio'].setVisible(True) # Enable these widget
             self.session.widget_dictionary['hide status layer radio'].setVisible(True) 
 
-            if self.session.mode != "Context": # Now, we must be changing to Gallery OR Multichannel. Want to save to DataFrame, not disk
+            if self.session.mode != "Slide": # Now, we must be changing to Gallery OR Multichannel. Want to save to DataFrame, not disk
                 _save_validation(self.viewer, target_mode)
 
             if target_mode == "Multichannel":
@@ -1210,9 +1207,9 @@ class GView:
             return page, sort_option, cid, ann_layer
 
         page_number,sort_option, cell_choice, cell_annotation = _get_widgets()
-        if self.session.mode == "Context":
+        if self.session.mode == "Slide":
             self.toggle_session_mode_catch_exceptions("Gallery", from_mouse=False)
-            # return None # Don't allow loading of new cells when in context mode.
+            # return None # Don't allow loading of new cells when in slide mode.
 
         # Assemble dict from cell choice if needed
         if cell_choice == '': 
@@ -1232,7 +1229,7 @@ class GView:
             self.viewer.status="Can't load cells: out of bounds error."
         else:
             for layer in self.viewer.layers:
-                if "Context" not in layer.name:
+                if "Slide" not in layer.name:
                     self.viewer.layers.selection.add(layer)
             self.viewer.layers.remove_selected()
             # self.viewer.layers.clear()
@@ -1250,7 +1247,7 @@ class GView:
         return True
 
     def toggle_statuslayer_visibility(self, show_widget):
-        if self.session.mode == "Context": return False
+        if self.session.mode == "Slide": return False
         if show_widget.isChecked(): self.session.status_layer_vis = True
         else: self.session.status_layer_vis = False
         # Find status layers and toggle visibility
@@ -1262,100 +1259,16 @@ class GView:
         self.viewer.window._qt_viewer.setFocus()
         return True
 
-    def toggle_nuclei_boxes(self, btn, checked, distanceSearchCenter = None):
-
-        # Always reset the user's input selection
-        self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]  
-        if not checked:
-            # This function gets called twice, since when one radio button in the group is toggle on, the other is toggled off. 
-            #   We only want to run this function once so the other call can be discarded
-            return False
-        if self.session.mode in ["Gallery","Multichannel"]:
-            self.session.nuclei_boxes_vis["Gallery/Multichannel"] = not self.session.nuclei_boxes_vis["Gallery/Multichannel"]
-            self.session.nuclei_boxes_vis["Context"] = "Show" if self.session.nuclei_boxes_vis["Gallery/Multichannel"] else "Hide"
-            try:
-                self.viewer.layers[f'{self.session.mode} Nuclei Boxes'].visible = self.session.nuclei_boxes_vis["Gallery/Multichannel"]
-            except KeyError:
-                pass
-
-        if self.session.mode == "Context":
-            match btn.text():
-                case str(x) if 'mouse' in x.lower():
-                    selected_mode = "Mouse"
-                case str(x) if 'hide' in x.lower():
-                    selected_mode = "Hide"
-                case _:
-                    selected_mode = "Show"
-            self.session.nuclei_boxes_vis["Context"] = selected_mode
-            self.session.nuclei_boxes_vis["Gallery/Multichannel"] = True if selected_mode == "Show" else False
-
-            # try to remove any previous box layers if there are any
-            try:
-                self.viewer.layers.selection.active = self.viewer.layers["Context Nuclei Boxes"]
-                self.viewer.layers.remove_selected()
-            except KeyError:
-                pass
-
-            try:
-                self.viewer.layers.selection.active = self.viewer.layers["Context Closest Cell Box"]
-                self.viewer.layers.remove_selected()
-            except KeyError:
-                pass
-            # Always reset the user's input selection
-            self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]
-
-            if self.session.nuclei_boxes_vis["Context"] != "Show":
-                return False # Leave! Nothing more to do since the user does not want to see these boxes
-            vy, vx = self.viewer.cursor.position
-            sc = 1 if self.session.image_scale is None else self.session.image_scale
-            
-            # Find cells in session table near target
-            z,y,x = self.viewer.camera.center
-            # nearby_inds = self.session.kdtree.query_ball_point([x/sc,y/sc], 550) # [x,y], dist -> indices in table
-            if distanceSearchCenter:
-                dists, nearby_inds = self.session.kdtree.query(distanceSearchCenter, k=200) # [x,y], dist -> indices in table
-            else:
-                dists, nearby_inds = self.session.kdtree.query([x/sc,y/sc], k=200) # [x,y], dist -> indices in table
-
-            # if there are fewer than k cells, there will be occurences of length of data +1 in the data. Remove these
-            #   so we can get real indices from the table
-            
-            nearby_cells = self.session.session_cells.iloc[nearby_inds[nearby_inds!=self.session.session_cells.shape[0]] ] 
-            nearby_cells.to_csv('nearby_cells.csv')
-
-            # Add box around cells
-            cids = nearby_cells.index.tolist()
-            x1 = nearby_cells["XMin"].astype(int).tolist() ; x2 = nearby_cells["XMax"].astype(int).tolist()
-            y1 = nearby_cells["YMin"].astype(int).tolist() ; y2 = nearby_cells["YMax"].astype(int).tolist()
-            a = [list(x) for x in zip(y1,x1)]
-            b = [list(x) for x in zip(y2,x2)]
-            nuclei_box_coords = [list(x) for x in zip(a,b)] #list(zip(zip(y1,x1), zip(y2,x2)))
-            validation_colors_hex = [self.data.statuses_hex[s] for s in nearby_cells["Validation"]]
-            self.session.context_nuclei_boxes_map_to_ind = {cid:i for cid, i in zip(nearby_cells.index.tolist(),  range(len(nearby_cells)))}
-
-            if nuclei_box_coords: # We have cells to box
-                features = {'cid': cids}
-                nb_color_str = 'black' if self.session.absorption_mode else 'white' 
-                nb_color_hex = '#000000' if self.session.absorption_mode else '#ffffff'
-                
-                nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':validation_colors_hex}
-                self.session.context_nuclei_boxes_text_object = nb_text
-                sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
-                self.viewer.add_shapes(nuclei_box_coords, name="Context Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=validation_colors_hex, 
-                                                    face_color='#00000000', scale=sc, features=features,text=nb_text,opacity=0.9 )
-            # Always reset the user's input selection
-            self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]
-
     def toggle_marker_button(self, marker_button: QPushButton):
-        current_marker_mode = self.session.context_marker_mode
+        current_marker_mode = self.session.slide_marker_mode
         if current_marker_mode == "Disabled":
             next_marker_mode = "Enabled"
         elif current_marker_mode == "Enabled":
             next_marker_mode = "Disabled"
         else:
-            raise ValueError(f"Unexpected value {current_marker_mode} encountered for 'context_marker_mode'. Need 'Enabled' or 'Disabled'")
+            raise ValueError(f"Unexpected value {current_marker_mode} encountered for 'slide_marker_mode'. Need 'Enabled' or 'Disabled'")
         
-        self.session.context_marker_mode = next_marker_mode
+        self.session.slide_marker_mode = next_marker_mode
         display_text = {"Disabled":"Enable marker tool", "Enabled":"Disable marker tool"}[next_marker_mode]
         marker_button.setText(display_text)
         self.session.widget_dictionary["marker combo"].setDisabled({"Enabled":False, "Disabled":True}[next_marker_mode])
@@ -1520,20 +1433,29 @@ class GView:
         return True
     ######------------------------- Image loading and processing functions ---------------------######
 
-    def black_background(self, color_space, mult, CPR):
-        if color_space == 'RGB':
+    def black_background(self, mult, CPR, kind = 'Luminescence', dtype_force = None):
+        if kind == 'RGB':
             #shape is (channels, y, x)
             return np.zeros((len(self.data.channels),ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR, 4), 
                     dtype=self.session.dask_high_res.dtype)
             
-        elif color_space == 'Luminescence':
+        elif kind == 'Luminescence':
             return np.zeros((len(self.data.channels), ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR), 
                     dtype=self.session.dask_high_res.dtype)
+        
+        elif kind == 'labels':
+            return np.zeros((ceil((self.data.page_size*mult)/CPR)*(self.data.imageSize+2),(self.data.imageSize+2) * CPR), 
+                    dtype=dtype_force)
             
 
-    ''' Overload in CosMxView to add other layers. '''
-    def add_extras(self, *args, **kwargs):
+    ''' Overload in HaloView and CosMxView to add other layers. '''
+    def _add_gallery_extras(self, *args, **kwargs):
         pass
+
+    def zip_coords(self,a1,a2,b1,b2):
+        a = [list(x) for x in zip(a1, a2)]
+        b = [list(x) for x in zip(b1, b2)]
+        return [list(x) for x in zip(a,b)]
     
     ''' Add images layers for Gallery and Multichannel modes. Only make visible the layers for the active mode'''
     def add_layers(self, viewer: napari.Viewer, cells:pd.DataFrame, offset: int, new_page=True):
@@ -1549,8 +1471,8 @@ class GView:
 
         for chn in self.data.channels:
             if chn == 'Composite': continue
-            page_image_gallery = self.black_background('Luminescence', 1, self.data.cells_per_row)
-            page_image_multichannel = self.black_background('Luminescence', cpr_m, cpr_m)
+            page_image_gallery = self.black_background(1, self.data.cells_per_row)
+            page_image_multichannel = self.black_background(cpr_m, cpr_m)
 
         # page_image = self.black_background('RGB',size_multiplier)
 
@@ -1563,18 +1485,20 @@ class GView:
             ''' Slice image -- DO NOT compute until actually adding images later'''
             cell_punchout = self.session.dask_high_res[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset]  
             results.append(cell_punchout)
-        print("Computing image wiht dask")
+        print("Computing image with dask")
         img = dask.compute(*results)
 
 
-        col_g = 0 
-        row_g = 0 ; row_m = 0
+        col_g = 0 ; row_g = 0 ; row_m = 0
         self.session.grid_to_ID = {"Gallery":{}, "Multichannel":{}} # Reset this since we could be changing to multichannel mode
         print("Inserting images into page")
         for pos, (_, cell) in enumerate(cells.iterrows()): # coords left
             col_g = (col_g%cpr_g)+1 
             if col_g ==1: row_g+=1
             row_m+=1     
+            # Set grid mapping to cell_id
+            self.session.grid_to_ID["Gallery"][f'{row_g},{col_g}'] = cell.name
+
             for col_m in range(len(self.data.channels)): # loop through channels
                 cell_id = cell.name
                 # multichannel mode: individual image
@@ -1583,11 +1507,13 @@ class GView:
                 # multichannel mode: composite image
                 page_image_multichannel[col_m, (row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
                             (cpr_m-1)*(self.data.imageSize+2)+1:cpr_m*(self.data.imageSize+2)-1] = img[pos][col_m]
-                self.session.grid_to_ID["Multichannel"][f'{row_m},{col_m+1}'] = cell_id
-            self.session.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cell_id
+                
+                self.session.grid_to_ID["Multichannel"][f'{row_m},{col_m+1}'] = cell.name
+            # Composite image in multichannel mode. Only need to do it once per row. 
+            self.session.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cell.name
                 
             # Gallery images 
-            self.session.grid_to_ID["Gallery"][f'{row_g},{col_g}'] = cell_id
+            
             page_image_gallery[:, (row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = img[pos]
 
             self.session.multichannel_page_images = page_image_multichannel.copy()
@@ -1627,75 +1553,114 @@ class GView:
         print('''Adding boxes around cells , text labels, and colored boxes for Gallery and Multichannel modes. ''')
 
         cells['g_col'] = range(len(cells))
-        cells['g_col'] %=cpr_g
+        cells['g_col'] %= cpr_g
         cells['g_row'] = range(len(cells))
         cells['g_row'] =  cells['g_row'] // cpr_g
 
-        x1 = (cells["XMin"] +offset-cells['center_x']).astype(int).to_numpy() 
-        x2 = (cells["XMax"] +offset-cells['center_x']).astype(int).to_numpy()
-        y1 = (cells["YMin"] +offset-cells['center_y']).astype(int).to_numpy()
-        y2 = (cells["YMax"] +offset-cells['center_y']).astype(int).to_numpy()
-
-        cid_list = list(cells.index)
         cXg = cells['g_row'].to_numpy()*(self.data.imageSize+2)
         cYg = cells['g_col'].to_numpy()*(self.data.imageSize+2)
         cXm = np.array(range(len(cells))) *(self.data.imageSize+2)
         cYm = len(self.data.channels)*(self.data.imageSize+2)
-
-        a = [list(x) for x in zip(cXg+y1, cYg+x1)]
-        b = [list(x) for x in zip(cXg+y2, cYg+x2)]
-        nuclei_box_coords_g = [list(x) for x in zip(a,b)]
-        a = [list(x) for x in zip(cXm+y1, cYm+x1)]
-        b = [list(x) for x in zip(cXm+y2, cYm+x2)]
-        nuclei_box_coords_m = [list(x) for x in zip(a,b)]
-        a = [list(x) for x in zip(cXg, cYg)]
-        b = [list(x) for x in zip(cXg+(self.data.imageSize+1), cYg+(self.data.imageSize+1))]
-        status_box_coords_g = [list(x) for x in zip(a,b)]
-        a = [list(x) for x in zip(cXm, np.zeros(len(cells)))]
-        b = [list(x) for x in zip(cXm+(self.data.imageSize+1), np.repeat(cYm+101, len(cells)))]
-        status_box_coords_m = [list(x) for x in zip(a,b)]        
-        a = [list(x) for x in zip(cXg, cYg)]
-        b = [list(x) for x in zip(cXg+int(self.data.imageSize/8), cYg+int(self.data.imageSize/8))]
-        status_box_flags_g = [list(x) for x in zip(a,b)]
-        a = [list(x) for x in zip(cXm, np.zeros(len(cells)))]
-        b = [list(x) for x in zip(cXm+int(self.data.imageSize/8), np.repeat(int(self.data.imageSize/8), len(cells)))]
-        status_box_flags_m = [list(x) for x in zip(a,b)]
-
+        
+        status_box_coords_g = self.zip_coords(cXg, cYg, cXg+(self.data.imageSize+1), cYg+(self.data.imageSize+1) )
+        status_box_coords_m = self.zip_coords(cXm, np.zeros(len(cells)), cXm+(self.data.imageSize+1), np.repeat(cYm+101, len(cells)))
+        status_box_flags_g = self.zip_coords(cXg, cYg, cXg+int(self.data.imageSize/8), cYg+int(self.data.imageSize/8))
+        status_box_flags_m = self.zip_coords(cXm, np.zeros(len(cells)), cXm+int(self.data.imageSize/8), np.repeat(int(self.data.imageSize/8), len(cells)))
+        
         edge_col_list = [self.data.statuses_hex[s] for s in cells["Validation"]]
-
-        features = {'cid': cid_list}
-        nb_color_str = edge_col_list #'black' if self.session.absorption_mode else 'white'
-        # nb_color_str = ['#000000' for x in nb_color_str if self.session.absorption_mode and (x == '#ffffff')]
-        # nb_color_str = ['#ffffff' for x in nb_color_str if (not self.session.absorption_mode) and (x == '#000000')] 
-
-        nb_color_hex = '#000000' if self.session.absorption_mode else '#ffffff'
+        nb_color_str = edge_col_list
         tl = int(self.data.imageSize/8)#* (1 if self.session.image_scale is None else self.session.image_scale)
         nb_text = {'string':'{cid}', 'anchor':'lower_left', 'size' : 8,'translation':[-(self.data.imageSize),int(tl*1.3)], 'color':nb_color_str}
         self.session.status_text_object = nb_text
-        viewer.add_shapes(nuclei_box_coords_g, name="Gallery Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
-                                            face_color='#00000000', scale=sc, visible = False)
-        viewer.add_shapes(nuclei_box_coords_m, name="Multichannel Nuclei Boxes", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
-                                            face_color='#00000000', scale=sc, visible = False)
-        self.session.multichannel_nuclei_box_coords = nuclei_box_coords_m
 
         viewer.add_shapes(status_box_flags_g, name="Gallery Status Squares", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
                                             face_color=edge_col_list, scale=sc, opacity=1, visible = False)
         viewer.add_shapes(status_box_flags_m, name="Multichannel Status Squares", shape_type="rectangle", edge_width=1, edge_color=edge_col_list, 
                                             face_color=edge_col_list, scale=sc, opacity=1, visible = False)
         viewer.add_shapes(status_box_coords_g, name="Gallery Status Numbers", shape_type="rectangle", edge_width=0, face_color='#00000000',
-                                                features=features, text = nb_text,
+                                                features={'cid': cells.index}, text = nb_text,
                                                 scale=sc,  opacity=1, visible = False)
         viewer.add_shapes(status_box_coords_m, name="Multichannel Status Numbers", shape_type="rectangle", edge_width=0, 
-                                                features=features, text = nb_text, face_color = "#00000000",
+                                                features={'cid': cells.index}, text = nb_text, face_color = "#00000000",
                                                 scale=sc, opacity=1, visible = False)
         
         # Add other layers
-        self.add_extras(cXg, cYg)
+        self._add_gallery_extras(gallery_x = cXg, gallery_y = cYg, multichannel_x = cXm, multichannel_y = cYm)
         self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]  
         #TODO make a page label... 
         # Exiting add_layers function
         return True
 
+    ''' Definition per-subclass '''
+    def _change_cell_score_slide_mode(self, *args, **kwargs):
+        pass
+    
+    ''' Definition per-subclass '''
+    def _change_cell_score_gallery_mode(self, *args, **kwargs):
+        pass
+
+    def change_cell_score(self, cell_name, next_status):
+        next_color_rgb = self.data.statuses_rgba[next_status]
+        next_color_rgb = list(x/255 if next_color_rgb.index(x)!=3 else 1 for x in next_color_rgb) # Keep opacity high
+
+        self.session.current_cells.loc[str(cell_name),'Validation'] = next_status
+        self.session.session_cells.loc[str(cell_name),'Validation'] = next_status
+        try:
+            self.session.page_cells.loc[str(cell_name),'Validation'] = next_status
+        except (KeyError, ValueError) as e:
+            pass # Cell not in page. Should still be marked in self.session.current_cells list
+
+        self.set_cell_description_label(str(cell_name)) 
+        # Change gallery mode status layer
+        try:
+            self._change_cell_score_gallery_mode(cell_name = cell_name, next_color_rgb = next_color_rgb, next_status = next_status)
+
+        except (KeyError, ValueError) as e:
+            # Changing a cell status that isn't in the current page using Slide Mode.
+            print(e)
+        
+        if self.session.mode =="Slide":
+            try:
+                self._change_cell_score_slide_mode(cell_name = cell_name, next_color_rgb = next_color_rgb, next_status = next_status)
+            except (KeyError, ValueError) as e:
+            # Changing a cell status that isn't in the current page using Slide Mode.
+                print(f"slide box status issue: {e}")
+
+    def change_cell_score_forAll(self, next_status):
+        next_color_txt = self.data.statuses_rgba[next_status]
+        next_color_txt = list(x/255 if next_color_txt.index(x)!=3 else 1 for x in next_color_txt)
+
+        # set all cells to status
+        for coords, cname in self.session.grid_to_ID[self.session.mode].items():
+            self.session.current_cells.loc[str(cname),'Validation'] = next_status
+            self.session.session_cells.loc[str(cname),'Validation'] = next_status
+            try:
+                self.session.page_cells.loc[str(cname),'Validation'] = next_status
+            except (KeyError, ValueError) as e:
+                pass # Cell not in page. Should still be marked in self.session.current_cells list
+        # Change gallery mode status layer
+        try:
+            x = self.viewer.layers["Gallery Status Squares"].face_color
+            x = [next_color_txt for y in x]
+            self.viewer.layers["Gallery Status Squares"].face_color = x 
+            x = self.viewer.layers["Gallery Status Squares"].edge_color
+            x = [next_color_txt for y in x]
+            self.viewer.layers["Gallery Status Squares"].edge_color = x
+            self.session.status_text_object["color"] = [next_color_txt for y in self.session.status_text_object["color"]]
+            self.viewer.layers["Gallery Status Numbers"].text = self.session.status_text_object
+            # Multichannel
+            x = self.viewer.layers["Multichannel Status Squares"].face_color
+            x = [next_color_txt for y in x]
+            self.viewer.layers["Multichannel Status Squares"].face_color = x 
+            x = self.viewer.layers["Multichannel Status Squares"].edge_color
+            x = [next_color_txt for y in x]
+            self.viewer.layers["Multichannel Status Squares"].edge_color = x
+            self.viewer.layers["Multichannel Status Numbers"].text = self.session.status_text_object
+            
+        except (KeyError, ValueError):
+            # Changing a cell status that isn't in the current page using Slide Mode.
+            pass 
+    
     ###################################################################
     ######---------------- Viewer Key Bindings, -----------------######
     ###################################################################
@@ -1727,6 +1692,7 @@ class GView:
             return wrapper
         return custom_error_gv if gv is None else custom_error_self
 
+    
     # @catch_exceptions_to_log_file
     def attach_functions_to_viewer(self, viewer):
         ##----------------- Live functions that control mouseover behavior on images 
@@ -1766,7 +1732,7 @@ class GView:
             vals = {} # will hold fluor : pixel intensity pairs 
 
             if coords[0] < 0 or coords[1]<0:
-                if self.session.mode == "Context": return {"cell":None,"coords": None,"vals": None}
+                if self.session.mode == "Slide": return {"cell":None,"coords": None,"vals": None}
                 return "None" , None, None
             if self.session.mode == "Multichannel": 
                 # Bail if in multichannel mode and mouse is off to the right. Hard coding this since the grid to id dict
@@ -1776,17 +1742,17 @@ class GView:
                     
                     return "None" , None, None
                 
-            if self.session.mode == "Context":
+            if self.session.mode == "Slide":
                 for fluor in self.data.channels:
                     if fluor == "Composite": continue
 
                     # Requesting single pixel value from Dask array layer 0
                     try:
 
-                        v = str(int(viewer.layers["Context "+fluor].get_value(data_coordinates)[1])) 
+                        v = str(int(viewer.layers["Slide "+fluor].get_value(data_coordinates)[1])) 
                         # get_value returns a tuple from the dask array like (0,25). First number indicates the pyramid layer, second is the value.
                         # Seems to default to returning the current layer shown to the user which is acceptable.
-                        # v = str(int(viewer.layers["Context "+fluor].data[0][coords]))
+                        # v = str(int(viewer.layers["Slide "+fluor].data[0][coords]))
                     except (IndexError, TypeError):
                         v = None # If you are very far off the canvas, get_value returns None. Also if the channel is not visible
                     vals[fluor] =  v if v is not None else "-"
@@ -1801,7 +1767,6 @@ class GView:
                     closest_cell = None
                 return {"cell":closest_cell,"coords": (coords[1],coords[0]),"vals": vals} # flips axes of coordinates
         
-
                 
             else: # Gallery mode or Multichannel mode    
                 row,col = pixel_coord_to_grid(coords)
@@ -1814,7 +1779,7 @@ class GView:
                 local_y = coords[0] - (self.data.imageSize+2)*(row-1)
                 for fluor in self.data.channels:
                     if fluor == "Composite": continue
-                    # Context mode already taken care of. Need to handle Gallery / Multichannel 
+                    # Slide mode already taken care of. Need to handle Gallery / Multichannel 
                     if self.session.mode=="Multichannel":
                         # print(f"data coords: {data_coordinates}  | vs assumed coords for {fluor}: {multichannel_fetch_val(local_x, data_coordinates[0], fluor)}")
                         vals[fluor] = self.viewer.layers[f"Multichannel {fluor}"].get_value(multichannel_fetch_val(local_x, data_coordinates[0], fluor))
@@ -1830,17 +1795,17 @@ class GView:
                     return str(image_name), (local_x,local_y), vals
 
         @self.catch_exceptions_to_log_file("runtime_box-cell-near-mouse")
-        def box_closest_context_mode_cell(cell: pd.Series):
+        def box_closest_slide_mode_cell(cell: pd.Series):
             if not self.session.cell_under_mouse_changed:  # Save computation and don't do this unless needed
                 return False 
-            elif self.session.nuclei_boxes_vis["Context"] != "Mouse": # Don't run the regular routine unless the "Show under mouse only" radio is toggled on
+            elif self.session.cell_labels_vis["Slide"] != "Mouse": # Don't run the regular routine unless the "Show under mouse only" radio is toggled on
                 try:
-                    self.viewer.layers["Context Closest Cell Box"].visible = False
+                    self.viewer.layers["Slide Closest Cell Label"].visible = False
                 except KeyError:
                     pass
                 return False
             try:
-                self.viewer.layers["Context Closest Cell Box"].visible = True
+                self.viewer.layers["Slide Closest Cell Label"].visible = True
                 layer_present = True
             except KeyError:
                 layer_present = False
@@ -1854,14 +1819,14 @@ class GView:
             
             nb_color_hex = self.data.statuses_hex[cell['Validation']] #'#000000' if self.session.absorption_mode else '#ffffff'
             nb_text = {'string':'{cid_feat}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_hex}
-            self.session.context_closest_cell_text_object = nb_text
+            self.session.slide_closest_cell_text_object = nb_text
             if layer_present:
-                self.viewer.layers["Context Closest Cell Box"].data = [cell_bbox]   
-                self.viewer.layers["Context Closest Cell Box"].edge_color = nb_color_hex  
-                self.viewer.layers["Context Closest Cell Box"].features = features   
-                self.viewer.layers["Context Closest Cell Box"].text = nb_text   
+                self.viewer.layers["Slide Closest Cell Label"].data = [cell_bbox]   
+                self.viewer.layers["Slide Closest Cell Label"].edge_color = nb_color_hex  
+                self.viewer.layers["Slide Closest Cell Label"].features = features   
+                self.viewer.layers["Slide Closest Cell Label"].text = nb_text   
             else:
-                self.viewer.add_shapes([cell_bbox], name="Context Closest Cell Box", shape_type="rectangle", edge_width=2, edge_color=nb_color_hex, 
+                self.viewer.add_shapes([cell_bbox], name="Slide Closest Cell Label", shape_type="rectangle", edge_width=2, edge_color=nb_color_hex, 
                                 opacity=0.9, face_color='#00000000', scale=sc, text = nb_text, features=features)
             self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"] 
 
@@ -1877,12 +1842,12 @@ class GView:
             self.session.cell_under_mouse_changed = False
             pass
 
-        ''' When in context mode, if radio toggle is enabled, user can move the mouse over a cell to relabel it
+        ''' When in slide mode, if radio toggle is enabled, user can move the mouse over a cell to relabel it
         as a certain scoring decision. Will need to implement this in the GUI as a dropdown menu'''
-        @self.catch_exceptions_to_log_file("runtime_mouse-movement-over-context-cell")
+        @self.catch_exceptions_to_log_file("runtime_mouse-movement-over-slide-cell")
         def label_cells_mouseover(viewer,event):
-            if self.session.mode != "Context" or self.session.context_marker_mode == "Disabled":
-                return False # Leave if not in context mode
+            if self.session.mode != "Slide" or self.session.slide_marker_mode == "Disabled":
+                return False # Leave if not in slide mode
             
             scoring_target = self.session.widget_dictionary["marker combo"].currentText()
             if self.session.cell_under_mouse_changed and scoring_target is not None:
@@ -1897,7 +1862,7 @@ class GView:
 
         @self.catch_exceptions_to_log_file("runtime_process-cell-under-mouse")
         def display_intensity(viewer, event): 
-            if self.session.mode == "Context":
+            if self.session.mode == "Slide":
                 kw_res = find_mouse(event.position)
                 cell = kw_res["cell"]
                 coords = kw_res["coords"]
@@ -1905,7 +1870,7 @@ class GView:
 
                 if (vals is None) or (next(iter(vals.values())) is None):
                     # Don't do anything else - the cursor is out of bounds of the image
-                    self.viewer.status = 'Out of bounds context'
+                    self.viewer.status = 'Out of bounds slide'
                     self.session.cell_under_mouse = None
                     return False 
                 
@@ -1923,13 +1888,13 @@ class GView:
                     self.session.cell_under_mouse =  cell # save info
                     self.set_cell_description_label(cid)
                     # Draw box around closest cell
-                    box_closest_context_mode_cell(cell)
+                    box_closest_slide_mode_cell(cell)
 
                 else: # Not near a cell
                     cid =''
                     self.set_cell_description_label(None, display_text_override="No cell nearby to show!")
                     try:
-                        self.viewer.layers.selection.active = self.viewer.layers["Context Closest Cell Box"]
+                        self.viewer.layers.selection.active = self.viewer.layers["Slide Closest Cell Label"]
                         self.viewer.layers.remove_selected()
                     except KeyError:
                         pass
@@ -1943,7 +1908,7 @@ class GView:
                     if val != "-": val = int(val)
                     output_str+= f'<font color="{self.data.channelColors[fluor].replace("blue","blue")}">    {val}   </font>' # "#0462d4"
                 
-                cname = f'Cell {cid}' if cell is not None else "Context Mode" # default display name if the mouse is not under a cell
+                cname = f'Cell {cid}' if cell is not None else "Slide Mode" # default display name if the mouse is not under a cell
                 
                 sc = self.data.statuses_hex[self.session.current_cells.loc[str(cid)]['Validation']] if cell is not None else '' # 
                 if not sc == "#ffffff":
@@ -2002,88 +1967,6 @@ class GView:
         self.session.display_intensity_func = display_intensity
         self.session.find_mouse_func = find_mouse
 
-        def change_status_display(cell_name, next_status):
-            next_color_txt = self.data.statuses_rgba[next_status]
-            next_color_txt = list(x/255 if next_color_txt.index(x)!=3 else 1 for x in next_color_txt)
-
-            self.session.current_cells.loc[str(cell_name),'Validation'] = next_status
-            self.session.session_cells.loc[str(cell_name),'Validation'] = next_status
-            try:
-                self.session.page_cells.loc[str(cell_name),'Validation'] = next_status
-            except (KeyError, ValueError) as e:
-                pass # Cell not in page. Should still be marked in self.session.current_cells list
-
-            self.set_cell_description_label(str(cell_name)) 
-            # Change gallery mode status layer
-            try:
-                ind_target = list(self.session.grid_to_ID["Gallery"].values()).index(str(cell_name))
-                x = viewer.layers["Gallery Status Squares"].face_color
-                x[ind_target] = next_color_txt
-                viewer.layers["Gallery Status Squares"].face_color = x 
-                viewer.layers["Multichannel Status Squares"].face_color = x
-
-                viewer.layers["Gallery Status Squares"].edge_color = x
-                viewer.layers["Multichannel Status Squares"].edge_color = x
-
-                self.session.status_text_object["color"][ind_target] = next_color_txt
-                viewer.layers["Gallery Status Numbers"].text = self.session.status_text_object
-                viewer.layers["Multichannel Status Numbers"].text = self.session.status_text_object
-    
-            except (KeyError, ValueError) as e:
-                # Changing a cell status that isn't in the current page using Context Mode.
-                print(e)
-            
-            # print(f"!!! {self.session.mode} {self.session.context_nuclei_boxes_text_object} {self.session.context_nuclei_boxes_map_to_ind}")
-            if self.session.mode =="Context" and self.session.context_nuclei_boxes_text_object is not None and self.session.context_nuclei_boxes_map_to_ind:
-                try:
-                    ind_target = self.session.context_nuclei_boxes_map_to_ind[str(cell_name)]
-                    print(f'% ind target')
-                    print(ind_target)
-                    x = viewer.layers["Context Nuclei Boxes"].edge_color # List of colors
-                    x[ind_target] = next_color_txt # Change only the color of this cell
-                    viewer.layers["Context Nuclei Boxes"].edge_color = x
-                    self.session.context_nuclei_boxes_text_object["color"] = x
-                    viewer.layers["Context Nuclei Boxes"].text = self.session.context_nuclei_boxes_text_object
-                except (KeyError, ValueError) as e:
-                # Changing a cell status that isn't in the current page using Context Mode.
-                    print(f"context box status issue: {e}")
-
-        def change_status_display_forAll(next_status):
-            next_color_txt = self.data.statuses_rgba[next_status]
-            next_color_txt = list(x/255 if next_color_txt.index(x)!=3 else 1 for x in next_color_txt)
-
-            # set all cells to status
-            for coords, cname in self.session.grid_to_ID[self.session.mode].items():
-                self.session.current_cells.loc[str(cname),'Validation'] = next_status
-                self.session.session_cells.loc[str(cname),'Validation'] = next_status
-                try:
-                    self.session.page_cells.loc[str(cname),'Validation'] = next_status
-                except (KeyError, ValueError) as e:
-                    pass # Cell not in page. Should still be marked in self.session.current_cells list
-            # Change gallery mode status layer
-            try:
-                x = viewer.layers["Gallery Status Squares"].face_color
-                x = [next_color_txt for y in x]
-                viewer.layers["Gallery Status Squares"].face_color = x 
-                x = viewer.layers["Gallery Status Squares"].edge_color
-                x = [next_color_txt for y in x]
-                viewer.layers["Gallery Status Squares"].edge_color = x
-
-                self.session.status_text_object["color"] = [next_color_txt for y in self.session.status_text_object["color"]]
-                viewer.layers["Gallery Status Numbers"].text = self.session.status_text_object
-
-                x = viewer.layers["Multichannel Status Squares"].face_color
-                x = [next_color_txt for y in x]
-                viewer.layers["Multichannel Status Squares"].face_color = x 
-                x = viewer.layers["Multichannel Status Squares"].edge_color
-                x = [next_color_txt for y in x]
-                viewer.layers["Multichannel Status Squares"].edge_color = x
-
-                viewer.layers["Multichannel Status Numbers"].text = self.session.status_text_object
-                
-            except (KeyError, ValueError):
-                # Changing a cell status that isn't in the current page using Context Mode.
-                pass 
         
         @viewer.bind_key('Space', overwrite = True)
         @self.catch_exceptions_to_log_file("runtime_assign-next-status")
@@ -2095,18 +1978,16 @@ class GView:
                 return False # leave if the mouse is not near a cell (not sure that this could even happen)
             cell_name = cell.name  
 
-                
-
             cur_status = self.session.current_cells.loc[str(cell_name)]['Validation']
             cur_index = list(status_colors.keys()).index(cur_status)
             next_status = list(status_colors.keys())[(cur_index+1)%len(status_colors)]
 
-            if self.session.mode == "Context" and self.session.nuclei_boxes_vis["Context"] == "Mouse":
-                # Change Context boxes and mouse only box colors
-                self.viewer.layers["Context Closest Cell Box"].edge_color = self.data.statuses_hex[next_status]
-                self.session.context_closest_cell_text_object["color"] = self.data.statuses_hex[next_status]
-                viewer.layers["Context Closest Cell Box"].text = self.session.context_closest_cell_text_object
-            change_status_display(cell_name, next_status)
+            if self.session.mode == "Slide" and self.session.cell_labels_vis["Slide"] == "Mouse":
+                # Change Slide boxes and mouse only box colors
+                self.viewer.layers["Slide Closest Cell Label"].edge_color = self.data.statuses_hex[next_status]
+                self.session.slide_closest_cell_text_object["color"] = self.data.statuses_hex[next_status]
+                viewer.layers["Slide Closest Cell Label"].text = self.session.slide_closest_cell_text_object
+            self.change_cell_score(cell_name, next_status)
 
             # Update scoring tally
             self.update_scoring_tally(cur_status, next_status, cell_name in self.session.page_cells.index)
@@ -2127,7 +2008,7 @@ class GView:
             # Allow user to click on a cell to get it's name into the entry box  
             if self.data.analysisRegionsInData:
                 self.session.widget_dictionary['notes annotation combo'].setCurrentText(layer)
-                if self.session.mode == "Context":
+                if self.session.mode == "Slide":
                     self.session.widget_dictionary['page cell layer'].setCurrentText(layer)
                 self.session.widget_dictionary['switch mode annotation'].setCurrentText(layer)
                 self.session.widget_dictionary["image_save_target_annotation"].setCurrentText(layer)
@@ -2136,7 +2017,7 @@ class GView:
             
             self.session.widget_dictionary["image_save_target_entry"].setText(cid)
             self.session.widget_dictionary['notes cell entry'].setText(cid)
-            if self.session.mode == "Context":
+            if self.session.mode == "Slide":
                 self.session.widget_dictionary['page cell id'].setText(cid)
             self.session.widget_dictionary['switch mode cell'].setText(cid)
             self.session.widget_dictionary["hist_target_entry"].setText(cid)
@@ -2157,17 +2038,17 @@ class GView:
                 cell_name = cell.name    
                 
                 
-                if self.session.mode == "Context" and self.session.nuclei_boxes_vis["Context"] == "Mouse":
-                    # Change Context boxes and mouse only box colors
-                    self.viewer.layers["Context Closest Cell Box"].edge_color = self.data.statuses_hex[scoring_decision]
-                    self.session.context_closest_cell_text_object["color"] = self.data.statuses_hex[scoring_decision]
-                    viewer.layers["Context Closest Cell Box"].text = self.session.context_closest_cell_text_object
+                if self.session.mode == "Slide" and self.session.cell_labels_vis["Slide"] == "Mouse":
+                    # Change Slide boxes and mouse only box colors
+                    self.viewer.layers["Slide Closest Cell Label"].edge_color = self.data.statuses_hex[scoring_decision]
+                    self.session.slide_closest_cell_text_object["color"] = self.data.statuses_hex[scoring_decision]
+                    viewer.layers["Slide Closest Cell Label"].text = self.session.slide_closest_cell_text_object
                 
                 # Update scoring tally BEFORE changing status 
                 self.update_scoring_tally(self.session.current_cells.loc[str(cell_name)]['Validation'], scoring_decision, cell_name in self.session.page_cells.keys())
                 self.set_scoring_label(self.session.widget_dictionary["scoring label"])
 
-                change_status_display(cell_name, scoring_decision)
+                self.change_cell_score(cell_name, scoring_decision)
                 self.session.last_score_used = scoring_decision
 
                 # change color of viewer status
@@ -2179,12 +2060,12 @@ class GView:
             @viewer.bind_key(f'Shift-{keybind}')
             @self.catch_exceptions_to_log_file("runtime_change-status-all")
             def set_scoring_all(viewer):
-                if self.session.mode == "Context": 
+                if self.session.mode == "Slide": 
                     # set up for marker tool   
                     self.toggle_marker_button(self.session.widget_dictionary["marker button"])
                     self.session.widget_dictionary["marker combo"].setCurrentText(scoring_decision)
                     self.session.widget_dictionary["marker combo"].setStyleSheet(f"background-color: rgba{self.data.statuses_rgba[scoring_decision]}; selection-background-color: rgba(0,0,0,30);")
-                    if self.session.context_marker_mode == "Enabled":
+                    if self.session.slide_marker_mode == "Enabled":
                         set_score(viewer)
                     return True
                 
@@ -2192,7 +2073,7 @@ class GView:
                 self.update_scoring_tally_all(scoring_decision)
                 self.set_scoring_label(self.session.widget_dictionary["scoring label"])
 
-                change_status_display_forAll(scoring_decision)
+                self.change_cell_score_forAll(scoring_decision)
 
                 cell_name,data_coordinates,val = find_mouse(viewer.cursor.position)
                 if val is None:
@@ -2208,10 +2089,10 @@ class GView:
             score_all_name = f"{scoring_decision}_all_func"
             exec(f'globals()["{score_name}"], globals()["{score_all_name}"] = create_score_funcs("{scoring_decision}","{keybind}")')
 
-        ''' This function is called on a Control+left click. USed currently to changee to context mode and back'''
+        ''' This function is called on a Control+left click. USed currently to changee to slide mode and back'''
         @viewer.mouse_drag_callbacks.append
         @self.catch_exceptions_to_log_file("runtime_change-session-mode-on-click")
-        def load_context_mode(viewer, event):
+        def load_slide_mode(viewer, event):
             
             if ("Control" in event.modifiers) and ("Shift" in event.modifiers):
                 pass
@@ -2229,8 +2110,8 @@ class GView:
                     self.session.widget_dictionary['switch mode cell'].setText(cid)
                     self.toggle_session_mode_catch_exceptions("Multichannel")
             elif "Control" in event.modifiers:
-                # Go to context or go back to last mode
-                if self.session.mode == "Context":
+                # Go to slide or go back to last mode
+                if self.session.mode == "Slide":
                     self.toggle_session_mode_catch_exceptions(self.session.last_mode)
                 else:
                     if self.session.cell_under_mouse is None: 
@@ -2240,7 +2121,7 @@ class GView:
                         layer = self.session.cell_under_mouse["Layer"]
                         self.session.widget_dictionary['switch mode annotation'].setCurrentText(layer)
                     self.session.widget_dictionary['switch mode cell'].setText(cid)
-                    self.toggle_session_mode_catch_exceptions("Context")
+                    self.toggle_session_mode_catch_exceptions("Slide")
 
         #TODO catch exceptions here? Probably need to inform the user.
         @viewer.bind_key('s')
@@ -2260,8 +2141,8 @@ class GView:
         @self.catch_exceptions_to_log_file("runtime_toggle-status")
         def toggle_statuslayer_visibility(viewer):
             # raise Exception(f"This should work!")
-            if self.session.mode == "Context":
-                toggle_boxes(viewer) # Allow 'h' to trigger cell box toggle when in context mode
+            if self.session.mode == "Slide":
+                toggle_boxes(viewer) # Allow 'h' to trigger cell box toggle when in slide mode
                 return False
             show_vis_radio = self.session.widget_dictionary['show status layer radio']
             hide_vis_radio = self.session.widget_dictionary['hide status layer radio']
@@ -2288,13 +2169,13 @@ class GView:
         @viewer.bind_key('Shift-h')
         @self.catch_exceptions_to_log_file("runtime_toggle-cell-boxes")
         def toggle_boxes(viewer):
-            if self.session.mode != "Context":
-                if self.session.nuclei_boxes_vis["Gallery/Multichannel"]:
+            if self.session.mode != "Slide":
+                if self.session.cell_labels_vis["Gallery/Multichannel"]:
                     self.session.widget_dictionary['hide boxes'].setChecked(True)
                 else:
                     self.session.widget_dictionary['show boxes'].setChecked(True)
-            else: # Context Mode
-                cur = ["Show","Hide","Mouse"].index(self.session.nuclei_boxes_vis["Context"])
+            else: # Slide Mode
+                cur = ["Show","Hide","Mouse"].index(self.session.cell_labels_vis["Slide"])
                 new = ["Show","Hide","Mouse"][(cur+1)%3]
                 self.session.widget_dictionary[f"{new.lower()} boxes"].setChecked(True)
         
@@ -2317,11 +2198,11 @@ class GView:
             z,y,x = viewer.camera.center
             sc = 1 if self.session.image_scale is None else self.session.image_scale
             step_size = ((self.data.imageSize+2)*sc)
-            if self.session.mode == "Context":
+            if self.session.mode == "Slide":
                 fluor = self.data.channels[0]
                 if fluor == "Composite":
                     fluor = self.data.channels[1] # Make sure to get an actual channel. Doesn't matter which one
-                mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
+                mult =  int(viewer.layers["Slide "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
                 step_size *= (mult**2)
 
             viewer.camera.center = (y-int(step_size),x)
@@ -2336,11 +2217,11 @@ class GView:
             z,y,x = viewer.camera.center
             sc = 1 if self.session.image_scale is None else self.session.image_scale
             step_size = ((self.data.imageSize+2)*sc) 
-            if self.session.mode == "Context":
+            if self.session.mode == "Slide":
                 fluor = self.data.channels[0]
                 if fluor == "Composite":
                     fluor = self.data.channels[1] # Make sure to get an actual channel. Doesn't matter which one
-                mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
+                mult =  int(viewer.layers["Slide "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
                 step_size *= (mult**2)
             viewer.camera.center = (y+int(step_size),x)
 
@@ -2354,11 +2235,11 @@ class GView:
             z,y,x = viewer.camera.center
             sc = 1 if self.session.image_scale is None else self.session.image_scale
             step_size = ((self.data.imageSize+2)*sc)
-            if self.session.mode == "Context":
+            if self.session.mode == "Slide":
                 fluor = self.data.channels[0]
                 if fluor == "Composite":
                     fluor = self.data.channels[1] # Make sure to get an actual channel. Doesn't matter which one
-                mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
+                mult =  int(viewer.layers["Slide "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
                 step_size *= (mult**2)
 
             viewer.camera.center = (y,x-int(step_size))
@@ -2377,11 +2258,11 @@ class GView:
             z,y,x = viewer.camera.center
             sc = 1 if self.session.image_scale is None else self.session.image_scale
             step_size = ((self.data.imageSize+2)*sc)
-            if self.session.mode == "Context":
+            if self.session.mode == "Slide":
                 fluor = self.data.channels[0]
                 if fluor == "Composite":
                     fluor = self.data.channels[1] # Make sure to get an actual channel. Doesn't matter which one
-                mult =  int(viewer.layers["Context "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
+                mult =  int(viewer.layers["Slide "+fluor].get_value((1,1))[0]) + 1.5 # This returns a number corresponding to the current pyramid layer. Biggest is 0
                 step_size *= (mult**2)
 
             viewer.camera.center = (y,x+int(step_size))
@@ -2397,7 +2278,7 @@ class GView:
         @viewer.bind_key('Control-Up')   
         @self.catch_exceptions_to_log_file("runtime_arrow-zoom")
         def zoom_in(viewer: napari.Viewer):
-            step_size = 1.15 if self.session.mode !="Context" else 1.4
+            step_size = 1.15 if self.session.mode !="Slide" else 1.4
             # _,y,x = viewer.camera.center
             # curY, curX = self.session.mouse_coords
             # print(f"Before moving, camera coords are {viewer.camera.center}")
@@ -2418,7 +2299,7 @@ class GView:
         @viewer.bind_key('Control-Down')  
         @self.catch_exceptions_to_log_file("runtime_arrow-zoom")
         def zoom_out(viewer):
-            step_size = 1.15 if self.session.mode !="Context" else 1.4
+            step_size = 1.15 if self.session.mode !="Slide" else 1.4
             # _,y,x = viewer.camera.center
             # curY, curX = self.session.mouse_coords
             # print(f"Before moving, camera coords are {viewer.camera.center}")
@@ -2448,7 +2329,7 @@ class GView:
                 if fluor =='Composite': continue
                 self.viewer.layers["Gallery " +fluor].interpolation = new
                 self.viewer.layers["Multichannel "+fluor].interpolation = new
-                self.viewer.layers["Context "+fluor].interpolation = new
+                self.viewer.layers["Slide "+fluor].interpolation = new
 
         @viewer.bind_key('Ctrl-i')
         @self.catch_exceptions_to_log_file("runtime_toggle-tooltip")
@@ -2567,7 +2448,7 @@ class GView:
             fluor_gamma = 2-(2*self.session.view_settings[fluor+" gamma"]) + 0.001
             fluor_contrast = [self.session.view_settings[fluor+" black-in"],self.session.view_settings[fluor+" white-in"]]
             position = self.data.channelOrder[fluor]
-            if self.session.mode in ("Gallery","Context"):
+            if self.session.mode in ("Gallery","Slide"):
                 offset = self.data.imageSize // 2
                 cell_image = self.session.dask_high_res[position,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute() # 0 is the largest pyramid layer         
                 imsize = self.data.imageSize
@@ -2650,7 +2531,7 @@ class GView:
         if self.session.absorption_mode: # Light mode. Subtractive color space
             if page_image: 
                 blended = np.ones(blended_image_shape + (4,))
-            elif self.session.mode in ("Gallery","Context"):
+            elif self.session.mode in ("Gallery","Slide"):
                 blended = np.ones(blended_image_shape + (4,))
             elif self.session.mode == "Multichannel":
                 blended_image_shape = (blended_image_shape[0], blended_image_shape[1]*(num_channels+1))
@@ -2678,7 +2559,7 @@ class GView:
         else: # Dark mode. Additive color space
             if page_image:
                 blended = np.zeros(blended_image_shape + (4,))
-            elif self.session.mode in ("Gallery","Context"):
+            elif self.session.mode in ("Gallery","Slide"):
                 blended = np.zeros(blended_image_shape + (4,))
             elif self.session.mode == "Multichannel":
                 blended_image_shape = (blended_image_shape[0], blended_image_shape[1]*(num_channels+1))
@@ -2812,9 +2693,7 @@ class GView:
 
         viewer.status = "Analyzing object data..."
         # Create array of channel indices in image data. Will use to fetch from the dask array
-        positions = []
-        for fluor in self.data.channels: # loop through channels
-            if fluor != 'Composite': positions.append(self.data.channelOrder[fluor]) # channelOrder dict holds mappings of fluors to position in image data
+        positions = [self.data.channelOrder[chn] for chn in self.data.channels if chn != 'Composite' ]
         # Get data for reference cell
         xmin = singlecell['XMin'] ; xmax = singlecell['XMax'] 
         ymin = singlecell['YMin'] ; ymax = singlecell['YMax'] 
@@ -3045,9 +2924,9 @@ class GView:
             viewer.camera.center = (350*sc, 300*sc)
             self.session.last_multichannel_camera_coordinates["center"] = viewer.camera.center
             self.session.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom
-        elif self.session.mode=="Context":
+        elif self.session.mode=="Slide":
             # Move to cell location on the global image
-            self.viewer.camera.center = (self.session.context_target["center_y"]*sc,self.session.context_target["center_x"]*sc)
+            self.viewer.camera.center = (self.session.slide_target["center_y"]*sc,self.session.slide_target["center_x"]*sc)
         if reset_session:
             self.session.last_gallery_camera_coordinates["center"] = (350*sc,450*sc)
             self.session.last_multichannel_camera_coordinates["center"] = (350*sc, 300*sc)
@@ -3117,7 +2996,7 @@ class GView:
         v = list(self.data.statuses.keys())
         validation_cols = [f"Validation | " + s for s in v]
         self.session.validation_columns = validation_cols
-        cols_to_keep = ["gvid", "Validation",self.data.idcol, "Analysis Region", "Notes", "XMin","XMax","YMin", "YMax"] \
+        cols_to_keep = ["gvid", "Validation",self.data.idcol, "Analysis Region", "Notes", "XMin","XMax","YMin", "YMax", "cell_ID"] \
             + phenotypes + all_possible_intensities + validation_cols + self.data.extra_columns
         cols_to_keep = df.columns.intersection(cols_to_keep)
         df = df.loc[:, cols_to_keep]
@@ -3221,7 +3100,7 @@ class GView:
         combobox_widget.setCurrentIndex(page_number-1)
         self.session.current_page = str(page_number)
         
-        # Save cells that form ALL pages for this session. They could appear in Context Mode.
+        # Save cells that form ALL pages for this session. They could appear in Slide Mode.
         self.session.session_cells = phen_only_df
         self.session.session_cells["center_x"] = ((self.session.session_cells['XMax']+self.session.session_cells['XMin'])/2).astype(int)
         self.session.session_cells["center_y"] = ((self.session.session_cells['YMax']+self.session.session_cells['YMin'])/2).astype(int)
@@ -3257,8 +3136,7 @@ class GView:
                 _sort = ["Analysis Region",self.data.idcol] if self.data.analysisRegionsInData else self.data.idcol
                 _asc = True
             cell_set = cell_set.sort_values(by = _sort, ascending = _asc, kind = 'mergesort')
-        print("WRITING")
-        self.session.session_cells.to_csv("sc.csv")
+            
         self.session.current_cells = cell_set.copy()
         self.session.page_cells = cell_set.copy()
         self.session.cell_under_mouse = cell_set.iloc[0] # Set first cell in list as "current" to avoid exceptions
@@ -3283,7 +3161,9 @@ class GView:
             print(f'\n{e}\n')
             self.viewer.status = 'Error recording note: Cell Id not found in list'
 
-
+###################################################
+#            Interactive points selection
+###################################################
 
 from matplotlib.widgets import LassoSelector
 from matplotlib.path import Path
@@ -3342,6 +3222,7 @@ class SelectFromCollection:
         self.fc[:, -1] = 1
         self.collection.set_facecolors(self.fc)
         self.canvas.draw_idle()
+
 ###################################################
 #                 Viewer Subclasses
 ###################################################
@@ -3350,6 +3231,147 @@ class HaloView(GView):
     def __init__(self, gvdata: storage_classes.GVData, gvui):
         super().__init__(gvdata, gvui)
         self.gvmode = "HALO"
+        
+
+
+
+    def _add_gallery_extras(self, *args, **kwargs):
+
+        print("Adding boxes around nuclei")
+        gx, gy = kwargs["gallery_x"], kwargs["gallery_y"]
+        mx, my = kwargs["multichannel_x"], kwargs["multichannel_y"]
+        offset = self.data.imageSize //2
+        cells = self.session.page_cells
+        x1 = (cells["XMin"] +offset-cells['center_x']).astype(int).to_numpy() 
+        x2 = (cells["XMax"] +offset-cells['center_x']).astype(int).to_numpy()
+        y1 = (cells["YMin"] +offset-cells['center_y']).astype(int).to_numpy()
+        y2 = (cells["YMax"] +offset-cells['center_y']).astype(int).to_numpy()
+        nuclei_box_coords_g = self.zip_coords(gx+y1, gy+x1,gx+y2, gy+x2)
+        nuclei_box_coords_m = self.zip_coords(mx+y1, my+x1,mx+y2, my+x2)
+
+        nb_color_hex = '#000000' if self.session.absorption_mode else '#ffffff'
+        sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
+        self.viewer.add_shapes(nuclei_box_coords_g, name="Gallery Labels", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
+                                            face_color='#00000000', scale=sc, visible = False)
+        self.viewer.add_shapes(nuclei_box_coords_m, name="Multichannel Labels", shape_type="rectangle", edge_width=1, edge_color=nb_color_hex, 
+                                            face_color='#00000000', scale=sc, visible = False)
+        self.session.multichannel_nuclei_box_coords = nuclei_box_coords_m
+
+    ''' In HaloView, this means a Labels layer of rectangles around each cell.'''
+    def toggle_cell_labels(self,*args, **kwargs):
+        # Retrieve arguments dynamically
+        btn, checked = args[:2] 
+        distanceSearchCenter = None if len(args) <3 else args[2]
+
+        # Always reset the user's input selection
+        self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]  
+        if not checked:
+            # This function gets called twice, since when one radio button in the group is toggle on, the other is toggled off. 
+            #   We only want to run this function once so the other call can be discarded
+            return False
+        if self.session.mode in ["Gallery","Multichannel"]:
+            self.session.cell_labels_vis["Gallery/Multichannel"] = not self.session.cell_labels_vis["Gallery/Multichannel"]
+            self.session.cell_labels_vis["Slide"] = "Show" if self.session.cell_labels_vis["Gallery/Multichannel"] else "Hide"
+            try:
+                self.viewer.layers[f'{self.session.mode} Labels'].visible = self.session.cell_labels_vis["Gallery/Multichannel"]
+            except KeyError:
+                pass
+
+        if self.session.mode == "Slide":
+            match btn.text():
+                case str(x) if 'mouse' in x.lower():
+                    selected_mode = "Mouse"
+                case str(x) if 'hide' in x.lower():
+                    selected_mode = "Hide"
+                case _:
+                    selected_mode = "Show"
+            self.session.cell_labels_vis["Slide"] = selected_mode
+            self.session.cell_labels_vis["Gallery/Multichannel"] = True if selected_mode == "Show" else False
+
+            # try to remove any previous box layers if there are any
+            try:
+                self.viewer.layers.selection.active = self.viewer.layers["Slide Labels"]
+                self.viewer.layers.remove_selected()
+            except KeyError:
+                pass
+
+            try:
+                self.viewer.layers.selection.active = self.viewer.layers["Slide Closest Cell Label"]
+                self.viewer.layers.remove_selected()
+            except KeyError:
+                pass
+            # Always reset the user's input selection
+            self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]
+
+            if self.session.cell_labels_vis["Slide"] != "Show":
+                return False # Leave! Nothing more to do since the user does not want to see these boxes
+            vy, vx = self.viewer.cursor.position
+            sc = 1 if self.session.image_scale is None else self.session.image_scale
+            
+            # Find cells in session table near target
+            z,y,x = self.viewer.camera.center
+            # nearby_inds = self.session.kdtree.query_ball_point([x/sc,y/sc], 550) # [x,y], dist -> indices in table
+            if distanceSearchCenter:
+                dists, nearby_inds = self.session.kdtree.query(distanceSearchCenter, k=200) # [x,y], dist -> indices in table
+            else:
+                dists, nearby_inds = self.session.kdtree.query([x/sc,y/sc], k=200) # [x,y], dist -> indices in table
+
+            # if there are fewer than k cells, there will be occurences of length of data +1 in the data. Remove these
+            #   so we can get real indices from the table
+            
+            nearby_cells = self.session.session_cells.iloc[nearby_inds[nearby_inds!=self.session.session_cells.shape[0]] ] 
+            nearby_cells.to_csv('nearby_cells.csv')
+
+            # Add box around cells
+            cids = nearby_cells.index.tolist()
+            x1 = nearby_cells["XMin"].astype(int).tolist() ; x2 = nearby_cells["XMax"].astype(int).tolist()
+            y1 = nearby_cells["YMin"].astype(int).tolist() ; y2 = nearby_cells["YMax"].astype(int).tolist()
+            a = [list(x) for x in zip(y1,x1)]
+            b = [list(x) for x in zip(y2,x2)]
+            nuclei_box_coords = [list(x) for x in zip(a,b)] #list(zip(zip(y1,x1), zip(y2,x2)))
+            validation_colors_hex = [self.data.statuses_hex[s] for s in nearby_cells["Validation"]]
+            self.session.slide_nuclei_boxes_map_to_ind = {cid:i for cid, i in zip(nearby_cells.index.tolist(),  range(len(nearby_cells)))}
+
+            if nuclei_box_coords: # We have cells to box
+                features = {'cid': cids}
+                nb_color_str = 'black' if self.session.absorption_mode else 'white' 
+                nb_color_hex = '#000000' if self.session.absorption_mode else '#ffffff'
+                
+                nb_text = {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':validation_colors_hex}
+                self.session.slide_nuclei_boxes_text_object = nb_text
+                sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
+                self.viewer.add_shapes(nuclei_box_coords, name="Slide Labels", shape_type="rectangle", edge_width=1, edge_color=validation_colors_hex, 
+                                                    face_color='#00000000', scale=sc, features=features,text=nb_text,opacity=0.9 )
+            # Always reset the user's input selection
+            self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]
+    
+    def _change_cell_score_slide_mode(self, *args, **kwargs):
+        if self.session.slide_nuclei_boxes_text_object is not None and self.session.slide_nuclei_boxes_map_to_ind:
+            ind_target = self.session.slide_nuclei_boxes_map_to_ind[str(kwargs['cell_name'])]
+            print(f'% ind target')
+            print(ind_target)
+            x = self.viewer.layers["Slide Labels"].edge_color # List of colors
+            x[ind_target] = kwargs['next_color_rgb'] # Change only the color of this cell
+            self.viewer.layers["Slide Labels"].edge_color = x
+            self.session.slide_nuclei_boxes_text_object["color"] = x
+            self.viewer.layers["Slide Labels"].text = self.session.slide_nuclei_boxes_text_object
+            return True
+        else:
+            pass
+
+    def _change_cell_score_gallery_mode(self, *args, **kwargs):
+        ind_target = list(self.session.grid_to_ID["Gallery"].values()).index(str(kwargs['cell_name']))
+        x = self.viewer.layers["Gallery Status Squares"].face_color
+        x[ind_target] = kwargs['next_color_rgb']
+        self.viewer.layers["Gallery Status Squares"].face_color = x 
+        self.viewer.layers["Multichannel Status Squares"].face_color = x
+
+        self.viewer.layers["Gallery Status Squares"].edge_color = x
+        self.viewer.layers["Multichannel Status Squares"].edge_color = x
+
+        self.session.status_text_object["color"][ind_target] = kwargs['next_color_rgb']
+        self.viewer.layers["Gallery Status Numbers"].text = self.session.status_text_object
+        self.viewer.layers["Multichannel Status Numbers"].text = self.session.status_text_object
 
 class CosMxView(GView):
     def __init__(self, gvdata: storage_classes.GVData, gvui):
@@ -3359,9 +3381,11 @@ class CosMxView(GView):
         self.mm_per_px = gvdata.mm_per_px
         self.px_per_mm = gvdata.px_per_mm
         self.pqds = gvdata.pqds
+        # Make colormap dictionary 
+        self.cell_validation_colors = {cid: transform_color(gvdata.statuses_hex[l])[0] for cid, l in zip(gvdata.objectDataFrame.index.astype(int).tolist(), gvdata.objectDataFrame['Validation'].tolist())}
+        # Have to get these colors in the list for _change_cell_score_slide_mode to work properly
+        self.cell_validation_colors.update({fake_cid+1 : transform_color(fake_status)[0] for fake_cid, fake_status in enumerate(list(gvdata.statuses_hex.values())) })
         super().__init__(gvdata, gvui)
-
-
 
     def get_dask_array(self):
         dask_list = []
@@ -3380,16 +3404,190 @@ class CosMxView(GView):
             dask_list.append(im)
         return dask_list
     
+    def get_labels(self):
+        metadata = zarr.open(self.data.image_path, mode = 'r+',)['labels'].attrs
+        datasets = metadata["multiscales"][0]["datasets"]
+        im = [da.from_zarr(os.path.join(self.data.image_path,'labels'), component=d["path"]) for d in datasets]
+        return im
+
+    
     ''' Overridden GView functions'''
     def _read_image(self):
         self.session.dask_high_res = da.stack(self.get_dask_high_res(), axis = 0) # Saves a path to the image data that can be used later
         self.session.dask_list = self.get_dask_array()
+        self.session.labels_image = self.get_labels()
 
-    def add_extras(self, x, y):
+    def _add_gallery_extras(self, *args, **kwargs):
+        
+        print('''Adding labels to gallery ''')
+        cells = self.session.page_cells
+        offset = self.data.imageSize // 2
+        page_image_gallery = self.black_background(1, self.data.cells_per_row, kind='labels', dtype_force=self.session.labels_image[0].dtype)
+        results = []
+
+        filled = False
+
+        def _keep_labels_erosion(labels):
+            borders = find_boundaries(labels)
+            return borders * labels
+        
+        count = 0
+
+
+        for _, cell in cells.iterrows(): # coords left
+            cell_x = cell['center_x']; cell_y = cell['center_y']
+            # Create array of channel indices in image data. Will use to fetch from the dask array
+            ''' Slice labels -- DO NOT compute until actually adding images later'''
+
+            cid = int(cell.name)
+            ''' Define with defaults that depend on the context of the loop to insert cell ID'''
+            def _filter_labels(labels, _population = cid, _filled = filled):
+                labels[labels!=_population] = 0
+                if _filled:
+                    return rescale_intensity(labels, out_range = (0,(2**8)-1)).astype(np.uint8)
+                else:
+                    return find_boundaries(labels)
+            
+            cell_label = self.session.labels_image[0][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].map_blocks(_filter_labels) 
+            # if not filled:
+            #     cell_label = self.session.labels_image[0][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].map_blocks(_keep_labels_erosion)  
+            # else:
+            #     cell_label = self.session.labels_image[0][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset]
+            results.append(cell_label)
+        print("Computing image with dask")
+        img = dask.compute(*results)
+        
+        
+        col_g = 0 ; row_g = 0 
+        for pos, (_, cell) in enumerate(cells.iterrows()): # coords left
+            col_g = (col_g%self.session.cells_per_row["Gallery"])+1 
+            if col_g ==1: row_g+=1
+            page_image_gallery[(row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = img[pos]
+        sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
+        
+        # Get colormap and subset to cells in gallery
+        self.viewer.add_labels(page_image_gallery, name="Gallery Labels", visible = False,
+            color=self.cell_validation_colors, opacity = 0.7, scale = sc)
+
+
+
+        print('''Adding transcripts to gallery ''',end='')
         for tx in self.data.transcripts:
+            x, y = kwargs["gallery_x"], kwargs["gallery_y"]
             self.get_gallery_tx(self.session.page_cells, tx, self.data.imageSize//2,x, y)
             self.add_slide_tx(tx)
+        print("Done")
 
+    def _add_slide_extras(self):
+        self.add_slide_labels()
+
+    def toggle_cell_labels(self,*args, **kwargs):
+        # Retrieve arguments dynamically
+        btn, checked = args[:2] 
+
+        if not checked:
+            # This function gets called twice, since when one radio button in the group is toggle on, the other is toggled off. 
+            #   We only want to run this function once so the other call can be discarded
+            return False
+        if self.session.mode in ["Gallery","Multichannel"]:
+            # Set button states
+            self.session.cell_labels_vis["Gallery/Multichannel"] = not self.session.cell_labels_vis["Gallery/Multichannel"]
+            self.session.cell_labels_vis["Slide"] = "Show" if self.session.cell_labels_vis["Gallery/Multichannel"] else "Hide"
+            # Toggle labels visibility
+            try:
+                self.viewer.layers[f'{self.session.mode} Labels'].visible = self.session.cell_labels_vis["Gallery/Multichannel"]
+            except KeyError:
+                pass
+        if self.session.mode == "Slide":
+            # set button states
+            match btn.text():
+                case str(x) if 'mouse' in x.lower():
+                    selected_mode = "Mouse"
+                case str(x) if 'hide' in x.lower():
+                    selected_mode = "Hide"
+                case _:
+                    selected_mode = "Show"
+            self.session.cell_labels_vis["Slide"] = selected_mode
+            self.session.cell_labels_vis["Gallery/Multichannel"] = True if selected_mode == "Show" else False
+
+            # Toggle labels visibility
+            try:
+                self.viewer.layers[f'{self.session.mode} Labels'].visible = self.session.cell_labels_vis["Gallery/Multichannel"]
+            except KeyError:
+                pass
+
+            self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]
+
+    def _change_cell_score_slide_mode(self, *args, **kwargs):
+        new_color = transform_color(self.data.statuses_hex[kwargs['next_status']])[0]
+        
+        cm = self.viewer.layers["Slide Labels"].colormap.colors
+        pos = 0
+        for i in range(len(cm)):
+            if all(cm[i] == new_color):
+                pos = i
+                break
+        self.viewer.layers["Slide Labels"]._label_color_index[int(kwargs['cell_name'])] = self.viewer.layers["Slide Labels"].colormap.controls[pos] + 0.02 # This MATTERS
+        self.viewer.layers["Slide Labels"].refresh()
+
+        try:
+            self.viewer.layers["Gallery Labels"]._label_color_index[int(kwargs['cell_name'])] = self.viewer.layers["Gallery Labels"].colormap.controls[pos] + 0.02 # This MATTERS
+            # self.viewer.layers["Gallery Labels"].refresh()
+        except KeyError:
+            pass
+        return True
+    
+    def _change_cell_score_gallery_mode(self, *args, **kwargs):
+        # Change squares
+        ind_target = list(self.session.grid_to_ID["Gallery"].values()).index(str(kwargs['cell_name']))
+        x = self.viewer.layers["Gallery Status Squares"].face_color
+        x[ind_target] = kwargs['next_color_rgb']
+        self.viewer.layers["Gallery Status Squares"].face_color = x 
+        self.viewer.layers["Multichannel Status Squares"].face_color = x
+
+        self.viewer.layers["Gallery Status Squares"].edge_color = x
+        self.viewer.layers["Multichannel Status Squares"].edge_color = x
+
+        self.session.status_text_object["color"][ind_target] = kwargs['next_color_rgb']
+        self.viewer.layers["Gallery Status Numbers"].text = self.session.status_text_object
+        self.viewer.layers["Multichannel Status Numbers"].text = self.session.status_text_object
+    
+        
+        #Change image data...
+        # filled = False
+        # def _keep_labels_erosion(labels):
+        #     borders = find_boundaries(labels)
+        #     return borders * labels
+
+        # cell = self.session.page_cells.loc[str(kwargs['cell_name'])]
+        # cell_x = cell['center_x']; cell_y = cell['center_y'] ; offset = self.data.imageSize//2
+        
+        # if not filled:
+        #     cell_label = self.session.labels_image[0][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].map_blocks(_keep_labels_erosion).compute()
+        # else:
+        #     cell_label = self.session.labels_image[0][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].compute()
+        # row_g, col_g = list(self.session.grid_to_ID["Gallery"].keys())[list(self.session.grid_to_ID["Gallery"].values()).index(cell.name)].split(",")
+        # row_g, col_g = int(row_g), int(col_g)
+        # self.viewer.layers["Gallery Labels"].data[(row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = cell_label
+        
+
+        new_color = transform_color(self.data.statuses_hex[kwargs['next_status']])[0]
+        
+        cm = self.viewer.layers["Gallery Labels"].colormap.colors
+        pos = 0
+        for i in range(len(cm)):
+            if all(cm[i] == new_color):
+                pos = i
+                break
+        self.viewer.layers["Gallery Labels"]._label_color_index[int(kwargs['cell_name'])] = self.viewer.layers["Gallery Labels"].colormap.controls[pos] + 0.02 # This MATTERS
+        self.viewer.layers["Gallery Labels"].refresh()
+
+        try:
+            self.viewer.layers["Slide Labels"]._label_color_index[int(kwargs['cell_name'])] = self.viewer.layers["Slide Labels"].colormap.controls[pos] + 0.02 # This MATTERS
+            # self.viewer.layers["Gallery Labels"].refresh()
+        except KeyError:
+            pass
+        return True
 
     ''' FOV stuff '''
     def get_offsets(self, fov):
@@ -3536,9 +3734,9 @@ class CosMxView(GView):
             exclude = {cid: [0,0,0,0] for cid in adata.obs.loc[~adata.obs["Selected"].isin(colvalues), "global_ID"].tolist()}
             cell_colors.update(exclude)
 
-        metadata = zarr.open(self.data.imagefolder, mode = 'r+',)["labels"].attrs
+        metadata = zarr.open(self.data.image_path, mode = 'r+',)["labels"].attrs
         datasets = metadata["multiscales"][0]["datasets"]
-        im = [da.from_zarr(os.path.join(self.data.imagefolder,"labels"), component=d["path"]) for d in datasets]
+        im = [da.from_zarr(os.path.join(self.data.image_path,"labels"), component=d["path"]) for d in datasets]
 
 
         def color_labels(labels, cell_dict, fill):
@@ -3572,9 +3770,9 @@ class CosMxView(GView):
 
     def add_cell_leiden3(self, view:napari.Viewer, layername = "leiden",colname = "Selected",colvalues = [True], filled = True, fov = None):
         adata = self.adata
-        metadata = zarr.open(self.data.imagefolder, mode = 'r+',)["labels"].attrs
+        metadata = zarr.open(self.data.image_path, mode = 'r+',)["labels"].attrs
         datasets = metadata["multiscales"][0]["datasets"]
-        im = [da.from_zarr(os.path.join(self.data.imagefolder,"labels"), component=d["path"]) for d in datasets]
+        im = [da.from_zarr(os.path.join(self.data.image_path,"labels"), component=d["path"]) for d in datasets]
 
         def _remove_bg_cells_and_fill(_labels, _population, _filled ):
             _labels[~np.isin(_labels, _population)] = 0 # Cells not in population will be treated as background and not colored
@@ -3607,7 +3805,7 @@ class CosMxView(GView):
         return view.add_labels(im,name=layername, color = cell_colors, scale = (self.mm_per_px, self.mm_per_px), metadata=metadata)
 
     def add_cell_metadata_labels(self, view:napari.Viewer,meta: pd.DataFrame,colname = "Selected",colvalues = [True], layername = "Custom", cm = "gray", filled = True, fov = None):
-        metadata = zarr.open(self.data.imagefolder, mode = 'r+',)["labels"].attrs
+        metadata = zarr.open(self.data.image_path, mode = 'r+',)["labels"].attrs
         datasets = metadata["multiscales"][0]["datasets"]
 
         def _filter_labels(labels, _population, _filled):
@@ -3617,8 +3815,8 @@ class CosMxView(GView):
             else:
                 return find_boundaries(labels)
             
-        im = [da.from_zarr(os.path.join(self.data.imagefolder,"labels"), component=d["path"]) for d in datasets]
-        # im = da.from_zarr(os.path.join(self.data.imagefolder,"labels"), 
+        im = [da.from_zarr(os.path.join(self.data.image_path,"labels"), component=d["path"]) for d in datasets]
+        # im = da.from_zarr(os.path.join(self.data.image_path,"labels"), 
         #     component=datasets[0]["path"])
         
         # fov_im = slice_fov_dask(im,fov)
@@ -3636,74 +3834,104 @@ class CosMxView(GView):
             blending="additive",
             opacity = 0.5,
             scale = (self.mm_per_px,self.mm_per_px),
-            rgb=False,
             metadata=metadata)
         return layer
 
-    def add_cell_labels(self, view:napari.Viewer, layername = "outlines", cm = "gray", fov = None):
-        metadata = zarr.open(self.data.imagefolder, mode = 'r+',)["labels"].attrs
-        datasets = metadata["multiscales"][0]["datasets"]
-        im = [da.from_zarr(os.path.join(self.data.imagefolder,"labels"), component=d["path"]).map_blocks(find_boundaries)
-            for d in datasets]
-        if fov is not None:
-            im = self.slice_fov_dask(im, fov)
-        cm = Colormap(['transparent', cm], controls = [0.0, 1.0])
-        layer = view.add_image(im, name=layername, multiscale=True,
-            colormap=cm, 
-            blending="translucent",
-            opacity = 0.5,
-            scale = (self.mm_per_px,self.mm_per_px),
-            rgb=False,
-            metadata=metadata)
-        return layer
+    def add_slide_labels(self, layername = "Slide Labels", cm = "gray", fov = None):
+        # Napari internal code modificaiton required
+        # in napari/layers/labels/labels.py
+        # In @color.setter color()
+        # DELETE 532 - 540
+        # PASTE on 532
+        # PMR MOFIDIED CODE BELOW
+        # if isinstance(list(color.values())[0],np.ndarray):
+        #     if self._background_label not in color:
+        #         color[self._background_label] = transform_color('transparent')[0]
+        #     if None not in color:
+        #         color[None] = transform_color('black')[0]
+        #     colors = color
+        # else:
+        #     if self._background_label not in color:
+        #         color[self._background_label] = 'transparent'
+        #     if None not in color:
+        #         color[None] = 'black'
+        #     colors = {label: transform_color(color_str)[0] for label, color_str in color.items()}
+        # PMR MODIFIED CODE ABOVE
 
-    def add_zarr_layer(self, view: napari.Viewer,name = 'U', layername = "DAPI", cm = "blue", fov = None):
-        if(name == "labels"):
-            return self.add_cell_labels(view,layername, cm,fov)
-        metadata = zarr.open(self.data.imagefolder, mode = 'r+',)[name].attrs
-        # track updates to contrast limits and colormap
-        
-
-        datasets = metadata["multiscales"][0]["datasets"]
-        im = [da.from_zarr(os.path.join(self.data.imagefolder,name), component=d["path"]) for d in datasets]
-        
+        metadata = zarr.open(self.data.image_path, mode = 'r+',)["labels"].attrs
+        im = [x for x in self.session.labels_image]
         if fov is not None:
             im = self.slice_fov_dask(im, fov)
 
-        window = metadata['omero']['channels'][0]['window']
-        layer = view.add_image(im, name=layername, multiscale=True,
-            colormap=cm, blending="additive",
-            contrast_limits = (window['start'],window['end']),
-            scale = (self.mm_per_px,self.mm_per_px),
-            # translate=self._top_left_mm(), 
-            # rotate=self.rotate,
-            rgb=False,
+        filled = False
+        if not filled:
+            def _keep_labels_erosion(labels):
+                borders = find_boundaries(labels)
+                return borders * labels
+            im = [x.map_blocks(_keep_labels_erosion) for x in im]
+        # cm = Colormap(['transparent', cm], controls = [0.0, 1.0])
+        sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
+        layer = self.viewer.add_labels(im, name=layername,
+            color=self.cell_validation_colors, 
+            # blending="translucent",
+            opacity = 0.7,
+            scale = sc,
             metadata=metadata)
-        layer.contrast_limits_range = window['min'],window['max']
+
         return layer
 
-    def update_viewer(self, view, lparams, fov = None):
-        layers = [self.add_zarr_layer(view, *args, fov = fov) for args in lparams]
-        return layers
+    # def add_zarr_layer(self, view: napari.Viewer,name = 'U', layername = "DAPI", cm = "blue", fov = None):
+    #     if(name == "labels"):
+    #         return self.add_cell_labels(view,layername, cm,fov)
+    #     metadata = zarr.open(self.data.image_path, mode = 'r+',)[name].attrs
+    #     # track updates to contrast limits and colormap
+        
+
+    #     datasets = metadata["multiscales"][0]["datasets"]
+    #     im = [da.from_zarr(os.path.join(self.data.image_path,name), component=d["path"]) for d in datasets]
+        
+    #     if fov is not None:
+    #         im = self.slice_fov_dask(im, fov)
+
+    #     window = metadata['omero']['channels'][0]['window']
+    #     layer = view.add_image(im, name=layername, multiscale=True,
+    #         colormap=cm, blending="additive",
+    #         contrast_limits = (window['start'],window['end']),
+    #         scale = (self.mm_per_px,self.mm_per_px),
+    #         # translate=self._top_left_mm(), 
+    #         # rotate=self.rotate,
+    #         rgb=False,
+    #         metadata=metadata)
+    #     layer.contrast_limits_range = window['min'],window['max']
+    #     return layer
+
+    # def update_viewer(self, view, lparams, fov = None):
+        # layers = [self.add_zarr_layer(view, *args, fov = fov) for args in lparams]
+        # return layers
     
     ''' Transcript functions '''
 
     def get_gallery_tx(self, cells:pd.DataFrame, tx_name: str, offset: int, yadj:int, xadj:int, color: str = 'white', psize:int = 12):
         pts = None
-        #TODO it's wrong
+        # Read all targets FIRST. Then in the loop, filter by coordinates. Consider NOT converting to DataFrame until inside the loop
+        #   This is still pretty fast though.
+        allpts = self.pqds.to_table(filter= (ds.field('target') == tx_name) , columns=['fov', 'y', 'x']).to_pandas()
+
         for i, (_, cell) in enumerate(cells.iterrows()):
-            # 
             cx = cell['fovX']
             cy = cell['fovY']
             cfov = cell['fov']
-            cpts = self.pqds.to_table(filter= (ds.field('target') == tx_name) & (ds.field('fov') == int(cfov)) & (ds.field('x') < cx+offset) & (ds.field('x') > cx-offset) & (ds.field('y') < cy+offset) & (ds.field('y') > cy-offset), columns=['y', 'x']).to_pandas().to_numpy()
+            cpts = allpts.loc[(allpts['fov'] == int(cfov)) &
+                                (allpts['x'] < cx+offset) & (allpts['x'] > cx-offset) &
+                                (allpts['y'] < cy+offset) & (allpts['y'] > cy-offset)
+                                , ['y','x']].to_numpy()
+            # Have points. Transform coordinates to gallery
             cpts[:,0] = cpts[:,0] - (cy-offset) + yadj[i] 
             cpts[:,1] = cpts[:,1] - (cx-offset) + xadj[i]
             pts = np.concatenate([pts, cpts]) if pts is not None else cpts
         sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
         return self.viewer.add_points(pts, name=f'Gallery {tx_name}', face_color= color, size = psize, scale= sc)
             
-
     def get_tx(self, tx_name, fov = None, extra_columns = []):
         topleft = (min(self.fov_offsets['Y_mm']), -max(self.fov_offsets['X_mm']))
         if fov:
@@ -3721,7 +3949,7 @@ class CosMxView(GView):
         else:
             return yx
 
-    def add_slide_tx(self, tx_name, fov = None, col = 'white',cm = 'viridis', psize = 20):
+    def add_slide_tx(self, tx_name, fov = None, col = 'white',cm = 'viridis', psize = 12):
         view = self.viewer
         sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
         if col in self.pqds.schema.names:
@@ -3731,11 +3959,11 @@ class CosMxView(GView):
             feat = feat[[col]].to_numpy().ravel() # Flatten to 1D
                                             
             ptprops = {col : rescale_intensity(feat, out_range = (0,1.0))} # Scale 0 to 1 is expected for colors.
-            return view.add_points(pts, name=f'Context {tx_name}', face_color=col, face_colormap= cm, properties=ptprops,  edge_color="white",
+            return view.add_points(pts, name=f'Slide {tx_name}', face_color=col, face_colormap= cm, properties=ptprops,  edge_color="white",
                         size = psize, scale= sc) 
         else:
             return view.add_points(self.get_tx(tx_name, fov),
-                    name=f'Context {tx_name}', face_color= col, size = psize, scale= sc)
+                    name=f'Slide {tx_name}', face_color= col, size = psize, scale= sc)
 
     def add_tx_heatmap(self, view: napari.Viewer, tx_name, imshape, fov=None, kind = ["contour"], scale_kde = True,
                     scale_kde_limits = (25, 500),

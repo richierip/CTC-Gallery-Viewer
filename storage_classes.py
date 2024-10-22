@@ -59,27 +59,27 @@ class SessionVariables:
         self.image_scale = None # None, or float representing pixels per micron
         self.zarr_store = None
         self.dask_array = {} # full [Channel,Y,X] dask array, not yet loaded
-        self.mode = "Gallery" # ['Gallery', 'Multichannel', 'Context']
+        self.mode = "Gallery" # ['Gallery', 'Multichannel', 'Slide']
         self.last_mode = "Gallery" # The previous mode of the viewer
         self.last_gallery_camera_coordinates = {"center":(0,0),"z":1} # store the last place the user was looking in the gallery
         self.last_multichannel_camera_coordinates = {"center":(0,0),"z":1} # store the last place the user was looking in multichannel mode
-        self.last_context_camera_coordinates = {"center":(0,0),"z":1} # store the last place the user was looking in context mode
+        self.last_slide_camera_coordinates = {"center":(0,0),"z":1} # store the last place the user was looking in slide mode
         self.grid_to_ID = {"Gallery":{}, "Multichannel":{}}
         self.page_status_layers = {"Gallery": [], "Multichannel": []}
         self.session_cells = pd.DataFrame() # all cells in all pages
         self.cell_under_mouse = {} # Will update with 'current cells' info for one cell
         self.cell_under_mouse_changed = False # Stores a flag to signal this event
-        self.context_target = {} # Saves information for the cell of interest in Context Mode
+        self.slide_target = {} # Saves information for the cell of interest in Slide Mode
         self.current_cells =  {'Layer':str|None,"cid": int,"center_x": int,'center_y': int,
                                 'validation_call': str, 'XMax' : float,'XMin':float,
                                 'YMax' : float,'YMin':float} # Holds dict of dict for the cells that are loaded on the current page in the viewer
         self.cells_per_row = {"Gallery" : 8, "Multichannel" : 4} # replaced with real numbers
         self.status_text_object = None
-        self.context_nuclei_boxes_text_object = None
-        self.context_nuclei_boxes_map_to_ind = {} # Save position in list for each cell
-        self.context_closest_cell_text_object = None # {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':validation_colors_hex}
+        self.slide_nuclei_boxes_text_object = None
+        self.slide_nuclei_boxes_map_to_ind = {} # Save position in list for each cell
+        self.slide_closest_cell_text_object = None # {'string':'{cid}', 'anchor':'upper_left', 'size' : 8, 'color':validation_colors_hex}
         self.absorption_mode = False # True = light mode, False = Dark mode
-        self.nuclei_boxes_vis = {"Gallery/Multichannel":False, "Context": "Hide"} # {"Gallery/Multichannel":True|False, "Context": "Show"|"Hide"|"Mouse"}
+        self.cell_labels_vis = {"Gallery/Multichannel":False, "Slide": "Hide"} # {"Gallery/Multichannel":True|False, "Slide": "Show"|"Hide"|"Mouse"}
         self.status_layer_vis = True
         self.status_box_vis = True
         self.kdtree = None # Will hold scipy.spatial.cKDTree data structure, for use in finding nearest neighbors
@@ -92,11 +92,11 @@ class SessionVariables:
         self.side_dock_groupboxes = {}
         self.widget_dictionary = {}
         self.scoring_tally = {"Page":{},"Session":{}, "Data":{}} # {"Session" : {"Unseen" : 1000, "Confirmed": 25 , ... }}, "Data":{"Unseen":2000, ...} }
-        self.page_cells = {} # same structure as current_cells, but will not add cells as the user moves around in context mode
+        self.page_cells = {} # same structure as current_cells, but will not add cells as the user moves around in slide mode
         self.radiogroups = {}
         self.last_score_used = None
-        self.context_marker_mode = "Disabled"
-        self.context_marker_score = None
+        self.slide_marker_mode = "Disabled"
+        self.slide_marker_score = None
         self.scoring_function_called_by_mouse_move = False
         self.tooltip_visible = False
         self.multichannel_page_images = {} # {"DAPI" : np.Array ...}

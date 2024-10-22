@@ -1599,14 +1599,15 @@ class GVUI_CosMx(GVUI):
 
             df['Validation'] = 'Unseen'
             df['Notes'] = '-'
-            df['center_x'] = df['CenterY_local_px'] - (df['X_mm']* self.gvdata.px_per_mm) - (topleft[1]*self.gvdata.px_per_mm)
-            df['center_y'] = df['CenterX_local_px'] + (df['Y_mm']*self.gvdata.px_per_mm) - (topleft[0]*self.gvdata.px_per_mm)
+            df.rename(columns = {'CenterX_local_px' : 'fovX', 'CenterY_local_px': 'fovY'}, inplace=True) # Coord flip again.
+            df['center_x'] = df['fovX'] - (df['X_mm']* self.gvdata.px_per_mm) - (topleft[1]*self.gvdata.px_per_mm)
+            df['center_y'] = df['fovY'] + (df['Y_mm']*self.gvdata.px_per_mm) - (topleft[0]*self.gvdata.px_per_mm)
 
             df['XMin'] = df['center_x'] - (df['Width'] //2)
             df['XMax'] = df['center_x'] + (df['Width'] //2)
             df['YMin'] = df['center_y'] - (df['Height'] //2)
             df['YMax'] = df['center_y'] + (df['Height'] //2)
-            df.rename(columns = {'CenterX_local_px' : 'fovY', 'CenterY_local_px': 'fovX'}, inplace=True) # Coord flip again.
+            
             adata.obs = df
             self.gvdata.objectDataFrame = df
             self.gvdata.adata = adata
