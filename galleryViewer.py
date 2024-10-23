@@ -11,7 +11,7 @@ from napari.layers import Points as PointsLayer
 from napari.layers import Image as ImageLayer
 from napari.settings import get_settings
 from qtpy.QtWidgets import (QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox, QButtonGroup, QSizePolicy, QFileDialog, QSpinBox,
-                        QComboBox, QHBoxLayout,QVBoxLayout, QGroupBox, QLayout, QAbstractButton, QScrollArea, QDockWidget, QToolTip)
+                        QComboBox, QHBoxLayout,QVBoxLayout,QGridLayout, QGroupBox, QLayout, QAbstractButton, QScrollArea, QDockWidget, QToolTip)
 from qtpy.QtCore import Qt,QPoint, QRect
 from qtpy.QtGui import QFont #, QImage, QGuiApplication, QPixmap
 import numpy as np
@@ -26,16 +26,15 @@ import matplotlib.lines as lines
 import copy
 import time
 import custom_color_functions # Necessary, do not remove
+from custom_color_functions import colormap_titled as rgbcd
 from math import ceil
 from re import sub
 import os
 import dask.array as da
 import dask 
-# import zarr
 import scipy.spatial as spatial
 from seaborn import histplot, violinplot, FacetGrid
-from itertools import chain
-from functools import wraps as fwrap
+# from itertools import chain
 
 #CosMx
 import pyarrow.dataset as ds
@@ -46,6 +45,7 @@ from skimage.transform import resize
 from skimage.exposure import rescale_intensity
 from vispy.color.colormap import Colormap
 import scipy.stats as st
+from collections import OrderedDict
 
 # Single cell processing
 import scanpy as sc
@@ -55,17 +55,16 @@ from pathlib import Path
 from napari.utils.color import transform_color
 from napari.utils.colormaps import AVAILABLE_COLORMAPS, label_colormap, color_dict_to_colormap
 
-
 # For clipboard
 from io import BytesIO
 import win32clipboard
 from PIL import Image
 import pathlib
-from datetime import datetime
+# from datetime import datetime
 
 # These files were created as part of the GalleryViewer Project
 import storage_classes
-from custom_qt_classes import StatusCombo, ViewSettingsDialog, make_fluor_toggleButton_stylesheet
+from custom_qt_classes import StatusCombo, ViewSettingsDialog, make_fluor_toggleButton_stylesheet, ColorfulComboBox
 # from initial_UI import GVUI # Can't do this (circular import)
 # from initial_UI import VERSION_NUMBER
 
@@ -459,13 +458,13 @@ class GView:
         im_save_page_buttons_layout.addWidget(imsave_page_button_file)
         im_save_page_layout.addLayout(im_save_page_buttons_layout)
 
-        self.overflow_page_dock_group = QGroupBox()
-        self.overflow_page_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
-        overflow_page_dock_layout = QVBoxLayout(self.overflow_page_dock_group)
+        self.export_dock_group = QGroupBox()
+        self.export_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+        export_dock_layout = QVBoxLayout(self.export_dock_group)
         self.session.side_dock_groupboxes['image cell group'] = im_save_cell_group
         self.session.side_dock_groupboxes['image page group'] = im_save_page_group
-        overflow_page_dock_layout.addWidget(im_save_cell_group)
-        overflow_page_dock_layout.addWidget(im_save_page_group)
+        export_dock_layout.addWidget(im_save_cell_group)
+        export_dock_layout.addWidget(im_save_page_group)
 
     def add_plot_tab(self):
 
@@ -690,7 +689,28 @@ class GView:
             # Adding these images with visible = True allows viewsettings changes to be applied to them when the user loads into gallery mode at first.
             # Otherwise, it seems that they only display the changes after they have been visible for some small period of time in the viewer. 
     
+    ''' Overload to change appearance / presence of other tabs'''
+    def _construct_right_dock(self):
+        # Make sure user can scroll through tools if there are too many
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        # scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+        scroll_area.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+        scroll_area.setWidget(self.side_dock_group)
+        self.side_dock_group.setAlignment(Qt.AlignHCenter)
+        scroll_area.resize(self.side_dock_group.sizeHint())
+        right_dock = self.viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right", tabify = True)
+        self.viewer.window.add_dock_widget(self.export_dock_group, name ="Export data",area="right", tabify = True)
+        self.viewer.window.add_dock_widget(self.plots_dock_group, name ="Plotting",area="right", tabify = True)
 
+        right_dock.show()
+        right_dock.raise_() # Make the user tools dock come up first
+
+        # right_dock.resize(side_dock_group.sizeHint())
+        # print(side_dock_group.sizeHint())
+        # print(scroll_area.sizeHint())
+        # print(right_dock.sizeHint())
     def finish_init(self):
         #TODO set custom theme?
         self.viewer.theme = "dark"
@@ -703,27 +723,7 @@ class GView:
         self.restore_viewsettings_from_cache()
         self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]  
 
-
-        # Make sure user can scroll through tools if there are too many
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        # scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-        scroll_area.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-        scroll_area.setWidget(self.side_dock_group)
-        self.side_dock_group.setAlignment(Qt.AlignHCenter)
-        scroll_area.resize(self.side_dock_group.sizeHint())
-        right_dock = self.viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right", tabify = True)
-        self.viewer.window.add_dock_widget(self.overflow_page_dock_group, name ="Export data",area="right", tabify = True)
-        self.viewer.window.add_dock_widget(self.plots_dock_group, name ="Plotting",area="right", tabify = True)
-
-        right_dock.show()
-        right_dock.raise_() # Make the user tools dock come up first
-
-        # right_dock.resize(side_dock_group.sizeHint())
-        # print(side_dock_group.sizeHint())
-        # print(scroll_area.sizeHint())
-        # print(right_dock.sizeHint())
+        self._construct_right_dock()
         self.set_viewer_to_neutral_zoom(self.viewer, reset_session=True) # Fix zoomed out issue
 
 ###################################################
@@ -1616,8 +1616,8 @@ class GView:
             self._change_cell_score_gallery_mode(cell_name = cell_name, next_color_rgb = next_color_rgb, next_status = next_status)
 
         except (KeyError, ValueError) as e:
-            # Changing a cell status that isn't in the current page using Slide Mode.
-            print(e)
+            # Changing a cell status that isn't in the current page using Slide Mode. It's fine
+            pass
         
         if self.session.mode =="Slide":
             try:
@@ -3381,11 +3381,19 @@ class CosMxView(GView):
         self.mm_per_px = gvdata.mm_per_px
         self.px_per_mm = gvdata.px_per_mm
         self.pqds = gvdata.pqds
+        self.adata = gvdata.adata
+        self.transcript_names = self.get_valid_tx_names()
         # Make colormap dictionary 
         self.cell_validation_colors = {cid: transform_color(gvdata.statuses_hex[l])[0] for cid, l in zip(gvdata.objectDataFrame.index.astype(int).tolist(), gvdata.objectDataFrame['Validation'].tolist())}
         # Have to get these colors in the list for _change_cell_score_slide_mode to work properly
         self.cell_validation_colors.update({fake_cid+1 : transform_color(fake_status)[0] for fake_cid, fake_status in enumerate(list(gvdata.statuses_hex.values())) })
         super().__init__(gvdata, gvui)
+        
+
+    def get_valid_tx_names(self):
+        remove = ["System", "NegPrb", "False", "Negative"]
+        return [n for n in list(self.adata.var_names) if not any([n.startswith(x) for x in remove])]
+        
 
     def get_dask_array(self):
         dask_list = []
@@ -3410,7 +3418,87 @@ class CosMxView(GView):
         im = [da.from_zarr(os.path.join(self.data.image_path,'labels'), component=d["path"]) for d in datasets]
         return im
 
+    def process_transcript_add(self, tx, color):
+        self.get_gallery_tx(self.session.page_cells, tx, color.lower() )
+        self.add_slide_tx(tx, col = color.lower())
+        self.data.transcripts.append(tx)
+
+    def process_transcript_remove(self):
+        for layer in self.viewer.layers:
+            if isinstance(layer, PointsLayer):
+                self.viewer.layers.remove(layer)
+        self.data.transcripts = []
+
+    def makeCosMxDock(self):
+
+        # Add transcript widget
+        transcript_group = QGroupBox("Display transcripts")
+        transcript_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+        transcript_layout = QGridLayout(transcript_group)
+
+        transcript_add_combo = QComboBox()
+        transcript_add_combo.addItems(self.transcript_names)
+
+        # bump white up, remove gray
+        no_gray_cd = OrderedDict(rgbcd)
+        order = list(no_gray_cd.keys())
+        order.pop(order.index("Gray")); w = order.pop(order.index("White"))
+        order.insert(0,w)
+        for key in order:
+            no_gray_cd.move_to_end(key)
+
+        transcript_color_combo = ColorfulComboBox(None, dict(no_gray_cd), list(no_gray_cd.keys())[len(self.data.transcripts)],8 )
+        transcript_add_button = QPushButton("Add transcript")
+        transcript_add_button.released.connect(lambda: self.process_transcript_add(transcript_add_combo.currentText(), transcript_color_combo.currentText()))
+
+        transcript_remove_button = QPushButton("Clear transcripts")
+        transcript_remove_button.released.connect(lambda: self.process_transcript_remove())
+
+        transcript_layout.addWidget(transcript_add_combo,0,0)
+        transcript_layout.addWidget(transcript_color_combo,0,1)
+        transcript_layout.addWidget(transcript_add_button,0,2)
+        transcript_layout.addWidget(transcript_remove_button,1,0,1,3)
+        # FOV center widget
+
+
+
+        # Construct dock group that holds everything and add specific buttons
+        self.cosmx_dock_group = QGroupBox()
+        self.cosmx_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+        cosmx_dock_layout = QVBoxLayout(self.cosmx_dock_group)
+        self.session.side_dock_groupboxes['transcript group'] = transcript_group
+        cosmx_dock_layout.addWidget(transcript_group)
+
+    ''' Overridden GView initializations'''
     
+    def _construct_right_dock(self):
+
+        # Create add-on cosmx docks
+        self.makeCosMxDock()
+
+
+        # Make sure user can scroll through tools if there are too many
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        # scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+        scroll_area.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+        scroll_area.setWidget(self.side_dock_group)
+        self.side_dock_group.setAlignment(Qt.AlignHCenter)
+        scroll_area.resize(self.side_dock_group.sizeHint())
+        right_dock = self.viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right", tabify = True)
+        self.viewer.window.add_dock_widget(self.cosmx_dock_group, name ="CosMx",area="right", tabify = True)
+        self.viewer.window.add_dock_widget(self.export_dock_group, name ="Export data",area="right", tabify = True)
+        self.viewer.window.add_dock_widget(self.plots_dock_group, name ="Plotting",area="right", tabify = True)
+
+        right_dock.show()
+        right_dock.raise_() # Make the user tools dock come up first
+
+        # right_dock.resize(side_dock_group.sizeHint())
+        # print(side_dock_group.sizeHint())
+        # print(scroll_area.sizeHint())
+        # print(right_dock.sizeHint())
+
     ''' Overridden GView functions'''
     def _read_image(self):
         self.session.dask_high_res = da.stack(self.get_dask_high_res(), axis = 0) # Saves a path to the image data that can be used later
@@ -3470,11 +3558,12 @@ class CosMxView(GView):
             color=self.cell_validation_colors, opacity = 0.7, scale = sc)
 
 
+        # Save current x and y offsets. Coordinates are flipped
+        self.y_gallery_offset, self.x_gallery_offset = kwargs["gallery_x"], kwargs["gallery_y"]
 
         print('''Adding transcripts to gallery ''',end='')
         for tx in self.data.transcripts:
-            x, y = kwargs["gallery_x"], kwargs["gallery_y"]
-            self.get_gallery_tx(self.session.page_cells, tx, self.data.imageSize//2,x, y)
+            self.get_gallery_tx(self.session.page_cells, tx)
             self.add_slide_tx(tx)
         print("Done")
 
@@ -3911,12 +4000,12 @@ class CosMxView(GView):
     
     ''' Transcript functions '''
 
-    def get_gallery_tx(self, cells:pd.DataFrame, tx_name: str, offset: int, yadj:int, xadj:int, color: str = 'white', psize:int = 12):
+    def get_gallery_tx(self, cells:pd.DataFrame, tx_name: str,  color: str = 'white', psize:int = 12):
         pts = None
         # Read all targets FIRST. Then in the loop, filter by coordinates. Consider NOT converting to DataFrame until inside the loop
         #   This is still pretty fast though.
         allpts = self.pqds.to_table(filter= (ds.field('target') == tx_name) , columns=['fov', 'y', 'x']).to_pandas()
-
+        offset = self.data.imageSize //2
         for i, (_, cell) in enumerate(cells.iterrows()):
             cx = cell['fovX']
             cy = cell['fovY']
@@ -3926,8 +4015,8 @@ class CosMxView(GView):
                                 (allpts['y'] < cy+offset) & (allpts['y'] > cy-offset)
                                 , ['y','x']].to_numpy()
             # Have points. Transform coordinates to gallery
-            cpts[:,0] = cpts[:,0] - (cy-offset) + yadj[i] 
-            cpts[:,1] = cpts[:,1] - (cx-offset) + xadj[i]
+            cpts[:,0] = cpts[:,0] - (cy-offset) + self.y_gallery_offset[i] 
+            cpts[:,1] = cpts[:,1] - (cx-offset) + self.x_gallery_offset[i]
             pts = np.concatenate([pts, cpts]) if pts is not None else cpts
         sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
         return self.viewer.add_points(pts, name=f'Gallery {tx_name}', face_color= color, size = psize, scale= sc)
