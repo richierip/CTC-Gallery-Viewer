@@ -166,7 +166,7 @@ class GVData:
         self.phenotype_mappings_label = '<u>Phenotypes</u><br>All' # String representation of the above info for displaying in a QLabel
         self.annotation_mappings = {} # Dict of user selected annotations and their status mappings. Cells in the data of these annotations will be kept for viewing and assigned the given status 
         self.annotation_mappings_label = '<u>Annotations</u><br>All'# String representation of the above info for displaying in a QLabel
-        self.analysisRegionsInData = False # Bool that tracks whether the object data has an 'Analysis Region' field with multiple annotations. Useful later
+        self.secondaryIdentifiers = False # Bool that tracks whether the object data has an repeating IDs -- this will hold any secondary identifiers needed if so
         self.filters = []
         self.filters_label = '<u>Filters</u><br>None'
         self.possible_fluors_in_data = ['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence']
@@ -367,6 +367,7 @@ class HaloData(GVData):
     def __init__(self, parent):
         super().__init__(parent)
         self.idcol = "Object Id"
+        self.second_idcol = "Analysis Region"
         self.extra_columns = []
         self.chunks = 512
         # self.user = parent
@@ -376,7 +377,8 @@ class CosMxData(GVData):
         super().__init__(parent, channels=['DAPI','PanCK','CD3','Membrane','CD45'],
                          colors={'DAPI': 'gray', "PanCK" :"green", "CD3" : "yellow", "Membrane":"darkcyan", "CD45": "red"})
         self.channelFolders = {'DAPI': 'U', "PanCK" :"B", "CD3" : "G", "Membrane":"Y", "CD45": "R"}
-        self.idcol = "cell"
+        self.idcol = "cell_ID"
+        self.second_idcol = "fov"
         self.transcripts = ["LINE1_ORF1"]
         self.extra_columns = ['fov','fovX','fovY']
         self.chunks = 2**13

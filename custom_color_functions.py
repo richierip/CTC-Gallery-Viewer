@@ -2,7 +2,6 @@
 # Each look-up table will be used to convert one intensity (luminescence) value 
 #   to the RGB value of the corresponding color.
 import numpy as np
-import matplotlib
 import re
 from skimage.color import color_dict as rgb_color_dict
 # from PIL import Image

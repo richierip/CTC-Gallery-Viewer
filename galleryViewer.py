@@ -50,7 +50,7 @@ from collections import OrderedDict
 # Single cell processing
 import scanpy as sc
 import anndata as ad
-from scipy.sparse import csr_matrix
+# from scipy.sparse import csr_matrix
 from pathlib import Path
 from napari.utils.color import transform_color
 from napari.utils.colormaps import AVAILABLE_COLORMAPS, label_colormap, color_dict_to_colormap
@@ -64,7 +64,7 @@ import pathlib
 
 # These files were created as part of the GalleryViewer Project
 import storage_classes
-from custom_qt_classes import StatusCombo, ViewSettingsDialog, make_fluor_toggleButton_stylesheet, ColorfulComboBox
+from custom_qt_classes import StatusCombo, ViewSettingsDialog, make_fluor_toggleButton_stylesheet, ColorfulComboBox, PairedIDEntry
 # from initial_UI import GVUI # Can't do this (circular import)
 # from initial_UI import VERSION_NUMBER
 
@@ -198,20 +198,14 @@ class GView:
         #TODO these dock widgets cause VERY strange behavior when trying to clear all layers / load more
 
         notes_entry_layout = QHBoxLayout()
-        note_text_entry = QLineEdit()
-        note_cell_entry = QLineEdit()
+        note_text_entry = QLineEdit() 
         notes_entry_layout.addWidget(note_text_entry) 
+        note_cell_entry = PairedIDEntry(None, self.data.secondaryIdentifiers, self.data.second_idcol)
+        self.session.widget_dictionary['note cell entry']=note_cell_entry
         notes_entry_layout.addWidget(note_cell_entry)
-        if self.data.analysisRegionsInData:
-            notes_annotation_combo = QComboBox()
-            notes_annotation_combo.addItems(self.data.analysisRegionsInData)
-            notes_entry_layout.addWidget(notes_annotation_combo)
-            self.session.widget_dictionary['notes annotation combo']=notes_annotation_combo
         note_button = QPushButton("Add note for cell")
         note_text_entry.setPlaceholderText('Enter new note')
-        # note_text_entry.setFixedWidth(200)
-        note_cell_entry.setPlaceholderText("Cell Id")
-        # note_cell_entry.setFixedWidth(200)
+
         # Pass pointer to widgets to function on button press
         note_button.pressed.connect(lambda: self.replace_note(note_cell_entry, note_text_entry))
 
@@ -245,8 +239,8 @@ class GView:
         page_combobox = QComboBox()
         page_combobox.setStyleSheet("combobox-popup: 0;")
         page_combobox.setMaxVisibleItems(10)
-        page_cell_entry = QLineEdit(); 
-        page_cell_entry.setPlaceholderText("Cell Id (optional)")#; page_cell_entry.setFixedWidth(200)
+        page_cell_entry = PairedIDEntry(None, self.data.secondaryIdentifiers, self.data.second_idcol, "Cell Id (optional)")
+        
         intensity_sort_box = QComboBox()
         intensity_sort_box.addItem("Sort page by Cell Id")
         for i, chn in enumerate(self.data.channels):
@@ -265,13 +259,6 @@ class GView:
 
         page_entry_layout = QHBoxLayout()
         page_entry_layout.addWidget(page_combobox)
-        page_entry_layout.addWidget(page_cell_entry)
-        # Don't include annotation combobox unless it is necessary
-        if self.data.analysisRegionsInData:
-            page_cell_combo = QComboBox(); page_cell_combo.addItems(self.data.analysisRegionsInData)#; page_cell_combo.setFixedWidth(200)
-            self.session.widget_dictionary["page cell layer"] = page_cell_combo
-            page_entry_layout.addWidget(page_cell_combo)
-
         next_page_button.pressed.connect(lambda: self.show_next_cell_group())
         
         page_group_layout.addLayout(page_entry_layout)
@@ -292,15 +279,11 @@ class GView:
         mode_entry_layout = QHBoxLayout()
         mode_switch_combo = QComboBox()
         mode_switch_combo.addItems(["Gallery","Multichannel","Slide"])
-        mode_switch_cell = QLineEdit() ; mode_switch_cell.setPlaceholderText("Cell ID (optional)")
         mode_entry_layout.addWidget(mode_switch_combo)
+        
+        mode_switch_cell = PairedIDEntry(None, self.data.secondaryIdentifiers, self.data.second_idcol, "Cell ID (optional)")
         mode_entry_layout.addWidget(mode_switch_cell)
-        if self.data.analysisRegionsInData:
-            mode_switch_annotations = QComboBox() ; mode_switch_annotations.addItems(self.data.analysisRegionsInData)
-            self.session.widget_dictionary["switch mode annotation"] = mode_switch_annotations
-            mode_entry_layout.addWidget(mode_switch_annotations)
-        else:
-            pass
+
         self.session.widget_dictionary['switch mode combo']=mode_switch_combo
         self.session.widget_dictionary['switch mode cell']=mode_switch_cell
         mode_layout.addLayout(mode_entry_layout)
@@ -384,18 +367,12 @@ class GView:
         im_save_cell_layout = QVBoxLayout(im_save_cell_group)
         
         # LineEdit
-        image_save_target_entry = QLineEdit()
-        image_save_target_entry.setPlaceholderText("ID to save")
+        image_save_target_entry = PairedIDEntry(None, self.data.secondaryIdentifiers, self.data.second_idcol, "ID to save")
         self.session.widget_dictionary["image_save_target_entry"] = image_save_target_entry
         
         # Layout 
         imsave_entry_layout = QHBoxLayout()
         imsave_entry_layout.addWidget(image_save_target_entry)
-        # Annotation widget:
-        if self.data.analysisRegionsInData:
-            imsave_annotations = QComboBox() ; imsave_annotations.addItems(self.data.analysisRegionsInData)
-            self.session.widget_dictionary["image_save_target_annotation"] = imsave_annotations
-            imsave_entry_layout.addWidget(imsave_annotations)
 
         imsave_cell_borders = QComboBox() ; imsave_cell_borders.addItems(["White borders","Black borders","No borders"])
         self.session.widget_dictionary['imsave_cell_borders'] = imsave_cell_borders
@@ -407,13 +384,13 @@ class GView:
         # Save to clipboard
         imsave_cell_button_clipboard = QPushButton("Save image to clipboard")
         imsave_cell_button_clipboard.released.connect(lambda: self.save_cell_image(self.viewer, 
-                    image_save_target_entry.text(), imsave_annotations.currentText() if self.data.analysisRegionsInData else None,
+                    image_save_target_entry.get_global(),
                     clipboard=True, borders=imsave_cell_borders.currentText()))
         # Save to file
         imsave_cell_button_file = QPushButton("Save image to file")
 
         imsave_cell_button_file.released.connect(lambda: self.save_cell_image(self.viewer, 
-                    image_save_target_entry.text(), imsave_annotations.currentText() if self.data.analysisRegionsInData else None,
+                    image_save_target_entry.get_global(),
                     clipboard=False, borders=imsave_cell_borders.currentText()))
         im_save_cell_buttons_layout.addWidget(imsave_cell_button_clipboard)
         im_save_cell_buttons_layout.addWidget(imsave_cell_button_file)
@@ -475,18 +452,12 @@ class GView:
         hist_layout = QVBoxLayout(hist_group)
         
         # LineEdit
-        hist_target_entry = QLineEdit()
-        hist_target_entry.setPlaceholderText("ID to plot")
+        hist_target_entry = PairedIDEntry(None, self.data.secondaryIdentifiers, self.data.second_idcol, "ID to plot")
         self.session.widget_dictionary["hist_target_entry"] = hist_target_entry
         
         # Layout 
         hist_entry_layout = QHBoxLayout()
         hist_entry_layout.addWidget(hist_target_entry)
-        # Annotation widget:
-        if self.data.analysisRegionsInData:
-            hist_annotations = QComboBox() ; hist_annotations.addItems(self.data.analysisRegionsInData)
-            self.session.widget_dictionary["hist_annotations"] = hist_annotations
-            hist_entry_layout.addWidget(hist_annotations)
 
         hist_subplots = QComboBox()
         hist_subplots.addItems(["Plot against page cells","Plot this cell only"])
@@ -511,7 +482,7 @@ class GView:
 
         hist_button = QPushButton("Generate histogram")
         hist_button.released.connect(lambda: self.generate_intensity_hist(self.viewer,
-                        hist_target_entry.text(), hist_annotations.currentText() if self.data.analysisRegionsInData else None,
+                        hist_target_entry.get_global(),
                         hist_bins.value(), 
                         {"Plot against page cells":True,"Plot this cell only":False}[hist_subplots.currentText()],
                         {"Normalize bins":True,"Plot raw counts":False}[hist_norm.currentText()]))
@@ -532,33 +503,21 @@ class GView:
         violin_entry_layout.addWidget(violin_use_refcell)
 
         # LineEdit
-        violin_target_entry = QLineEdit()
-        violin_target_entry.setPlaceholderText("ID to plot")
+        violin_target_entry = PairedIDEntry(None, self.data.secondaryIdentifiers, self.data.second_idcol, "ID to plot")
         self.session.widget_dictionary["violin_target_entry"] = violin_target_entry
-
-
         violin_entry_layout.addWidget(violin_target_entry)
-        # Annotation widget:
-        if self.data.analysisRegionsInData:
-            violin_annotations = QComboBox() ; violin_annotations.addItems(self.data.analysisRegionsInData)
-            self.session.widget_dictionary["violin_annotations"] = violin_annotations
-            violin_entry_layout.addWidget(violin_annotations)
         violin_layout.addLayout(violin_entry_layout)
 
-        def _change_reference_settings(button, entry, annot):
+        def _change_reference_settings(button, entry: PairedIDEntry):
             if button.text() == "Plot a reference cell":
                 button.setText("No reference")
-                entry.setDisabled(True)
-                if annot is not None:
-                    annot.setDisabled(True)
+                entry.disable()
 
             elif button.text() == "No reference":
                 button.setText("Plot a reference cell")
-                entry.setEnabled(True)
-                if annot is not None:
-                    annot.setEnabled(True)
+                entry.enable()
 
-        violin_use_refcell.released.connect(lambda: _change_reference_settings(violin_use_refcell,violin_target_entry, None if not self.data.analysisRegionsInData else violin_annotations))
+        violin_use_refcell.released.connect(lambda: _change_reference_settings(violin_use_refcell,violin_target_entry))
 
         
         violin_second_row_layout = QHBoxLayout()
@@ -590,8 +549,7 @@ class GView:
 
         violin_button = QPushButton("Generate violins")
         violin_button.released.connect(lambda: self.generate_intensity_violins(self.viewer,
-                                    violin_target_entry.text() if violin_target_entry.isEnabled() else None, 
-                                    violin_annotations.currentText() if self.data.analysisRegionsInData and violin_annotations.isEnabled() else None,
+                                    violin_target_entry.get_global() if violin_target_entry.isEnabled() else None,
                                     violin_referencedata.currentText(),
                                     violin_intensity.currentText(), violin_phenotype.currentText() ))
         violin_layout.addWidget(violin_button)
@@ -711,6 +669,7 @@ class GView:
         # print(side_dock_group.sizeHint())
         # print(scroll_area.sizeHint())
         # print(right_dock.sizeHint())
+    
     def finish_init(self):
         #TODO set custom theme?
         self.viewer.theme = "dark"
@@ -1039,17 +998,12 @@ class GView:
         if target_mode=="Slide":
             if not from_mouse:
                 try:
-                    cid = self.session.widget_dictionary['switch mode cell'].text()
-                    if self.data.analysisRegionsInData:
-                        layer = self.session.widget_dictionary['switch mode annotation'].currentText()
-                        cname = f"{layer} {cid}"
-                    else:
-                        cname = str(cid)
+                    cname = self.session.widget_dictionary['switch mode cell'].get_global()
                     target_cell_info = self.session.current_cells.loc[cname]
                     self.session.cell_under_mouse = target_cell_info
                     # print(target_cell_info)
                 except KeyError:
-                    self.viewer.status = f"Can't find cell [{cid}] in the current page. Staying in {self.session.mode} mode"
+                    self.viewer.status = f"Can't find cell [{cname}] in the current page. Staying in {self.session.mode} mode"
                     return False
             else:
                 target_cell_info = self.session.cell_under_mouse
@@ -1061,7 +1015,7 @@ class GView:
 
             # Find offset coordinates
             if self.session.mode=="Gallery": 
-                cname = f"{target_cell_info['Layer']} {cell_num}" if self.data.analysisRegionsInData else str(cell_num)
+                cname = cell_num
                 row, col = list(self.session.grid_to_ID["Gallery"].keys())[list(self.session.grid_to_ID["Gallery"].values()).index(cname)].split(",")
                 row, col = (int(row),int(col))
                 cellCanvasY = ((row-1)*(self.data.imageSize+2)) + ((self.data.imageSize+2)/2)
@@ -1134,20 +1088,15 @@ class GView:
             if target_mode == "Multichannel":
                 if not from_mouse:
                     try:
-                        cid = self.session.widget_dictionary['switch mode cell'].text()
-                        if cid == '':
+                        target_cell_name = self.session.widget_dictionary['switch mode cell'].get_global()
+                        if target_cell_name is None:
                             target_cell_info = self.session.page_cells.loc[self.session.grid_to_ID["Multichannel"]["1,1"]] # get first
                             target_cell_name = target_cell_info.name
-                        elif self.data.analysisRegionsInData:
-                            layer = self.session.widget_dictionary['switch mode annotation'].currentText()
-                            target_cell_name = f"{layer} {cid}"
-                            target_cell_info = self.session.current_cells.loc[target_cell_name]
                         else:
-                            target_cell_name = str(cid)
                             target_cell_info = self.session.current_cells.loc[target_cell_name]
                         self.session.cell_under_mouse = target_cell_info
                     except KeyError:
-                        self.viewer.status = f"Can't find cell [{cid}] in the current page. Staying in {self.session.mode} mode"
+                        self.viewer.status = f"Can't find cell [{target_cell_name}] in the current page. Staying in {self.session.mode} mode"
                         return False
                 else:
                     target_cell_name = self.session.cell_under_mouse.name
@@ -1196,26 +1145,16 @@ class GView:
             else:
                 sort_option = intensity_sort_widget.currentText().replace("Sort page by ","")
 
-            cid = widgets["page cell id"].text()
+            cid = widgets["page cell id"].get_global()
             page_widget = widgets["page combobox"]
             page = int(page_widget.currentText().split()[-1])
             self.session.page = page
-            if self.data.analysisRegionsInData:
-                ann_layer = widgets["page cell layer"].currentText()
-            else:
-                ann_layer = ""
-            return page, sort_option, cid, ann_layer
+            return page, sort_option, cid
 
-        page_number,sort_option, cell_choice, cell_annotation = _get_widgets()
+        page_number,sort_option, cell_choice = _get_widgets()
         if self.session.mode == "Slide":
             self.toggle_session_mode_catch_exceptions("Gallery", from_mouse=False)
             # return None # Don't allow loading of new cells when in slide mode.
-
-        # Assemble dict from cell choice if needed
-        if cell_choice == '': 
-            cell_choice = None
-        else:
-            cell_choice = {"ID": cell_choice, "Annotation Layer": cell_annotation}
 
         # Save data to file from current set
         #TODO Fix amount field
@@ -1350,10 +1289,8 @@ class GView:
             self.viewer.window._qt_viewer.setFocus()
             return True
         cell_num = ID.split()[-1]; cell_anno = ID.replace(' '+cell_num,'')
-        if self.data.analysisRegionsInData:
-            cell_name = f'Cell {cell_num} from {cell_anno}'
-        else:
-            cell_name = f'Cell {cell_num}'
+   
+        cell_name = f'Cell {cell_num}'
         try:
             cell = self.session.current_cells.loc[str(ID)]
         except KeyError: # in case the name was off
@@ -1457,6 +1394,17 @@ class GView:
         b = [list(x) for x in zip(b1, b2)]
         return [list(x) for x in zip(a,b)]
     
+    def ensure_slice_shape(self, cell_x, cell_y, offset, shape):
+        if cell_y-offset <0:
+            cell_y = offset
+        elif cell_y+offset > self.session.dask_high_res.shape[-2]:
+            cell_y = shape[-2] - offset
+        if cell_x-offset <0:
+            cell_x = offset
+        elif cell_x+offset > self.session.dask_high_res.shape[-1]:
+            cell_x = shape[-1] - offset
+        return cell_x, cell_y
+
     ''' Add images layers for Gallery and Multichannel modes. Only make visible the layers for the active mode'''
     def add_layers(self, viewer: napari.Viewer, cells:pd.DataFrame, offset: int, new_page=True):
         print(f'\n---------\n \n Entering the add_layers function')
@@ -1482,17 +1430,20 @@ class GView:
             cell_x = cell['center_x']; cell_y = cell['center_y']
             # Create array of channel indices in image data. Will use to fetch from the dask array
             positions = [self.data.channelOrder[chn] for chn in self.data.channels if chn != 'Composite' ]
+            # Ensure 100x100 slice, even if cell is at the very edge for the whole slide image
+            cell_x, cell_y = self.ensure_slice_shape(cell_x, cell_y, offset, self.session.dask_high_res.shape)
             ''' Slice image -- DO NOT compute until actually adding images later'''
             cell_punchout = self.session.dask_high_res[positions,cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset]  
             results.append(cell_punchout)
         print("Computing image with dask")
         img = dask.compute(*results)
 
-
+        import IPython  
         col_g = 0 ; row_g = 0 ; row_m = 0
         self.session.grid_to_ID = {"Gallery":{}, "Multichannel":{}} # Reset this since we could be changing to multichannel mode
         print("Inserting images into page")
         for pos, (_, cell) in enumerate(cells.iterrows()): # coords left
+        
             col_g = (col_g%cpr_g)+1 
             if col_g ==1: row_g+=1
             row_m+=1     
@@ -1502,19 +1453,28 @@ class GView:
             for col_m in range(len(self.data.channels)): # loop through channels
                 cell_id = cell.name
                 # multichannel mode: individual image
-                page_image_multichannel[col_m, (row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
-                            col_m*(self.data.imageSize+2)+1:(col_m+1)*(self.data.imageSize+2)-1] = img[pos][col_m]
-                # multichannel mode: composite image
-                page_image_multichannel[col_m, (row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
-                            (cpr_m-1)*(self.data.imageSize+2)+1:cpr_m*(self.data.imageSize+2)-1] = img[pos][col_m]
-                
+                try:
+                    page_image_multichannel[col_m, (row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
+                                col_m*(self.data.imageSize+2)+1:(col_m+1)*(self.data.imageSize+2)-1] = img[pos][col_m]
+                except ValueError:
+                    page_image_multichannel[col_m, (row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
+                                col_m*(self.data.imageSize+2)+1:(col_m+1)*(self.data.imageSize+2)-1] = np.zeros((self.data.imageSize, self.data.imageSize))
+                try:
+                    # multichannel mode: composite image
+                    page_image_multichannel[col_m, (row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
+                                (cpr_m-1)*(self.data.imageSize+2)+1:cpr_m*(self.data.imageSize+2)-1] = img[pos][col_m]
+                except ValueError:
+                    page_image_multichannel[col_m, (row_m-1)*(self.data.imageSize+2)+1:row_m*(self.data.imageSize+2)-1,
+                                (cpr_m-1)*(self.data.imageSize+2)+1:cpr_m*(self.data.imageSize+2)-1] = np.zeros((self.data.imageSize, self.data.imageSize))
                 self.session.grid_to_ID["Multichannel"][f'{row_m},{col_m+1}'] = cell.name
             # Composite image in multichannel mode. Only need to do it once per row. 
             self.session.grid_to_ID["Multichannel"][f'{row_m},{cpr_m}'] = cell.name
                 
             # Gallery images 
-            
-            page_image_gallery[:, (row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = img[pos]
+            try:
+                page_image_gallery[:, (row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = img[pos]
+            except ValueError:
+                page_image_gallery[:, (row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = np.zeros((len(self.data.channels),self.data.imageSize, self.data.imageSize))
 
             self.session.multichannel_page_images = page_image_multichannel.copy()
 
@@ -1932,10 +1892,7 @@ class GView:
                 self.session.cell_under_mouse = self.session.current_cells.loc[cell_name] # save info
                 cell_num = cell_name.split()[-1]; cell_anno = cell_name.replace(' '+cell_num,'')
 
-                if self.data.analysisRegionsInData:
-                    image_name = f'Cell {cell_num} from {cell_anno}'
-                else:
-                    image_name = f'Cell {cell_num}'
+                image_name = f'Cell {cell_num}'
 
                 self.set_cell_description_label(str(cell_name))
                 output_str = ''
@@ -2003,25 +1960,16 @@ class GView:
             #TODO decide on the behavior for clicking on a cell
             if self.session.cell_under_mouse is None:
                 return None # Nothing to do if no cell under mouse
-            layer = self.session.cell_under_mouse['Analysis Region'] if self.data.analysisRegionsInData else ''
-            cid = str(self.session.cell_under_mouse.name)
-            # Allow user to click on a cell to get it's name into the entry box  
-            if self.data.analysisRegionsInData:
-                self.session.widget_dictionary['notes annotation combo'].setCurrentText(layer)
-                if self.session.mode == "Slide":
-                    self.session.widget_dictionary['page cell layer'].setCurrentText(layer)
-                self.session.widget_dictionary['switch mode annotation'].setCurrentText(layer)
-                self.session.widget_dictionary["image_save_target_annotation"].setCurrentText(layer)
-                self.session.widget_dictionary["hist_annotations"].setCurrentText(layer)
-                self.session.widget_dictionary["violin_annotations"].setCurrentText(layer)
             
-            self.session.widget_dictionary["image_save_target_entry"].setText(cid)
-            self.session.widget_dictionary['notes cell entry'].setText(cid)
+            cid = str(self.session.cell_under_mouse.name)
+
+            self.session.widget_dictionary["image_save_target_entry"].set_global(cid)
+            self.session.widget_dictionary['notes cell entry'].set_global(cid)
             if self.session.mode == "Slide":
-                self.session.widget_dictionary['page cell id'].setText(cid)
-            self.session.widget_dictionary['switch mode cell'].setText(cid)
-            self.session.widget_dictionary["hist_target_entry"].setText(cid)
-            self.session.widget_dictionary["violin_target_entry"].setText(cid)
+                self.session.widget_dictionary['page cell id'].set_global(cid)
+            self.session.widget_dictionary['switch mode cell'].set_global(cid)
+            self.session.widget_dictionary["hist_target_entry"].set_global(cid)
+            self.session.widget_dictionary["violin_target_entry"].set_global(cid)
             
         ''' Dynamically make new functions that can change scoring decisions with a custom keypress. This
             will allow the user to choose their own scoring decisions, colors, and keybinds'''
@@ -2104,10 +2052,7 @@ class GView:
                         return False # Can't do anything without a target cell
                     
                     cid = str(self.session.cell_under_mouse.name)
-                    if self.data.analysisRegionsInData:
-                        layer = self.session.cell_under_mouse["Analysis Region"]
-                        self.session.widget_dictionary['switch mode annotation'].setCurrentText(layer)
-                    self.session.widget_dictionary['switch mode cell'].setText(cid)
+                    self.session.widget_dictionary['switch mode cell'].set_global(cid)
                     self.toggle_session_mode_catch_exceptions("Multichannel")
             elif "Control" in event.modifiers:
                 # Go to slide or go back to last mode
@@ -2117,10 +2062,7 @@ class GView:
                     if self.session.cell_under_mouse is None: 
                         return False # Can't do anything without a target cell
                     cid = str(self.session.cell_under_mouse.name)
-                    if self.data.analysisRegionsInData:
-                        layer = self.session.cell_under_mouse["Layer"]
-                        self.session.widget_dictionary['switch mode annotation'].setCurrentText(layer)
-                    self.session.widget_dictionary['switch mode cell'].setText(cid)
+                    self.session.widget_dictionary['switch mode cell'].set_global(cid)
                     self.toggle_session_mode_catch_exceptions("Slide")
 
         #TODO catch exceptions here? Probably need to inform the user.
@@ -2377,7 +2319,6 @@ class GView:
                 x1 = (row*(self.data.imageSize+2)) ; x2 = x1 + self.data.imageSize + 2
                 y1 = (col*(self.data.imageSize+2)) ; y2 = y1 + self.data.imageSize + 2
 
-                print(f"My Xs are {x1} {x2} and my Ys are {y1} {y2}")
                 if (x2,y2) == blended.shape[:2]:
                     blended[x1:,y1] = fill
                     blended[x1:,-1] = fill
@@ -2411,7 +2352,7 @@ class GView:
         # Done!
 
     @catch_exceptions_to_log_file("runtime_save-cell-image")
-    def save_cell_image(self, viewer: napari.Viewer, cell_id : str, layer_name = None, clipboard :bool = True, borders = 'No borders' ):
+    def save_cell_image(self, viewer: napari.Viewer, cell_id : str, clipboard :bool = True, borders = 'No borders' ):
 
         # Silence all layers
         for layer in viewer.layers:
@@ -2419,7 +2360,6 @@ class GView:
         
         df = self.session.session_cells
         try:
-            cell_id = cell_id if layer_name is None else f'{cell_id} {layer_name}'
             singlecell_df  = df.loc[str(cell_id)]
         except (ValueError, TypeError, IndexError):
             # Cell doesn't exist
@@ -2429,6 +2369,7 @@ class GView:
         # print(f"Trying to take screenshot for the following frame: {singlecell_df}")
         cell_x = singlecell_df["center_x"]
         cell_y = singlecell_df["center_y"]
+        self.ensure_slice_shape(cell_x, cell_y, self.data.imageSize//2,self.session.dask_high_res.shape )
         # Get images from dask in chosen channels
 
 
@@ -2681,8 +2622,7 @@ class GView:
         return True
 
     @catch_exceptions_to_log_file("runtime_plot-histogram")
-    def generate_intensity_hist(self, viewer :napari.Viewer, cell_id : str , layer_name : str | None, 
-                                bins:int, include_all:bool, normalize:bool):
+    def generate_intensity_hist(self, viewer :napari.Viewer, cell_id : str , bins:int, include_all:bool, normalize:bool):
         
         try:
             singlecell = self.session.page_cells.loc[cell_id]
@@ -2695,8 +2635,8 @@ class GView:
         # Create array of channel indices in image data. Will use to fetch from the dask array
         positions = [self.data.channelOrder[chn] for chn in self.data.channels if chn != 'Composite' ]
         # Get data for reference cell
-        xmin = singlecell['XMin'] ; xmax = singlecell['XMax'] 
-        ymin = singlecell['YMin'] ; ymax = singlecell['YMax'] 
+        xmin = int(singlecell['XMin']) ; xmax = int(singlecell['XMax']) 
+        ymin = int(singlecell['YMin']) ; ymax = int(singlecell['YMax'])
         cname = singlecell.name
         
         reference_pixels = self.session.dask_high_res[positions,ymin:ymax, xmin:xmax].compute() # 0 is the largest pyramid layer         
@@ -2807,8 +2747,8 @@ class GView:
                 return None
 
         pal = selection.copy()
-        for chn in self.data.channels:
-            pal = [self.data.channelColors[chn] if chn in x else x for x in pal]
+        for chn in self.data.channels: # If can't find the color, make it black.
+            pal = [self.data.channelColors[chn] if chn in x else 'black' for x in pal]
 
         # print(f'Palette is {list(zip(selection,pal))}')
         # print(f"Phenotypes are {self.data.phenotypes}")
@@ -2819,9 +2759,8 @@ class GView:
                 pheno_selection = [x for x in self.data.phenotypes if x.startswith("Validation |") and x in list(df.columns)]
             case _:
                 pheno_selection = [pheno_choice]
-        # df.to_csv('mdf.csv',index=False)
-        # print(selection)
-        # print(pheno_selection)
+
+
         mdf = df.reset_index().melt(id_vars=['gvid', *pheno_selection ], value_vars=selection).rename(columns={'variable':'Intensity Type','value':'Intensity Value'})
         mdf = mdf.melt(id_vars = ['gvid','Intensity Type','Intensity Value'], value_vars= pheno_selection).rename(columns={'variable':'Phenotype'})
         # Only keep cells positive for the chosen phenotypes. Cells with multiple phenotypes are split into different rows here (this is fine)
@@ -2979,7 +2918,7 @@ class GView:
         for ph in phenotypes:
             if ph not in list(df.columns):
                 raise KeyError
-        if len(annotations) >0 and ('Analysis Region' not in list(df.columns)):
+        if len(annotations) >0 and (self.data.second_idcol not in list(df.columns)):
             raise KeyError
 
 
@@ -2996,7 +2935,8 @@ class GView:
         v = list(self.data.statuses.keys())
         validation_cols = [f"Validation | " + s for s in v]
         self.session.validation_columns = validation_cols
-        cols_to_keep = ["gvid", "Validation",self.data.idcol, "Analysis Region", "Notes", "XMin","XMax","YMin", "YMax", "cell_ID"] \
+        #TODO make cols to keep dynamic
+        cols_to_keep = ["mask_id", "Validation",self.data.idcol, self.data.second_idcol, "Notes", "XMin","XMax","YMin", "YMax", "cell_ID"] \
             + phenotypes + all_possible_intensities + validation_cols + self.data.extra_columns
         cols_to_keep = df.columns.intersection(cols_to_keep)
         df = df.loc[:, cols_to_keep]
@@ -3020,10 +2960,10 @@ class GView:
                 global_sort_status = False
                 self.viewer.status = 'Global sort failed. Will sort by Cell Id instead.'
                 
-                _sort =  ["Analysis Region",self.data.idcol] if annotations else self.data.idcol
+                _sort =  [self.data.second_idcol,self.data.idcol] if annotations else self.data.idcol
                 _asc = True
         else:
-            _sort =  ["Analysis Region",self.data.idcol] if annotations else self.data.idcol
+            _sort =  [self.data.second_idcol,self.data.idcol] if annotations else self.data.idcol
             _asc = True
         df = df.sort_values(by = _sort, ascending = _asc, kind = 'mergesort')
 
@@ -3032,7 +2972,7 @@ class GView:
         def _create_anno_pheno_query(anno_list, pheno_list):
             query = ''
             for anno in anno_list:
-                query += f"(`Analysis Region` == '{anno}') | "
+                query += f"(`{self.data.second_idcol}` == '{anno}') | "
             for pheno in pheno_list:
                 query += f"(`Validation` == {pheno}) |"
             # print(query)
@@ -3081,11 +3021,7 @@ class GView:
         print(f"testing if specific cell {specific_cell} and type {type(specific_cell)}")
         if specific_cell is not None:
             try:
-                cid = specific_cell['ID']
-                if self.data.analysisRegionsInData:
-                    cid = f"{specific_cell['Annotation Layer']} {cid}"
-                
-                #TODO fix this
+                cid = specific_cell
                 singlecell_df = phen_only_df.loc[cid]
                 page_number = singlecell_df["Page"] # Converts single row dataframe to series and fetches the page value
 
@@ -3121,7 +3057,7 @@ class GView:
         if sort_by_intensity is not None: # should never be none
             try:    
                 if sort_by_intensity == self.data.idcol:
-                    _sort = ["Analysis Region",self.data.idcol] if self.data.analysisRegionsInData else self.data.idcol
+                    _sort = [self.data.second_idcol,self.data.idcol] if self.data.secondaryIdentifiers else self.data.idcol
                     _asc = True
                 else:
                     # First, check if a custom name was used.
@@ -3133,7 +3069,7 @@ class GView:
                     self.viewer.status = f"Unable to sort this page by '{sort_by_intensity}', will use ID instead. Check your data headers."
                 else:
                     self.viewer.status = f"Unable to sort everything by '{sort_by_intensity}', will use ID instead. Check your data headers."
-                _sort = ["Analysis Region",self.data.idcol] if self.data.analysisRegionsInData else self.data.idcol
+                _sort = [self.data.second_idcol,self.data.idcol] if self.data.secondaryIdentifiers else self.data.idcol
                 _asc = True
             cell_set = cell_set.sort_values(by = _sort, ascending = _asc, kind = 'mergesort')
             
@@ -3142,17 +3078,11 @@ class GView:
         self.session.cell_under_mouse = cell_set.iloc[0] # Set first cell in list as "current" to avoid exceptions
         return 'pass'
 
-    def replace_note(self, cell_widget, note_widget):
-        cellID = cell_widget.text(); note = note_widget.text()
-        if self.data.analysisRegionsInData:
-            annotation_layer = self.session.widget_dictionary['notes annotation combo'].currentText()
-            cellID = f"{annotation_layer} {cellID}"
+    def replace_note(self, cell_widget: PairedIDEntry, note_widget):
 
-        # try: 
-        #     cellID = int(cellID)
-        # except ValueError:
-        #     self.viewer.status = 'Error recording note: non-numeric Cell Id given'
-        #     return None 
+        note = note_widget.text()
+        cellID = cell_widget.get_global()
+
         try:
             self.session.current_cells.loc[str(cellID), "Notes"] = note
             cell_widget.clear(); note_widget.clear()
@@ -3384,7 +3314,7 @@ class CosMxView(GView):
         self.adata = gvdata.adata
         self.transcript_names = self.get_valid_tx_names()
         # Make colormap dictionary 
-        self.cell_validation_colors = {cid: transform_color(gvdata.statuses_hex[l])[0] for cid, l in zip(gvdata.objectDataFrame.index.astype(int).tolist(), gvdata.objectDataFrame['Validation'].tolist())}
+        self.cell_validation_colors = {cid: transform_color(gvdata.statuses_hex[l])[0] for cid, l in zip(gvdata.objectDataFrame['mask_id'].astype(int).tolist(), gvdata.objectDataFrame['Validation'].tolist())}
         # Have to get these colors in the list for _change_cell_score_slide_mode to work properly
         self.cell_validation_colors.update({fake_cid+1 : transform_color(fake_status)[0] for fake_cid, fake_status in enumerate(list(gvdata.statuses_hex.values())) })
         super().__init__(gvdata, gvui)
@@ -3394,7 +3324,6 @@ class CosMxView(GView):
         remove = ["System", "NegPrb", "False", "Negative"]
         return [n for n in list(self.adata.var_names) if not any([n.startswith(x) for x in remove])]
         
-
     def get_dask_array(self):
         dask_list = []
         for _, folder in self.data.channelFolders.items():
@@ -3521,13 +3450,12 @@ class CosMxView(GView):
         
         count = 0
 
-
         for _, cell in cells.iterrows(): # coords left
             cell_x = cell['center_x']; cell_y = cell['center_y']
             # Create array of channel indices in image data. Will use to fetch from the dask array
             ''' Slice labels -- DO NOT compute until actually adding images later'''
-
-            cid = int(cell.name)
+            cell_x, cell_y = self.ensure_slice_shape(cell_x, cell_y,offset,  self.session.labels_image[0].shape)
+            cid = int(cell['mask_id'])
             ''' Define with defaults that depend on the context of the loop to insert cell ID'''
             def _filter_labels(labels, _population = cid, _filled = filled):
                 labels[labels!=_population] = 0
@@ -3609,6 +3537,7 @@ class CosMxView(GView):
 
     def _change_cell_score_slide_mode(self, *args, **kwargs):
         new_color = transform_color(self.data.statuses_hex[kwargs['next_status']])[0]
+        mask_id = self.session.session_cells.loc[kwargs['cell_name'], 'mask_id']
         
         cm = self.viewer.layers["Slide Labels"].colormap.colors
         pos = 0
@@ -3616,11 +3545,11 @@ class CosMxView(GView):
             if all(cm[i] == new_color):
                 pos = i
                 break
-        self.viewer.layers["Slide Labels"]._label_color_index[int(kwargs['cell_name'])] = self.viewer.layers["Slide Labels"].colormap.controls[pos] + 0.02 # This MATTERS
+        self.viewer.layers["Slide Labels"]._label_color_index[int(mask_id)] = self.viewer.layers["Slide Labels"].colormap.controls[pos] + 0.02 # This MATTERS
         self.viewer.layers["Slide Labels"].refresh()
 
         try:
-            self.viewer.layers["Gallery Labels"]._label_color_index[int(kwargs['cell_name'])] = self.viewer.layers["Gallery Labels"].colormap.controls[pos] + 0.02 # This MATTERS
+            self.viewer.layers["Gallery Labels"]._label_color_index[int(mask_id)] = self.viewer.layers["Gallery Labels"].colormap.controls[pos] + 0.02 # This MATTERS
             # self.viewer.layers["Gallery Labels"].refresh()
         except KeyError:
             pass
@@ -3661,18 +3590,19 @@ class CosMxView(GView):
         
 
         new_color = transform_color(self.data.statuses_hex[kwargs['next_status']])[0]
-        
+        mask_id = self.session.session_cells.loc[kwargs['cell_name'], 'mask_id']
+
         cm = self.viewer.layers["Gallery Labels"].colormap.colors
         pos = 0
         for i in range(len(cm)):
             if all(cm[i] == new_color):
                 pos = i
                 break
-        self.viewer.layers["Gallery Labels"]._label_color_index[int(kwargs['cell_name'])] = self.viewer.layers["Gallery Labels"].colormap.controls[pos] + 0.02 # This MATTERS
+        self.viewer.layers["Gallery Labels"]._label_color_index[int(mask_id)] = self.viewer.layers["Gallery Labels"].colormap.controls[pos] + 0.02 # This MATTERS
         self.viewer.layers["Gallery Labels"].refresh()
 
         try:
-            self.viewer.layers["Slide Labels"]._label_color_index[int(kwargs['cell_name'])] = self.viewer.layers["Slide Labels"].colormap.controls[pos] + 0.02 # This MATTERS
+            self.viewer.layers["Slide Labels"]._label_color_index[int(mask_id)] = self.viewer.layers["Slide Labels"].colormap.controls[pos] + 0.02 # This MATTERS
             # self.viewer.layers["Gallery Labels"].refresh()
         except KeyError:
             pass

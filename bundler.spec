@@ -1,5 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 '''
+
+Updated 10.24.24
+
 Spec file to use to bundle napari / PyQt5 project with pyinstaller
 
 Example command line usage:
@@ -10,7 +13,6 @@ This spec file will omit the following critical folder from your /venv/Lib/site-
 (if they are only partially included, delete those and copy over the folders from the venv package)
     
     3.11.7:
-        /magicgui
         /napari
         /napari_console
         /napari_plugin_engine
@@ -29,7 +31,10 @@ This spec file will omit the following critical folder from your /venv/Lib/site-
         /honestly anything related to napari
         /freetype
     
+    Move data folder up one levels
     Make sure the PDF guide made it to the bundle.
+
+    mkdirs profiles, runtime logs
 
 
 Modified from this: https://github.com/tlambert03/napari/blob/e9eee2edd29dc29db0fc011c31635ee2d713abf0/bundle/napari.spec
@@ -148,7 +153,7 @@ a = Analysis(
     [r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\initial_UI.py"],
     # https://github.com/pypa/setuptools/issues/1963  # noqa
     hiddenimports=['pkg_resources.py2_warn', 'importlib', 'napari.conftest',
-                 'imagecodecs._shared', 'imagecodecs._imcd', 'magicgui'],
+                 'imagecodecs._shared', 'imagecodecs._imcd'],
     pathex=[BUNDLE_ROOT],
     datas=DATA_FILES + [(r'C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\*.PNG', 'data' ),
             (r"C:\Users\prich\Desktop\Projects\MGH\CTC-Gallery-Viewer\data\mghiconwhite.ico", 'data'),

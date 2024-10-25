@@ -1,0 +1,55 @@
+
+
+Lib\site-packages\napari\layers\labels\labels.py
+In @color.setter color()
+DELETE 532 - 540
+PASTE on 532
+        # PMR MOFIDIED CODE BELOW
+        if isinstance(list(color.values())[0],np.ndarray):
+            if self._background_label not in color:
+                color[self._background_label] = transform_color('transparent')[0]
+            if None not in color:
+                color[None] = transform_color('black')[0]
+            colors = color
+        else:
+            if self._background_label not in color:
+                color[self._background_label] = 'transparent'
+            if None not in color:
+                color[None] = 'black'
+            colors = {label: transform_color(color_str)[0] for label, color_str in color.items()}
+        # PMR MODIFIED CODE ABOVE
+
+
+Lib/site-packages/napari/_vispy/layers/image.py
+In _on_gamma_change
+DELETE 206 (line shown below)
+if len(self.node.shared_program.frag._set_items) > 0:
+
+
+site-packages\napari\components\viewer_model.py
+In _update_status_bar_from_cursor
+REPLACE content under 473 with pass
+Looks like this -- 
+
+        if active is not None:
+            pass
+            # self.status = active.get_status(
+            #     self.cursor.position,
+            #     view_direction=self.cursor._view_direction,
+            #     dims_displayed=list(self.dims.displayed),
+            #     world=True,
+            # )
+
+            self.help = active.help
+            # if self.tooltip.visible:
+            #     self.tooltip.text = active._get_tooltip_text(
+            #         self.cursor.position,
+            #         view_direction=self.cursor._view_direction,
+            #         dims_displayed=list(self.dims.displayed),
+            #         world=True,
+            #     )
+
+
+Lib\site-packages\napari\utils\shortcuts.py
+Line 19 replace with
+'napari:hold_for_pan_zoom': ['Control-Space'],

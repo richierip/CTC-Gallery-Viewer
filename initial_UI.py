@@ -220,9 +220,9 @@ class GVUI(QDialog):
         # dataEntryLabel.setMaximumWidth(600)
 
         self.previewObjectDataButton = QPushButton("Choose Data")
-        self.previewObjectDataButton.setMaximumWidth(200)
+        # self.previewObjectDataButton.setMaximumWidth(200)
         self.previewImageDataButton = QPushButton("Choose Image")
-        self.previewImageDataButton.setMaximumWidth(200)
+        # self.previewImageDataButton.setMaximumWidth(200)
         self.previewObjectDataButton.setDefault(True)
 
         
@@ -974,7 +974,7 @@ class GVUI(QDialog):
         self.phenotypeCombo.addItems(include)
         # Assess annotation regions in csv
         try:
-            regions = list(pd.read_csv(self.gvdata.objectDataPath, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique()) 
+            regions = list(pd.read_csv(self.gvdata.objectDataPath, index_col=False, usecols=[self.gvdata.second_idcol])[self.gvdata.second_idcol].unique()) 
             
             print(f"{self.gvdata.objectDataPath}   {regions}")
             self.annotationCombo.setVisible(True); self.annotationEdit.setVisible(False)
@@ -1191,7 +1191,7 @@ class GVUI(QDialog):
             status = self.gvdata.annotation_mappings[annotation]
             if status == "Don't assign":
                 continue
-            df.loc[df["Analysis Region"]==annotation, "Validation"] = status
+            df.loc[df[self.gvdata.second_idcol]==annotation, "Validation"] = status
         self._append_status('<font color="#7dbc39">  Done. </font>') 
         return df
 
@@ -1219,12 +1219,12 @@ class GVUI(QDialog):
     '''Find all unique annotation layer names, if the column exists in the data, and return the results'''
     def _locate_annotations_col(self, path):
         try:
-            true_annotations = list(pd.read_csv(path, index_col=False, usecols=['Analysis Region'])['Analysis Region'].unique()) 
-            self.gvdata.analysisRegionsInData = true_annotations
+            true_annotations = list(pd.read_csv(path, index_col=False, usecols=[self.gvdata.second_idcol])[self.gvdata.second_idcol].unique()) 
+            self.gvdata.secondaryIdentifiers = true_annotations
             return true_annotations
         except (KeyError, ValueError):
             print("No Analysis regions column in data")
-            self.gvdata.analysisRegionsInData = False
+            self.gvdata.secondaryIdentifiers = False
             return None
 
     '''Check that annotations and phenotypes chosen by the user match the data. Return False if there is a mismatch. 
@@ -1262,12 +1262,18 @@ class GVUI(QDialog):
         return df
     
     def add_global_id(self, df:pd.DataFrame):
-        if self.gvdata.analysisRegionsInData:
-            df['gvid'] = df['Analysis Region'].astype(str) +' '+ df[self.gvdata.idcol].astype(str)
+        if self.gvdata.secondaryIdentifiers:
+            df['gvid'] = df[self.gvdata.second_idcol].astype(str) +' '+ df[self.gvdata.idcol].astype(str)
         else:
-            # df.drop(columns=['Analysis Region'], inplace=True)
+            # df.drop(columns=[self.gvdata.second_idcol], inplace=True)
             df['gvid'] = df[self.gvdata.idcol].astype(str)    
-        return df.set_index('gvid', drop=True)
+        df.set_index('gvid', drop=True, inplace = True)
+        return df
+    
+    def check_notes(self, df:pd.DataFrame):
+        if "Notes" not in df.columns:
+            df["Notes"] = '-'
+        return df
 
     '''Read in the object data file and assign user chosen validation calls to the data, if needed'''
     def process_cell_table(self):
@@ -1284,6 +1290,7 @@ class GVUI(QDialog):
                 # df.to_csv(self.gvdata.objectDataPath,index=False)
                 # self._append_status('<font color="#7dbc39">  Done. </font>')
                 self._check_halo_validation_cols(df)
+                df = self.check_notes(df)
                 df = self.convert_from_halo_phenotypes(df)
                 df = self.assign_phenotype_statuses_to_sheet(df)
                 df = self.assign_annotation_statuses_to_sheet(df)
@@ -1550,10 +1557,13 @@ class GVUI_CosMx(GVUI):
         self._append_status_br('Validating chosen phenotypes...')
         
         try:
-            adata.obs["gvid"] = (adata.obs['cell_ID'].astype(int) + (adata.obs['fov'].astype(int) * 25_000)).astype(str)
-            adata.obs.set_index('gvid', inplace = True)
             df = adata.obs
+            df = self.add_global_id(df)
+            df["mask_id"] = (df['cell_ID'].astype(int) + (df['fov'].astype(int) * 25_000)).astype(str)
+            
             df = self.assign_phenotype_statuses_to_sheet(df)
+            # Set secondary ID as fov
+            self.gvdata.secondaryIdentifiers = df['fov'].unique().tolist()
             self._append_status('<font color="#7dbc39">  Done. </font>')
 
             def tryall(a,b,c, m='min'):

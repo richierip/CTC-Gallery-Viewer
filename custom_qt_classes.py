@@ -4,7 +4,6 @@ from qtpy.QtGui import QIcon, QColor, QLinearGradient, QFont
 from qtpy.QtWidgets import (QApplication, QComboBox, QDialog, QGridLayout, QLayout, QSlider, QDoubleSpinBox, QFileDialog,
                             QRadioButton, QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QHBoxLayout)
 from qtpy import QtGui, QtCore
-from napari import Viewer
 import os
 import pandas as pd
 # import warnings
@@ -16,7 +15,7 @@ from random import choice
 from typing import Callable
 from itertools import product
 
-from storage_classes import SessionVariables, GVData
+from storage_classes import GVData
 import custom_color_functions
 from custom_color_functions import colormap_titled as hexcd
 
@@ -1033,3 +1032,104 @@ class ModeCombo(QComboBox):
         # self.setEditable(True)
         # self.lineEdit().setReadOnly(True)
         # self.lineEdit().setAlignment(QtCore.Qt.AlignCenter)
+
+
+''' A pair of widgets that together let the user select two parameters needed to identify one cell for data with an secondary identifier'''
+
+class PairedIDEntry(QGroupBox):
+    def __init__(self, parent, secondary_ids, secondary_id_name: str, primary_placeholder:str = "Cell ID"):
+        super(PairedIDEntry, self).__init__(parent)
+        self.primary_id = None
+        self.placeholder = primary_placeholder
+        self.secondary_ids = secondary_ids
+        self.primary_widget = QLineEdit()
+        self.secondary_widget = QComboBox()
+        self.secondary_widget.addItems(secondary_ids)
+        self.secondary_id = secondary_ids[0]
+        self.secondary_id_name = secondary_id_name
+        self.arrange_widgets()
+        self.setStyleSheet('''
+            QWidget{
+                combobox-popup: 0;
+            }
+            QGroupBox{background-color: transparent; 
+                border: 0px; 
+                padding: 0px;
+                margin: 0ex;
+                font-size: 24px;
+            } 
+        
+            QGroupBox:title {
+                subcontrol-position: top middle; 
+                padding: 0px;
+            }
+        ''')
+
+    def arrange_widgets(self):
+        self.secondary_label = QLabel(f"{self.secondary_id_name}:")
+        self.layout = QHBoxLayout(self)
+        self.layout.addWidget(self.secondary_label)
+        self.layout.addWidget(self.secondary_widget)
+        self.layout.addWidget(self.primary_widget)
+        self.primary_widget.setPlaceholderText(self.placeholder)
+        self.primary_widget.editingFinished.connect(self.update_primary)
+        self.secondary_widget.setMaxVisibleItems(10)
+        self.secondary_widget.currentTextChanged.connect(self.update_secondary)
+        if not self.secondary_ids:
+            self.secondary_label.setDisabled(True)
+            self.secondary_label.setVisible(False)
+            self.secondary_widget.setDisabled(True)
+            self.secondary_widget.setVisible(False)
+
+    def disable(self):
+        self.primary_widget.setDisabled(True)
+        self.secondary_widget.setDisabled(True)
+
+    def enable(self):
+        self.primary_widget.setDisabled(False)
+        self.secondary_widget.setDisabled(False)
+
+    def clear(self):
+        self.primary_widget.clear()
+        self.secondary_widget.setCurrentIndex(0)
+    
+    def update_primary(self):
+        self.primary_id = self.primary_widget.text()
+
+    def update_secondary(self):
+        self.secondary_id = self.secondary_widget.currentText()
+
+    def _set_global(self, primary, secondary):
+        self.set_primary(primary)
+        self.set_secondary(secondary)
+
+    def set_global(self, global_id):
+        if self.secondary_ids:
+            secondary, primary = str(global_id).split()
+            self._set_global(primary, secondary)
+        else:
+            self.set_primary(global_id)
+    
+    def set_primary(self, primary):
+        self.primary_widget.setText(primary)
+        self.primary_id = primary
+    
+    def set_secondary(self, secondary):
+        self.secondary_widget.setCurrentText(secondary)
+        self.secondary_id = secondary
+
+    def get_global(self):
+        if not self.primary_widget.text():
+            return None
+        elif self.secondary_ids:
+            return f'{self.secondary_id} {self.primary_id}'
+        else:
+            return str(self.primary_id)
+    
+    def get_primary(self):
+        return self.primary_id
+    
+    def get_secondary(self):
+        return self.secondary_id
+    
+
