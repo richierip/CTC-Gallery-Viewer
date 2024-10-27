@@ -947,31 +947,25 @@ class GVUI(QDialog):
             self.setWidgetColorBackground(self.dataEntry, "#ffa000")
             QTimer.singleShot(800, lambda:self.setWidgetColorBackground(self.dataEntry, "#ffffff"))
     
+    ''' Overload per-subclass '''
+    def parse_columns_in_data(self):
+        pass
+
     ''' Worker function to read and object data file and check for compatibility. Dynamic columns names present a challenge. 
             Tries to only pull in column data that is relevant. 
             Sets widgets to visible -- dependent on the data
             Also check if the image location in the data matches the image given'''
     def _prefillObjectData(self):
-        headers = pd.read_csv(self.gvdata.objectDataPath, index_col=False, nrows=0).columns.tolist() 
-        possible_fluors = self.gvdata.possible_fluors_in_data
-        suffixes = self.gvdata.non_phenotype_fluor_suffixes_in_data
-        exclude = self.gvdata.other_cols_in_data
-        
-        intens_ = ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity']
+        self.parse_columns_in_data()
 
-        include = [x for x in headers if any(f in x for f in intens_)]
+        
         self.filterMarker.setVisible(False)
         self.filterMarkerCombo.setVisible(True)
-        self.filterMarkerCombo.addItems(include)
+        self.filterMarkerCombo.addItems(self.gvdata.fluor_columns)
 
-        for fl in possible_fluors:
-            for sf in suffixes:
-                exclude.append(f'{fl} {sf}')
-        include = [x for x in headers if ((x not in exclude) and not (any(f in x for f in possible_fluors)))]
-        self.gvdata.phenotypes = include
         self.phenotypeToGrab.setVisible(False) #
         self.phenotypeCombo.setVisible(True) 
-        self.phenotypeCombo.addItems(include)
+        self.phenotypeCombo.addItems(self.gvdata.phenotypes)
         # Assess annotation regions in csv
         try:
             regions = list(pd.read_csv(self.gvdata.objectDataPath, index_col=False, usecols=[self.gvdata.second_idcol])[self.gvdata.second_idcol].unique()) 
@@ -1395,6 +1389,13 @@ class GVUI_Halo(GVUI):
         channels = HaloChannelDialog(self, self.app, self.gvdata, self.topLeftGroupLayout, self.topLeftGroupBox , self.createLeftGroupBox)
         channels.exec()
 
+    ''' Find columns that have fluor intensity information, and get phenotype columns '''
+    def parse_columns_in_data(self):
+        headers = pd.read_csv(self.gvdata.objectDataPath, index_col=False, nrows=0).columns.tolist() 
+        self.gvdata.fluor_columns = [x for x in headers if x in self.gvdata.fluor_columns]
+        exclude = self.gvdata.other_cols_in_data + [f'{fl} {sf}' for fl, sf in zip(self.gvdata.possible_fluors_in_data, self.gvdata.non_phenotype_fluor_suffixes_in_data)]
+        self.gvdata.phenotypes = [x for x in headers if ((x not in exclude) and not (any(f in x for f in self.gvdata.possible_fluors_in_data)))]
+
 class GVUI_Halo_MI(GVUI):
     def __init__(self, app: QApplication, tracker = None, gvdata: storage_classes.GVData | None = None):
         super().__init__(app, tracker, gvdata)
@@ -1468,7 +1469,48 @@ class GVUI_CosMx(GVUI):
         self.dataEntry.clear()
         self.dataEntry.insert(pathlib.Path(folder).name)
 
-    
+
+    ''' Find columns that have fluor intensity information, and get phenotype columns '''
+    def parse_columns_in_data(self, df: pd.DataFrame):
+        headers = df.columns.tolist() 
+        self.gvdata.fluor_columns = [x for x in headers if x in self.gvdata.fluor_columns]
+        exclude = self.gvdata.other_cols_in_data + [f'{fl} {sf}' for fl, sf in zip(self.gvdata.possible_fluors_in_data, self.gvdata.non_phenotype_fluor_suffixes_in_data)]
+        self.gvdata.phenotypes = [x for x in headers if ((x not in exclude) and not (any(f in x for f in self.gvdata.possible_fluors_in_data)))]
+
+        # Create pinned columns for readout in viewer
+        unchecked_columns = copy.copy(self.gvdata.fluor_columns)
+
+        # If the user has no pinned columns yet, make defaults. Otherwise use what's there already.
+        if not self.gvdata.pinned_columns:
+            self.gvdata.pinned_columns = []
+            while len(unchecked_columns)>0:
+                new = unchecked_columns.pop(0)
+                fluor = new.replace("Mean.","").replace("Max.",'')
+                if fluor in self.gvdata.possible_fluors_in_data: 
+                    if fluor not in self.gvdata.channels: continue # Default: start with looking at only
+                    other = [x for x in unchecked_columns if fluor in x]
+                    if other:
+                        other = other[0]
+                        unchecked_columns.remove(other)
+                        self.gvdata.pinned_columns.append( tuple([new, other]) )
+                    else:
+                        self.gvdata.pinned_columns.append(new)
+                else:
+                    match new:
+                        case 'nCount_RNA':
+                            try:
+                                unchecked_columns.remove('nFeature_RNA')
+                                self.gvdata.pinned_columns.append( tuple(['nCount_RNA', 'nFeature_RNA']) )
+                            except ValueError:
+                                self.gvdata.pinned_columns.append('nCount_RNA')
+                        case 'nFeature_RNA':
+                            try:
+                                unchecked_columns.remove('nCount_RNA')
+                                self.gvdata.pinned_columns.append( tuple(['nCount_RNA', 'nFeature_RNA']) )
+                            except ValueError:
+                                self.gvdata.pinned_columns.append('nFeature_RNA')
+                        case _:
+                            self.gvdata.pinned_columns.append(new)
 
     def _prefillObjectData(self):
         self.status_label.setText("Checking compatibility...")
@@ -1487,8 +1529,6 @@ class GVUI_CosMx(GVUI):
         imagecontents.remove('.zattrs') ; imagecontents.remove('.zgroup') ; imagecontents.remove('labels') 
         if any([x not in self.gvdata.channelFolders.values() for x in imagecontents]):
             return 'request reconfigure'
-        
-
         
         self.gvdata.adata_path = self.gvdata.cosmx_folder.joinpath('counts.h5ad')
         self.gvdata.pqds = ds.dataset(self.gvdata.cosmx_folder.joinpath('transcripts.parquet'))
@@ -1558,6 +1598,7 @@ class GVUI_CosMx(GVUI):
         
         try:
             df = adata.obs
+            self.parse_columns_in_data(df)
             df = self.add_global_id(df)
             df["mask_id"] = (df['cell_ID'].astype(int) + (df['fov'].astype(int) * 25_000)).astype(str)
             

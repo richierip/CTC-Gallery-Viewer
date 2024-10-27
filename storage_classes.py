@@ -13,7 +13,7 @@ import pickle
 import copy
 import pandas as pd
 import numpy as np
-from typing import Callable
+from typing import Callable, Collection
 from PIL import ImageColor
 from itertools import product
 from qtpy.QtGui import QFont
@@ -24,6 +24,7 @@ from datetime import datetime
 from qtpy.QtWidgets import QToolTip
 from custom_color_functions import colormap, hex_color_from_decimal, decimal_color_from_hex
 import pathlib
+import itertools
 
 CELL_COLORS = ['gray', 'purple' , 'blue', 'green', 'orange','red', 'yellow', 'cyan', 'pink'] # List of colors available to use as colormaps
 CHANNELS_STR = ["DAPI", "Opal 570", "Opal 690", "Opal 480","Opal 620","Opal 780", "Opal 520", "AF"] # List of String names for fluors the user wants to display  
@@ -169,12 +170,10 @@ class GVData:
         self.secondaryIdentifiers = False # Bool that tracks whether the object data has an repeating IDs -- this will hold any secondary identifiers needed if so
         self.filters = []
         self.filters_label = '<u>Filters</u><br>None'
-        self.possible_fluors_in_data = ['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence']
-        self.non_phenotype_fluor_suffixes_in_data = ['Positive Classification', 'Positive Nucleus Classification','Positive Cytoplasm Classification',
-                    'Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity', '% Nucleus Completeness', '% Cytoplasm Completeness',
-                    '% Cell Completeness', '% Completeness']
-        self.other_cols_in_data = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
-                  'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
+        self.possible_fluors_in_data = [] # Names of fluors we might see. Should be a superset of channels. 
+        self.non_phenotype_fluor_suffixes_in_data = [] # endings that might be paired with fluor names in the data. Many columns like this in Halo object data
+        self.fluor_columns = [] # columns to keep and display in the viewer per-cell
+        self.other_cols_in_data = [] # Extra unique column names that might not be considered a phenotype
         self.phenotypes = []
         self.image_path = image_path # String - image path
 
@@ -366,9 +365,16 @@ class GVData:
 class HaloData(GVData):
     def __init__(self, parent):
         super().__init__(parent)
+        self.possible_fluors_in_data = set(['DAPI','Opal 480','Opal 520', 'Opal 570', 'Opal 620','Opal 690', 'Opal 720', 'AF', 'Sample AF', 'Autofluorescence'] + self.channels)
+        self.non_phenotype_fluor_suffixes_in_data = ['Positive Classification', 'Positive Nucleus Classification','Positive Cytoplasm Classification',
+                    'Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity', '% Nucleus Completeness', '% Cytoplasm Completeness',
+                    '% Cell Completeness', '% Completeness']
+        self.fluor_columns = [f"{f} {s}" for f, s in itertools.product(self.possible_fluors_in_data, ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity'])]
+        self.other_cols_in_data = ['Cell Area (µm²)', 'Cytoplasm Area (µm²)', 'Nucleus Area (µm²)', 'Nucleus Perimeter (µm)', 'Nucleus Roundness',
+                  'Image Location','Image File Name', 'Analysis Region', 'Algorithm Name', 'Object Id', 'XMin', 'XMax', 'YMin', 'YMax', 'Notes']
         self.idcol = "Object Id"
         self.second_idcol = "Analysis Region"
-        self.extra_columns = []
+        self.extra_columns = ["XMin","XMax","YMin", "YMax"]
         self.chunks = 512
         # self.user = parent
 
@@ -377,10 +383,14 @@ class CosMxData(GVData):
         super().__init__(parent, channels=['DAPI','PanCK','CD3','Membrane','CD45'],
                          colors={'DAPI': 'gray', "PanCK" :"green", "CD3" : "yellow", "Membrane":"darkcyan", "CD45": "red"})
         self.channelFolders = {'DAPI': 'U', "PanCK" :"B", "CD3" : "G", "Membrane":"Y", "CD45": "R"}
+        self.possible_fluors_in_data = set(list(self.channelFolders.keys()) + list(self.channelFolders.values()))
+        self.fluor_columns = [f"{p}.{f}" for f,p in itertools.product(self.possible_fluors_in_data, ['Mean','Max'])] + ['nCount_RNA', 'nFeature_RNA', 'leiden']
+        self.pinned_columns : Collection = []
+        
         self.idcol = "cell_ID"
         self.second_idcol = "fov"
         self.transcripts = ["LINE1_ORF1"]
-        self.extra_columns = ['fov','fovX','fovY']
+        self.extra_columns = ["mask_id",'fovX','fovY']
         self.chunks = 2**13
 
     def _save_validation(self, to_disk = False):

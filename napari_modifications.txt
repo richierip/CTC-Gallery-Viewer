@@ -53,3 +53,7 @@ Looks like this --
 Lib\site-packages\napari\utils\shortcuts.py
 Line 19 replace with
 'napari:hold_for_pan_zoom': ['Control-Space'],
+
+
+Lib\site-packages\napari\layers\image\_image_key_bindings.py
+comment out hold_to_pan_zoom, lines 58 - 69

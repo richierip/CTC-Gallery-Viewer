@@ -1280,6 +1280,10 @@ class GView:
         scoring_label.setText(display_string)
         return True
 
+    ''' OVerload per-subclass'''
+    def _construct_description_string(self, present_intensities:list, intensity_series : pd.Series):
+        pass
+
     def set_cell_description_label(self, ID, display_text_override = None):
         # Instead of showing a cell's info, display this text
         if display_text_override is not None:
@@ -1288,75 +1292,43 @@ class GView:
             self.session.widget_dictionary['notes label'].setVisible(False)
             self.viewer.window._qt_viewer.setFocus()
             return True
-        cell_num = ID.split()[-1]; cell_anno = ID.replace(' '+cell_num,'')
-   
-        cell_name = f'Cell {cell_num}'
+        
+        if ID is None: return True # No cell under mouse most likely
         try:
             cell = self.session.current_cells.loc[str(ID)]
-        except KeyError: # in case the name was off
+        except KeyError: # in case the name was off or some other issue
             return False
+        
+        try:
+            ID.split()
+        except:
+            import IPython
+            IPython.embed()
+            exit()
+        
+        if not self.data.secondaryIdentifiers:
+            cell_name = f'Cell {ID}'
+        else:
+            secondary, primary = ID.split()
+            cell_name = f'{self.data.second_idcol.title()} {secondary} cell {primary}'
         note = cell['Notes']
         status = cell['Validation']
-        if self.data.statuses_hex[status] != "#ffffff":
-            prefix = f'Page {cell["Page"]}<br><font color="{self.data.statuses_hex[status]}">{cell_name}</font>'
-        else:
-            prefix = f'Page {cell[ID]["Page"]}<br>{cell_name}' 
+        try:
+            if self.data.statuses_hex[status] != "#ffffff":
+                prefix = f'Page {cell["Page"]}<br><font color="{self.data.statuses_hex[status]}">{cell_name}</font>'
+            else:
+                prefix = f'Page {cell[ID]["Page"]}<br>{cell_name}' 
+        except TypeError:
+            import IPython
+            IPython.embed()
+            exit()
 
         # Add intensities
         # Find out which columns are present in the Series and subset to those
         present_intensities = sorted(list(set(list(cell.index)).intersection(set(self.session.intensity_columns))))
         intensity_series = cell.loc[present_intensities]
-        # intensity_series = self.session.session_cells[ID]['intensities']
         
-        intensity_str = ''
-        for fluor in self.data.channels:
-            if fluor == 'Composite':
-                continue
-            # fluor = str(cell).replace(" Cell Intensity","")
-            fluor = str(fluor)
-            intensity_str += f'<br><font color="{self.data.channelColors[fluor].replace("blue","blue")}">{fluor}</font>'
-            def add_values(intensity_str, fluor, intensity_lookup):
-                flag = True
-                name = intensity_lookup + ': No data'
-                try:
-                    cyto = intensity_lookup
-                    cyto = [x for x in present_intensities if (cyto in x and 'Cytoplasm Intensity' in x)][0]
-                    val = round(float(intensity_series[cyto]),1)
-                    intensity_str += f'<font color="{self.data.channelColors[fluor].replace("blue","blue")}"> cyto: {val}</font>'
-                    flag = False
-                    name = cyto.replace(' Cytoplasm Intensity','')
-                except (KeyError, IndexError): pass
-                try:
-                    nuc = intensity_lookup
-                    nuc = [x for x in present_intensities if (nuc in x and 'Nucleus Intensity' in x)][0]
-                    val = round(float(intensity_series[nuc]),1)
-                    intensity_str += f'<font color="{self.data.channelColors[fluor].replace("blue","blue")}"> nuc: {val}</font>'
-                    flag = False
-                    name = nuc.replace(' Nucleus Intensity','')
-                except (KeyError, IndexError): pass
-                try:
-                    cell = intensity_lookup
-                    cell = [x for x in present_intensities if (cell in x and 'Cell Intensity' in x)][0]
-                    val = round(float(intensity_series[cell]),1)
-                    intensity_str += f'<font color="{self.data.channelColors[fluor].replace("blue","blue")}"> cell: {val}</font>'
-                    flag = False
-                    name = cell.replace(' Cell Intensity','')
-                except (KeyError, IndexError): pass
-                return intensity_str.replace(intensity_lookup,name), flag
-            intensity_str, error = add_values(intensity_str, fluor,fluor)
-            possible_af_strings = ['AF', 'Autofluorescence', 'Sample AF']
-            if error and fluor in possible_af_strings:
-                possible_af_strings.remove(fluor)
-                while possible_af_strings:
-                    new = possible_af_strings.pop()
-                    intensity_str, error = add_values(intensity_str,"AF", new)
-                    if not error: 
-                        break
-            # Should have something from the fluorescence column if it's there
-
-
-            # intensity_str += f'<br><font color="{self.data.channelColors[fluor.replace(" ","").upper()].replace("blue","#0462d4")}">{fluor} cyto: {round(float(intensity_series[cyto]),1)} nuc: {round(float(intensity_series[nuc]),1)} cell: {round(float(intensity_series[cell]),1)}</font>'
-        # Add note if it exists
+        intensity_str = self._construct_description_string(present_intensities, intensity_series)
         
         self.session.widget_dictionary['cell description label'].setText(prefix + intensity_str)
         if note == '-' or note == '' or note is None: 
@@ -1437,8 +1409,7 @@ class GView:
             results.append(cell_punchout)
         print("Computing image with dask")
         img = dask.compute(*results)
-
-        import IPython  
+  
         col_g = 0 ; row_g = 0 ; row_m = 0
         self.session.grid_to_ID = {"Gallery":{}, "Multichannel":{}} # Reset this since we could be changing to multichannel mode
         print("Inserting images into page")
@@ -2923,21 +2894,13 @@ class GView:
 
 
         # Get relevant columns for intensity sorting
-        # TODO make this conditional, and in a try except format
-        headers = self.data.objectDataFrame.columns.tolist() 
-        possible_fluors = self.data.possible_fluors_in_data
-        suffixes = ['Cell Intensity','Nucleus Intensity', 'Cytoplasm Intensity']
-        all_possible_intensities = [x for x in headers if (any(s in x for s in suffixes) and (any(f in x for f in possible_fluors)))]
-        self.session.intensity_columns = all_possible_intensities
-        # for fl in possible_fluors:
-        #         for sf in suffixes:
-        #             all_possible_intensities.append(f'{fl} {sf}')
-        v = list(self.data.statuses.keys())
-        validation_cols = [f"Validation | " + s for s in v]
-        self.session.validation_columns = validation_cols
+        self.session.intensity_columns = self.data.fluor_columns
+        
         #TODO make cols to keep dynamic
-        cols_to_keep = ["mask_id", "Validation",self.data.idcol, self.data.second_idcol, "Notes", "XMin","XMax","YMin", "YMax", "cell_ID"] \
-            + phenotypes + all_possible_intensities + validation_cols + self.data.extra_columns
+        cols_to_keep = ["Validation", "XMin","XMax","YMin", "YMax",self.data.idcol, self.data.second_idcol, "Notes"] + phenotypes + self.session.intensity_columns + self.data.extra_columns
+        if isinstance(self, HaloView):
+            cols_to_keep += [f"Validation | " + s for s in list(self.data.statuses.keys())]
+
         cols_to_keep = df.columns.intersection(cols_to_keep)
         df = df.loc[:, cols_to_keep]
 
@@ -2948,10 +2911,11 @@ class GView:
         global_sort_status = True
         if self.data.global_sort is not None:
             try:
-                # Doing this temporarily to handle cases where there is a custom fluor name passed. Fluor needs to still contain the 'Opal'
-                #   Label somewhere in the name.
-                self.data.global_sort = [x for x in all_possible_intensities if all(y in x for y in self.data.global_sort.replace("Cell Intensity",""))]
-                self.data.global_sort = [x for x in self.data.global_sort if "Cell Intensity" in x][0]
+                if isinstance(self, HaloView):
+                    # Doing this temporarily to handle cases where there is a custom fluor name passed. Fluor needs to still contain the 'Opal'
+                    #   Label somewhere in the name.
+                    self.data.global_sort = [x for x in self.session.intensity_columns if all(y in x for y in self.data.global_sort.replace("Cell Intensity",""))]
+                    self.data.global_sort = [x for x in self.data.global_sort if "Cell Intensity" in x][0]
                 _sort = self.data.global_sort
                 _asc = False
             except:
@@ -3061,7 +3025,8 @@ class GView:
                     _asc = True
                 else:
                     # First, check if a custom name was used.
-                    sort_by_intensity = [x for x in all_possible_intensities if all(y in x for y in sort_by_intensity.split(" "))][0]
+                    if isinstance(self, HaloView):
+                        sort_by_intensity = [x for x in self.session.intensity_columns if all(y in x for y in sort_by_intensity.split(" "))][0]
                     _sort = sort_by_intensity
                     _asc = False
             except (KeyError, IndexError):
@@ -3303,6 +3268,53 @@ class HaloView(GView):
         self.viewer.layers["Gallery Status Numbers"].text = self.session.status_text_object
         self.viewer.layers["Multichannel Status Numbers"].text = self.session.status_text_object
 
+    def _construct_description_string(self, present_intensities:list, intensity_series : pd.Series):
+        intensity_str = ''
+        for fluor in self.data.channels:
+            if fluor == 'Composite':
+                continue
+            # fluor = str(cell).replace(" Cell Intensity","")
+            fluor = str(fluor)
+            intensity_str += f'<br><font color="{self.data.channelColors[fluor].replace("blue","lightblue")}">{fluor}</font>'
+            def add_values(intensity_str, fluor, intensity_lookup):
+                flag = True
+                name = intensity_lookup + ': No data'
+                try:
+                    cyto = intensity_lookup
+                    cyto = [x for x in present_intensities if (cyto in x and 'Cytoplasm Intensity' in x)][0]
+                    val = round(float(intensity_series[cyto]),1)
+                    intensity_str += f'<font color="{self.data.channelColors[fluor].replace("blue","lightblue")}"> cyto: {val}</font>'
+                    flag = False
+                    name = cyto.replace(' Cytoplasm Intensity','')
+                except (KeyError, IndexError): pass
+                try:
+                    nuc = intensity_lookup
+                    nuc = [x for x in present_intensities if (nuc in x and 'Nucleus Intensity' in x)][0]
+                    val = round(float(intensity_series[nuc]),1)
+                    intensity_str += f'<font color="{self.data.channelColors[fluor].replace("blue","lightblue")}"> nuc: {val}</font>'
+                    flag = False
+                    name = nuc.replace(' Nucleus Intensity','')
+                except (KeyError, IndexError): pass
+                try:
+                    cell = intensity_lookup
+                    cell = [x for x in present_intensities if (cell in x and 'Cell Intensity' in x)][0]
+                    val = round(float(intensity_series[cell]),1)
+                    intensity_str += f'<font color="{self.data.channelColors[fluor].replace("blue","lightblue")}"> cell: {val}</font>'
+                    flag = False
+                    name = cell.replace(' Cell Intensity','')
+                except (KeyError, IndexError): pass
+                return intensity_str.replace(intensity_lookup,name), flag
+            intensity_str, error = add_values(intensity_str, fluor,fluor)
+            possible_af_strings = ['AF', 'Autofluorescence', 'Sample AF']
+            if error and fluor in possible_af_strings:
+                possible_af_strings.remove(fluor)
+                while possible_af_strings:
+                    new = possible_af_strings.pop()
+                    intensity_str, error = add_values(intensity_str,"AF", new)
+                    if not error: 
+                        break
+            # Should have something from the fluorescence column if it's there
+        return intensity_str
 class CosMxView(GView):
     def __init__(self, gvdata: storage_classes.GVData, gvui):
         self.gvmode = "CosMx"
@@ -3587,7 +3599,6 @@ class CosMxView(GView):
         # row_g, col_g = list(self.session.grid_to_ID["Gallery"].keys())[list(self.session.grid_to_ID["Gallery"].values()).index(cell.name)].split(",")
         # row_g, col_g = int(row_g), int(col_g)
         # self.viewer.layers["Gallery Labels"].data[(row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = cell_label
-        
 
         new_color = transform_color(self.data.statuses_hex[kwargs['next_status']])[0]
         mask_id = self.session.session_cells.loc[kwargs['cell_name'], 'mask_id']
@@ -3607,6 +3618,53 @@ class CosMxView(GView):
         except KeyError:
             pass
         return True
+
+    def _construct_description_string(self, present_intensities:list, intensity_series : pd.Series):
+        intensity_str = ''
+        contrast_color = 'black' if self.session.absorption_mode else 'white'
+
+        def _convert_to_color(fl):
+            try:
+                return self.data.channelColors[fl]
+            except KeyError:
+                try:
+                    r = {value:key for key, value in self.data.channelFolders.items()}
+                    return self.data.channelColors[r[fl]]
+                except KeyError:
+                    return contrast_color
+            return '' #unreachable
+
+        l = [item for pair in self.data.channelFolders.items() for item in pair]
+        for datacol in self.data.pinned_columns:
+            if isinstance(datacol, tuple):
+                try:
+                    data0 = intensity_series[datacol[0]]
+                    data1 = intensity_series[datacol[1]]
+                except KeyError:
+                    # Col not in data. mistakes were made earlier.
+                    continue
+                
+                if any([x == y.replace("Mean.",'').replace("Max.",'') for y in datacol for x in l]):
+                    fluor = [x for x in l if x in datacol[0]][0]
+                    
+                    intensity_str += f'<br><font color="{_convert_to_color(fluor).replace("blue","lightblue")}">{datacol[0]}: {data0}'
+                    intensity_str += f'  ,  {datacol[1]}: {data1}</font>'
+                else:
+                    intensity_str += f'<br><font color="{contrast_color}">{datacol[0]} : {data0}  ,  {datacol[1]}: {data1}</font>'
+            else: # Just one thing. Give it it's own row.
+                try:
+                    data = intensity_series[datacol]
+                except KeyError:
+                    continue
+                if any([x in datacol for x in l]):
+                    fluor = [x for x in l if x in datacol][0]
+                    intensity_str += f'<br><font color="{_convert_to_color(fluor).replace("blue","lightblue")}">{datacol} : {data}</font>'
+                else:
+                    intensity_str += f'<br><font color="{contrast_color}">{datacol} : {data}</font>'
+
+        return intensity_str
+
+            # Should have something from the fluorescence column if it's there
 
     ''' FOV stuff '''
     def get_offsets(self, fov):
