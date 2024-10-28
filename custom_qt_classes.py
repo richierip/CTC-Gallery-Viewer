@@ -2,7 +2,7 @@
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QIcon, QColor, QLinearGradient, QFont
 from qtpy.QtWidgets import (QApplication, QComboBox, QDialog, QGridLayout, QLayout, QSlider, QDoubleSpinBox, QFileDialog,
-                            QRadioButton, QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QHBoxLayout)
+                            QRadioButton, QGroupBox, QLabel, QLineEdit,QPushButton, QSpinBox, QHBoxLayout, QSizePolicy)
 from qtpy import QtGui, QtCore
 import os
 import pandas as pd
@@ -18,6 +18,8 @@ from itertools import product
 from storage_classes import GVData
 import custom_color_functions
 from custom_color_functions import colormap_titled as hexcd
+
+# from napari.utils.colormaps.colorbars
 
 
 VERSION_NUMBER = '1.3.5'
@@ -1133,3 +1135,114 @@ class PairedIDEntry(QGroupBox):
         return self.secondary_id
     
 
+class FovLabelInput(QGroupBox):
+    def __init__(self, parent, gview, callback:Callable):
+        super(FovLabelInput, self).__init__(parent)
+        self.layout = QGridLayout(self)
+        self.setSizePolicy(QSizePolicy.MinimumExpanding ,QSizePolicy.Minimum)
+        self.layout.setSizeConstraint(QLayout.SetFixedSize)
+        self.gview = gview
+        self.adata = gview.adata
+        self.callback = callback
+                # Kinds
+        self.fov_label_transcripts = QComboBox()
+        self.fov_label_transcripts.setVisible(False)
+        self.fov_label_transcripts.addItems(self.adata.var_names)
+        self.transcript_cm = QComboBox()
+        self.transcript_cm.setVisible(False)
+        self.transcript_cm.setStyleSheet("combobox-popup: 0;")
+        self.transcript_cm.setMaxVisibleItems(8)
+        cms = ["inferno", "viridis", "magma","plasma", 'turbo'] + list(hexcd.keys())[1:9]
+        self.transcript_cm.addItems(cms)
+
+        self.fov_label_cm  = ColorfulComboBox(None,hexcd, text_size='8pt')
+        self.fov_label_combo = QComboBox()
+        self.fov_label_combo.addItems(["Flat color","Scale color by RNA"])
+        self.fov_label_combo.currentIndexChanged.connect(self.on_mode_change)
+
+        self.transcript_min = QSpinBox() ; self.transcript_min.setRange(0,1_000_000) ; self.transcript_min.setVisible(False)
+        self.transcript_max = QSpinBox() ; self.transcript_max.setRange(0,1_000_000) ; self.transcript_max.setVisible(False)
+                
+
+        self.fov_limits_combo = QComboBox()
+        self.fov_limits_combo.setVisible(False)
+        self.fov_limits_combo.addItems(["Auto", "Custom"])
+        self.fov_limits_combo.currentIndexChanged.connect(lambda: self.toggle_limits(self.fov_limits_combo.currentText()))
+
+        fov_label_button = QPushButton("Add labels")
+        fov_label_button.released.connect(self.on_button_push)
+        
+        #TODO connect
+        self.layout.addWidget(self.fov_label_combo, 0,0)
+        self.layout.addWidget(self.fov_label_transcripts, 1,0,1,4)
+        self.layout.addWidget(self.fov_label_cm, 0,1)
+        self.layout.addWidget(self.transcript_cm, 0,1)
+        self.layout.addWidget(self.fov_limits_combo,0,2,1,2)
+        self.layout.addWidget(self.transcript_min, 1,2)
+        self.layout.addWidget(self.transcript_max, 1,3)
+        self.layout.addWidget(fov_label_button, 2,0,1,4 )
+        self.setStyleSheet('''
+            QWidget{
+                combobox-popup: 0;
+            }
+            QGroupBox{background-color: transparent; 
+                border: 0px; 
+                padding: 0px;
+                margin: 0ex;
+                font-size: 24px;
+            } 
+        
+            QGroupBox:title {
+                subcontrol-position: top middle; 
+                padding: 0px;
+            }
+        ''')
+
+    def toggle_widgets(self,wl, action = 'on'):
+        print("TW")
+        match action:
+            case 'on':
+                print('on')
+                for w in wl:
+                    w.setDisabled(False)
+                    w.setVisible(True)
+            case 'off':
+                print('off')
+                for w in wl:
+                    w.setDisabled(True)
+                    w.setVisible(False)  
+
+    def toggle_limits(self, state):
+            action = {"Auto" : 'off', 'Custom': 'on'}[state]
+            wl = [self.transcript_min, self.transcript_max]
+            self.toggle_widgets(wl, action)
+    
+    def on_mode_change(self):
+        print("Mode change")
+        a = [self.fov_label_cm]
+        b = [self.fov_label_transcripts, self.transcript_cm, self.fov_limits_combo]
+        match self.fov_label_combo.currentText():
+            case "Flat color":
+                self.toggle_widgets(a, 'on')
+                self.toggle_widgets(b, 'off')
+                self.toggle_widgets([self.transcript_min, self.transcript_max], 'off')
+            case "Scale color by RNA":
+                self.toggle_widgets(a, 'off')
+                self.toggle_widgets(b, 'on')
+                self.toggle_limits(self.fov_limits_combo.currentText())
+
+    def on_button_push(self):
+        match self.fov_label_combo.currentText():
+            case "Flat color":
+                tx = []
+                limits = None
+                cm = self.fov_label_cm.currentText().lower()
+            case "Scale color by RNA":
+                tx = [self.fov_label_transcripts.currentText()]
+                if self.fov_limits_combo.currentText() == "Custom":
+                    limits = (int(self.transcript_min.value()), int(self.transcript_max.value()) ) 
+                else:
+                    limits = None
+                cm = self.transcript_cm.currentText().lower()
+        kwargs = {'tx_names' :tx, 'limits': limits, 'cm': cm  }
+        self.callback(self.gview, **kwargs)

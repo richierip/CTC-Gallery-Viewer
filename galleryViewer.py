@@ -5,6 +5,8 @@ Peter Richieri
 '''
 
 # import IPython
+import napari.utils
+import napari.utils.colormaps
 import tifffile
 import napari
 from napari.layers import Points as PointsLayer
@@ -64,7 +66,8 @@ import pathlib
 
 # These files were created as part of the GalleryViewer Project
 import storage_classes
-from custom_qt_classes import StatusCombo, ViewSettingsDialog, make_fluor_toggleButton_stylesheet, ColorfulComboBox, PairedIDEntry
+from custom_qt_classes import (StatusCombo, ViewSettingsDialog, make_fluor_toggleButton_stylesheet, ColorfulComboBox, 
+            PairedIDEntry, FovLabelInput)
 # from initial_UI import GVUI # Can't do this (circular import)
 # from initial_UI import VERSION_NUMBER
 
@@ -948,6 +951,34 @@ class GView:
 
     ## --- Side bar functions and GUI elements 
 
+    def center_multichannel(self, action = "move"):
+        extent = [0,min(self.session.multichannel_page_images[0].shape) * self.session.image_scale]
+        size = extent[1] - extent[0]
+        new_center = np.add([0,0], np.divide(size, 2))
+        new_zoom = np.min(np.array(self.viewer._canvas_size) / size)
+        if action == "move":
+            self.viewer.camera.center = new_center
+            self.viewer.camera.zoom = new_zoom
+        return new_center, new_zoom
+
+    def center_gallery(self, action = "move"):
+        cpr = self.data.cells_per_row
+        gallery_shape = (len(self.data.channels), ceil((self.data.page_size)/cpr)*(self.data.imageSize+2),(self.data.imageSize+2) * cpr)
+        extent = [0,max(gallery_shape) * self.session.image_scale]
+        size = extent[1] - extent[0]
+        new_center = np.add([0,0], np.divide(size, 2))
+        new_zoom = np.min(np.array(self.viewer._canvas_size) / size)
+        if action =="move":
+            self.viewer.camera.center = new_center
+            self.viewer.camera.zoom = new_zoom
+        return new_center, new_zoom
+
+    def center_slide(self):
+        extent = [0,max(self.session.dask_high_res.shape) * self.session.image_scale]
+        size = extent[1] - extent[0]
+        self.viewer.camera.center = np.add([0,0], np.divide(size, 2))
+        self.viewer.camera.zoom = np.min(np.array(self.viewer._canvas_size) / size) 
+
     ''' Definition per-subclass'''
     def toggle_cell_labels(self):
         pass
@@ -1280,7 +1311,7 @@ class GView:
         scoring_label.setText(display_string)
         return True
 
-    ''' OVerload per-subclass'''
+    ''' Definition per-subclass'''
     def _construct_description_string(self, present_intensities:list, intensity_series : pd.Series):
         pass
 
@@ -1357,7 +1388,7 @@ class GView:
                     dtype=dtype_force)
             
 
-    ''' Overload in HaloView and CosMxView to add other layers. '''
+    ''' Definition per-subclass'''
     def _add_gallery_extras(self, *args, **kwargs):
         pass
 
@@ -1895,7 +1926,6 @@ class GView:
         self.session.display_intensity_func = display_intensity
         self.session.find_mouse_func = find_mouse
 
-        
         @viewer.bind_key('Space', overwrite = True)
         @self.catch_exceptions_to_log_file("runtime_assign-next-status")
         def toggle_status(viewer):
@@ -2200,11 +2230,6 @@ class GView:
             # print(f"Zoom level is {viewer.camera.zoom}\n")
             # display_intensity(viewer, dummyCursor(curY+((y-curY)*(step_size-1)), curX+((x-curX)*(step_size-1)) ))
             viewer.camera.zoom *= step_size
-
-
-        # @viewer.mouse_move_callbacks.append
-        # def zoom_out_wrapper(viewer, event):
-        #     zoom_out(viewer, event)
 
         @viewer.bind_key('Shift-Left')  
         @viewer.bind_key('Shift-Down') 
@@ -2827,21 +2852,23 @@ class GView:
         sc = 1 if self.session.image_scale is None else self.session.image_scale
         viewer.camera.zoom = 1.2 / sc
         if self.session.mode=="Gallery":
-            viewer.camera.center = (350*sc,450*sc) # these values seem to work best
+            self.center_gallery()
             self.session.last_gallery_camera_coordinates["center"] = viewer.camera.center
             self.session.last_gallery_camera_coordinates["z"] = viewer.camera.zoom
         elif self.session.mode=="Multichannel":
-            viewer.camera.center = (350*sc, 300*sc)
+            self.center_multichannel()
             self.session.last_multichannel_camera_coordinates["center"] = viewer.camera.center
             self.session.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom
         elif self.session.mode=="Slide":
             # Move to cell location on the global image
             self.viewer.camera.center = (self.session.slide_target["center_y"]*sc,self.session.slide_target["center_x"]*sc)
         if reset_session:
-            self.session.last_gallery_camera_coordinates["center"] = (350*sc,450*sc)
-            self.session.last_multichannel_camera_coordinates["center"] = (350*sc, 300*sc)
-            self.session.last_gallery_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
-            self.session.last_multichannel_camera_coordinates["z"] = viewer.camera.zoom = 1.2/sc
+            gxy, gz = self.center_gallery(action="return")
+            mxy, mz = self.center_multichannel(action="return")
+            self.session.last_gallery_camera_coordinates["center"] = gxy
+            self.session.last_multichannel_camera_coordinates["center"] = mxy
+            self.session.last_gallery_camera_coordinates["z"] = gz
+            self.session.last_multichannel_camera_coordinates["z"] = mz
 
     def chn_key_wrapper(self, viewer):
         def create_fun(position,channel):
@@ -3399,16 +3426,42 @@ class CosMxView(GView):
         transcript_layout.addWidget(transcript_color_combo,0,1)
         transcript_layout.addWidget(transcript_add_button,0,2)
         transcript_layout.addWidget(transcript_remove_button,1,0,1,3)
-        # FOV center widget
+                    
+        # FOV labels widget
+        fov_label_group = QGroupBox("Label FOVs")
+        fov_label_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+        transcript_layout = QVBoxLayout(fov_label_group)
+        fov_label_widget = FovLabelInput(None, self, self.on_fov_label_event)
+        transcript_layout.addWidget(fov_label_widget)
 
+        # Navigvation 
+        navigation_group = QGroupBox("Navigation")
+        navigation_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+        navigation_layout = QGridLayout(navigation_group)
+        center_fov_combo = QComboBox()
+        center_fov_combo.addItems(self.adata.obs['fov'].unique().tolist())
+        center_fov_combo.setStyleSheet("combobox-popup: 0;")
+        center_fov_combo.setMaxVisibleItems(10)
+        center_fov_button = QPushButton("Go to FOV")
+        center_fov_button.released.connect(lambda: self.center_fov(int(center_fov_combo.currentText())))
+        center_slide_button = QPushButton("Show full slide")
+        center_slide_button.released.connect(self.center_slide)
+        navigation_layout.addWidget(center_fov_button, 0,0)
+        navigation_layout.addWidget(center_fov_combo,0,1)
+        navigation_layout.addWidget(center_slide_button,1,0,1,2)
 
+        
 
         # Construct dock group that holds everything and add specific buttons
         self.cosmx_dock_group = QGroupBox()
         self.cosmx_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
         cosmx_dock_layout = QVBoxLayout(self.cosmx_dock_group)
         self.session.side_dock_groupboxes['transcript group'] = transcript_group
+        self.session.side_dock_groupboxes['fov label group'] = fov_label_group
+        self.session.side_dock_groupboxes['navigation group'] = navigation_group
         cosmx_dock_layout.addWidget(transcript_group)
+        cosmx_dock_layout.addWidget(fov_label_group)
+        cosmx_dock_layout.addWidget(navigation_group)
 
     ''' Overridden GView initializations'''
     
@@ -3422,10 +3475,11 @@ class CosMxView(GView):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         # scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
-        scroll_area.setSizePolicy(QSizePolicy.MinimumExpanding,QSizePolicy.MinimumExpanding)
+        self.side_dock_group.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
+        scroll_area.setSizePolicy(QSizePolicy.MinimumExpanding ,QSizePolicy.MinimumExpanding)
         scroll_area.setWidget(self.side_dock_group)
         self.side_dock_group.setAlignment(Qt.AlignHCenter)
+        # self.side_dock_group.layout().setSizeConstraint(QLayout.SetFixedSize)
         scroll_area.resize(self.side_dock_group.sizeHint())
         right_dock = self.viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right", tabify = True)
         self.viewer.window.add_dock_widget(self.cosmx_dock_group, name ="CosMx",area="right", tabify = True)
@@ -3447,60 +3501,56 @@ class CosMxView(GView):
         self.session.labels_image = self.get_labels()
 
     def _add_gallery_extras(self, *args, **kwargs):
-        
-        print('''Adding labels to gallery ''')
-        cells = self.session.page_cells
-        offset = self.data.imageSize // 2
-        page_image_gallery = self.black_background(1, self.data.cells_per_row, kind='labels', dtype_force=self.session.labels_image[0].dtype)
-        results = []
+        if False:
+            print('''Adding labels to gallery ''')
+            cells = self.session.page_cells
+            offset = self.data.imageSize // 2
+            page_image_gallery = self.black_background(1, self.data.cells_per_row, kind='labels', dtype_force=self.session.labels_image[0].dtype)
+            results = []
 
-        filled = False
+            filled = False
 
-        def _keep_labels_erosion(labels):
-            borders = find_boundaries(labels)
-            return borders * labels
-        
-        count = 0
-
-        for _, cell in cells.iterrows(): # coords left
-            cell_x = cell['center_x']; cell_y = cell['center_y']
-            # Create array of channel indices in image data. Will use to fetch from the dask array
-            ''' Slice labels -- DO NOT compute until actually adding images later'''
-            cell_x, cell_y = self.ensure_slice_shape(cell_x, cell_y,offset,  self.session.labels_image[0].shape)
-            cid = int(cell['mask_id'])
-            ''' Define with defaults that depend on the context of the loop to insert cell ID'''
-            def _filter_labels(labels, _population = cid, _filled = filled):
-                labels[labels!=_population] = 0
-                if _filled:
-                    return rescale_intensity(labels, out_range = (0,(2**8)-1)).astype(np.uint8)
-                else:
-                    return find_boundaries(labels)
+            def _keep_labels_erosion(labels):
+                borders = find_boundaries(labels)
+                return borders * labels
+            for _, cell in cells.iterrows(): # coords left
+                cell_x = cell['center_x']; cell_y = cell['center_y']
+                # Create array of channel indices in image data. Will use to fetch from the dask array
+                ''' Slice labels -- DO NOT compute until actually adding images later'''
+                cell_x, cell_y = self.ensure_slice_shape(cell_x, cell_y,offset,  self.session.labels_image[0].shape)
+                cid = int(cell['mask_id'])
+                ''' Define with defaults that depend on the context of the loop to insert cell ID'''
+                def _filter_labels(labels, _population = cid, _filled = filled):
+                    labels[labels!=_population] = 0
+                    if _filled:
+                        return rescale_intensity(labels, out_range = (0,(2**8)-1)).astype(np.uint8)
+                    else:
+                        return find_boundaries(labels)
+                
+                cell_label = self.session.labels_image[0][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].map_blocks(_filter_labels) 
+                # if not filled:
+                #     cell_label = self.session.labels_image[0][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].map_blocks(_keep_labels_erosion)  
+                # else:
+                #     cell_label = self.session.labels_image[0][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset]
+                results.append(cell_label)
+            print("Computing image with dask")
+            img = dask.compute(*results)
             
-            cell_label = self.session.labels_image[0][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].map_blocks(_filter_labels) 
-            # if not filled:
-            #     cell_label = self.session.labels_image[0][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset].map_blocks(_keep_labels_erosion)  
-            # else:
-            #     cell_label = self.session.labels_image[0][cell_y-offset:cell_y+offset, cell_x-offset:cell_x+offset]
-            results.append(cell_label)
-        print("Computing image with dask")
-        img = dask.compute(*results)
-        
-        
-        col_g = 0 ; row_g = 0 
-        for pos, (_, cell) in enumerate(cells.iterrows()): # coords left
-            col_g = (col_g%self.session.cells_per_row["Gallery"])+1 
-            if col_g ==1: row_g+=1
-            page_image_gallery[(row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = img[pos]
-        sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
-        
-        # Get colormap and subset to cells in gallery
-        self.viewer.add_labels(page_image_gallery, name="Gallery Labels", visible = False,
-            color=self.cell_validation_colors, opacity = 0.7, scale = sc)
+            
+            col_g = 0 ; row_g = 0 
+            for pos, (_, cell) in enumerate(cells.iterrows()): # coords left
+                col_g = (col_g%self.session.cells_per_row["Gallery"])+1 
+                if col_g ==1: row_g+=1
+                page_image_gallery[(row_g-1)*(self.data.imageSize+2)+1:row_g*(self.data.imageSize+2)-1, (col_g-1)*(self.data.imageSize+2)+1:col_g*(self.data.imageSize+2)-1] = img[pos]
+            sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
+            
+            # Get colormap and subset to cells in gallery
+            self.viewer.add_labels(page_image_gallery, name="Gallery Labels", visible = False,
+                color=self.cell_validation_colors, opacity = 0.7, scale = sc)
 
 
         # Save current x and y offsets. Coordinates are flipped
         self.y_gallery_offset, self.x_gallery_offset = kwargs["gallery_x"], kwargs["gallery_y"]
-
         print('''Adding transcripts to gallery ''',end='')
         for tx in self.data.transcripts:
             self.get_gallery_tx(self.session.page_cells, tx)
@@ -3666,7 +3716,7 @@ class CosMxView(GView):
 
             # Should have something from the fluorescence column if it's there
 
-    ''' FOV stuff '''
+    ''' FOV and navigation '''
     def get_offsets(self, fov):
         """Get offsets for given FOV
 
@@ -3684,8 +3734,8 @@ class CosMxView(GView):
         return (x_offset, y_offset)
 
     def rect_for_fov(self, fov):
-        fov_height = self.cmeta['fov_height']* self.mm_per_px
-        fov_width = self.cmeta['fov_width']* self.mm_per_px
+        fov_height = self.cmeta['fov_height'] * self.mm_per_px
+        fov_width = self.cmeta['fov_width'] * self.mm_per_px
         rect = np.array([
             list(self.get_offsets(fov)),
             list(map(sum, zip(self.get_offsets(fov), (fov_height, 0)))),
@@ -3695,10 +3745,11 @@ class CosMxView(GView):
         topleft = (min(self.fov_offsets['Y_mm']), -max(self.fov_offsets['X_mm']))
         y_offset = topleft[0]
         x_offset = topleft[1]
-        return [[i[0] - y_offset, i[1] - x_offset] for i in rect]
+        return [[(i[0] - y_offset) * self.px_per_mm, (i[1] - x_offset) * self.px_per_mm] for i in rect]
+        
 
-    def add_fov_labels(self, view: napari.Viewer, tx_names = [], limits:tuple | None = None, cm = "inferno"):
-        topleft = (min(self.fov_offsets['Y_mm']), -max(self.fov_offsets['X_mm']))
+    def add_fov_labels(self,  tx_names = [], limits:tuple | None = None, cm = "inferno"):
+        # topleft = (min(self.fov_offsets['Y_mm']), -max(self.fov_offsets['X_mm']))
         rects = [self.rect_for_fov(i) for i in self.fov_offsets['FOV']]
 
         text_parameters = {
@@ -3706,9 +3757,11 @@ class CosMxView(GView):
             'size': 12,
             'color': 'white'
         }
+        sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
 
-        if tx_names != []:
-            pts = self.pqds.to_table(filter= (ds.field('target').isin(tx_names)), columns=['fov']).to_pandas()
+        if tx_names:
+            tx = [x.replace("-","_") for x in tx_names]
+            pts = self.pqds.to_table(filter= (ds.field('target').isin(tx)), columns=['fov']).to_pandas()
             values = pts.fov.value_counts().sort_index().to_numpy()
             if limits is not None:
                 if len(limits) != 2:
@@ -3719,49 +3772,61 @@ class CosMxView(GView):
                 'label': self.fov_offsets['FOV'].to_numpy(),
                 'n_transcripts' : values
             }
-            shapes_layer = view.add_shapes(rects,
+            shapes_layer = self.viewer.add_shapes(rects,
                 face_color='n_transcripts',
-                face_colormap= cm,
+                face_colormap = custom_color_functions.retrieve_cm(cm) if cm not in napari.utils.colormaps.AVAILABLE_COLORMAPS else cm,
                 edge_color='white',
                 edge_width=0.02,
                 properties=shape_properties,
                 text = text_parameters,
                 name = 'FOV labels',
-                # translate=self._top_left_mm(),
-                # rotate=self.rotate
+                scale = sc
             )
+            # shapes_layer.colormap
         else:
-            shape_properties = {
-                'label': self.fov_offsets['FOV'].to_numpy()
-            }
-            shapes_layer = view.add_shapes(rects,
-                face_color='#90ee90',
+            try:
+                col = custom_color_functions.colormap[cm]
+            except KeyError:
+                col = '#90ee90'
+            shape_properties = {'label': self.fov_offsets['FOV'].to_numpy()}
+            shapes_layer = self.viewer.add_shapes(rects,
+                face_color=col,
                 edge_color='white',
                 edge_width=0.02,
-                properties=shape_properties,
+                properties= shape_properties,
                 text = text_parameters,
                 name = 'FOV labels',
-                # translate=self._top_left_mm(),
-                # rotate=self.rotate
+                scale = sc
             )
         shapes_layer.opacity = 0.5
-        shapes_layer.editable = False
+        # shapes_layer.editable = False
         return shapes_layer
 
-    def center_fov(self, view: napari.Viewer, fov:int, buffer:float=1.0):
+    def center_fov(self, fov:int, buffer:float=1.0):
         """Center FOV in canvas and zoom to fill
 
         Args:
             fov (int): FOV number
             buffer (float): Buffer size for zoom. < 1 equals zoom out.
         """        
-        # topleft = (min(fov_offsets['Y_mm']), -max(fov_offsets['X_mm'])) This is dumb???
-        topleft = 0
-        extent = [np.min(self.rect_for_fov(fov), axis=0) + topleft,
-            np.max(self.rect_for_fov(fov), axis=0) + topleft]
+
+        extent = [np.min(self.rect_for_fov(fov), axis=0)* self.session.image_scale,
+            np.max(self.rect_for_fov(fov), axis=0)* self.session.image_scale]
         size = extent[1] - extent[0]
-        view.camera.center = np.add(extent[0], np.divide(size, 2))
-        view.camera.zoom = np.min(np.array(view._canvas_size) / size) * buffer
+        self.viewer.camera.center = np.add(extent[0], np.divide(size, 2))
+        self.viewer.camera.zoom = np.min(np.array(self.viewer._canvas_size) / size) * buffer
+
+    def on_fov_label_event(self, *args, **kwargs):
+        print(f"Current mode is {self.session.mode}")
+        if self.session.mode == "Slide":
+            try:
+                self.viewer.layers.remove["FOV Labels"]
+            except :
+                pass # Wasn't there, we don't need to remove anythin
+            self.add_fov_labels(**kwargs)
+
+        else:
+            self.viewer.status = "Change to Slide Mode before modifying FOV labels"
 
     ''' Image functions '''
 
