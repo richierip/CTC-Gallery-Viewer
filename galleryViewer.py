@@ -27,6 +27,8 @@ import matplotlib.lines as lines
 
 import copy
 import time
+from itertools import chain
+from typing import Collection
 import custom_color_functions # Necessary, do not remove
 from custom_color_functions import colormap_titled as rgbcd
 from math import ceil
@@ -96,7 +98,7 @@ class GView:
         self.gvui = gvui
         self.status_label = gvui.status_label
         self.data.active_channels = copy.copy(gvdata.channels)
-        self.data.active_channels.append("Composite")
+        # self.data.active_channels.append("Composite") #TODO phase this out perhaps
         self.session = self.data.user.session
         self.session.saving_required = True
 
@@ -121,7 +123,7 @@ class GView:
         self.init_side_dock()
         self.add_export_tab()
         self.add_plot_tab()
-        self.add_bottom_bar_widgets()
+        self._add_bottom_bar_widgets()
         self.ingest_cell_data()
         self.ingest_images()
         self.finish_init() 
@@ -315,15 +317,7 @@ class GView:
         self.session.widget_dictionary['hide status layer radio']=status_layer_hide
         show_hide_layout.addLayout(status_layer_layout)
 
-        nuc_boxes_show = QRadioButton("Show nuclei boxes"); nuc_boxes_show.setChecked(False)
-        nuc_boxes_hide = QRadioButton("Hide nuclei boxes"); nuc_boxes_hide.setChecked(True)
-        nuc_boxes_slide = QRadioButton("Show box under mouse"); nuc_boxes_slide.setChecked(False); nuc_boxes_slide.setVisible(False)
         
-        
-        nuc_boxes_layout = QHBoxLayout(); nuc_boxes_layout.addWidget(nuc_boxes_show) ; nuc_boxes_layout.addWidget(nuc_boxes_hide); nuc_boxes_layout.addWidget(nuc_boxes_slide)
-        nuc_boxes_group = QButtonGroup(); nuc_boxes_group.addButton(nuc_boxes_show) ; nuc_boxes_group.addButton(nuc_boxes_hide) ; nuc_boxes_group.addButton(nuc_boxes_slide)
-        nuc_boxes_show.setFont(self.data.user.fonts.small); nuc_boxes_hide.setFont(self.data.user.fonts.small); nuc_boxes_slide.setFont(self.data.user.fonts.small)
-
         # Slide mode marker tool group
         marker_layout = QHBoxLayout()
         # Create a combobox
@@ -341,13 +335,6 @@ class GView:
         marker_layout.addWidget(marker_button)
         show_hide_layout.addLayout(marker_layout)
 
-        # nuc_boxes_show.tog
-        nuc_boxes_group.buttonToggled[QAbstractButton, bool].connect(self.toggle_cell_labels)
-        self.session.radiogroups['Cell boxes group'] = nuc_boxes_group
-        self.session.widget_dictionary['show boxes']=nuc_boxes_show
-        self.session.widget_dictionary['hide boxes']=nuc_boxes_hide
-        self.session.widget_dictionary['mouse boxes']=nuc_boxes_slide
-        show_hide_layout.addLayout(nuc_boxes_layout)
         self.session.side_dock_groupboxes['hide'] = show_hide_group
         self.scoring_tab_groups.append(show_hide_group)
 
@@ -568,7 +555,8 @@ class GView:
 
      # Open viewsettings popout
     
-    def add_bottom_bar_widgets(self):
+    ''' Definition per-subclass '''
+    def _add_bottom_bar_widgets(self):
         open_vs = QPushButton("Modify view settings")
         open_vs.pressed.connect(lambda: self.open_vs_popup(self.gvui))
         open_vs.setFont(QFont("Calibri", 6, weight=QFont.Normal))
@@ -579,9 +567,9 @@ class GView:
         absorption_widget.pressed.connect(self.toggle_absorption)
         self.session.widget_dictionary["absorption_widget"] = absorption_widget
 
-
         # Create bottom bar widgets
-        for box in self.check_creator2(self.data.active_channels):
+        # Use active_channels if you want active_channels
+        for box in self.channel_button_factory(self.data.channels + ["Cell Mask"]):
             self.channel_buttons.append(box)
         self.viewer.window.add_dock_widget(self.channel_buttons + [absorption_widget, open_vs],area='bottom')
         # right_dock.adjustSize()
@@ -791,14 +779,10 @@ class GView:
             viewer.layers[f"{session.mode} Status Squares"].visible = session.status_layer_vis
             viewer.layers[f"{session.mode} Status Numbers"].visible = session.status_layer_vis
             # viewer.layers[f"{session.mode} Absorption"].visible = session.absorption_mode
+        
         try:
-            if session.mode == "Slide":
-                viewer.layers[f"Slide LINE1_ORF1"].visible =True
-                show_boxes = True if session.cell_labels_vis["Slide"] =="Show" else False
-            else:
-                viewer.layers[f"Gallery LINE1_ORF1"].visible =True
-                show_boxes = session.cell_labels_vis["Gallery/Multichannel"]
-            viewer.layers[f"{session.mode} Labels"].visible = show_boxes
+            viewer.layers[f"{self.session.mode} LINE1_ORF1"].visible =True  
+            viewer.layers[f"{session.mode} Labels"].visible = session.cell_labels_vis[self.session.mode]
         except KeyError:
             pass
 
@@ -890,7 +874,11 @@ class GView:
         # Change colors and widget styles
         for toggle in self.channel_buttons:
             name = str(toggle.objectName())
-            toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(self.data.channelColors[name] if name != "Composite" else "None", toggle.isChecked(), self.session.absorption_mode))
+            try:
+                clr = self.data.channelColors[name]
+            except KeyError:
+                clr = "None"
+            toggle.setStyleSheet(make_fluor_toggleButton_stylesheet(clr, toggle.isChecked(), self.session.absorption_mode))
             
         newmode = "light" if self.session.absorption_mode else "dark"
         oldmode = "dark" if self.session.absorption_mode else "light"
@@ -936,19 +924,38 @@ class GView:
         self.viewer.window._qt_viewer.setFocus()
         # return myfunc
 
-    def check_creator2(self, list_of_names):
+
+    ''' Definition per-subclass'''
+    def cell_mask_button_toggled(self): #TODO
+        pass
+
+    ''' Definition per-subclass'''
+    def toggle_cell_labels(self, *args, **kwargs):
+        pass
+
+    def channel_button_factory(self, list_of_names):
         all_boxes = []
         for name in list_of_names:
-            tb = QPushButton(name); tb.setObjectName(name)
-            tb.setCheckable(True)
-            tb.setStyleSheet(make_fluor_toggleButton_stylesheet(self.data.channelColors[name] if name != "Composite" else "None") )
-            all_boxes.append(tb)
-            # f = dynamic_checkbox_creator()
-            tb.clicked.connect(self.fluor_button_toggled)
+            if name in self.data.channels + ["Composite"]:
+                tb = QPushButton(name); tb.setObjectName(name)
+                tb.setCheckable(True)
+                tb.setStyleSheet(make_fluor_toggleButton_stylesheet(self.data.channelColors[name] if name != "Composite" else "None") )
+                all_boxes.append(tb)
+                # f = dynamic_checkbox_creator()
+                tb.clicked.connect(self.fluor_button_toggled)
+            elif name == "Cell Mask":
+                tb = QPushButton(name); tb.setObjectName(name)
+                tb.setCheckable(True)
+                tb.setChecked(True)
+                tb.setStyleSheet(make_fluor_toggleButton_stylesheet("None", toggled= True))
+                all_boxes.append(tb)
+                self.session.widget_dictionary["cell mask"] = tb
+                tb.clicked.connect(lambda: self.toggle_cell_labels(tb))
+            else:
+                pass
+
         return all_boxes
-
-    # all_boxes = self.check_creator2(self.data.channels)
-
+    
     ## --- Side bar functions and GUI elements 
 
     def center_multichannel(self, action = "move"):
@@ -979,8 +986,9 @@ class GView:
         self.viewer.camera.center = np.add([0,0], np.divide(size, 2))
         self.viewer.camera.zoom = np.min(np.array(self.viewer._canvas_size) / size) 
 
-    ''' Definition per-subclass'''
-    def toggle_cell_labels(self):
+    ''' Definition per-subclass '''
+    def _toggle_session_mode_extras(self, *args, **kwargs):
+        # Allow specific behaviour per subclass
         pass
 
     def toggle_session_mode_catch_exceptions(self, target_mode, from_mouse = True):
@@ -1002,6 +1010,8 @@ class GView:
                 viewer.status = f'{Mode} Mode enabled. But, there was a problem saving your scoring     decisions. Close your data file?'
                 return False
 
+        self._toggle_session_mode_extras(target_mode = target_mode, from_mouse = from_mouse)
+        
         if self.session.mode != "Slide" and from_mouse:
             _, coords, _ = self.session.find_mouse_func(self.viewer.cursor.position)
             if coords is None: # User has clicked outside the grid area with the chage mode hotkey pressed. Alert and do nothing.
@@ -1012,7 +1022,6 @@ class GView:
 
         # Change widget display
         self.session.widget_dictionary['switch mode combo'].setCurrentText(target_mode)
-        if self.session.cell_labels_vis["Slide"]=="Mouse": self.session.widget_dictionary['hide boxes'].setChecked(True)
         self.session.widget_dictionary['page cell id'].clear() #This can only cause issues if not cleared.
         # Do nothing in these cases
         if target_mode==self.session.mode: return None
@@ -1064,7 +1073,6 @@ class GView:
             self.viewer.camera.center = ((target_cell_info["center_y"]+offsetY)*sc,(target_cell_info["center_x"]+offsetX)*sc) # these values seem to work best
             # viewer.camera.zoom = 1.2 / sc
 
-            self.session.widget_dictionary['mouse boxes'].setVisible(True) # Enable these widget
             self.session.widget_dictionary["marker combo"].setVisible(True)
             self.session.widget_dictionary["marker button"].setVisible(True)
             self.session.widget_dictionary['show status layer radio'].setVisible(False) # Disable these widget
@@ -1086,11 +1094,7 @@ class GView:
 
             # Will trigger this function with the appropriate input to box and color the nearest
             #   100 cells around the target cell 
-            if self.session.cell_labels_vis["Gallery/Multichannel"]:
-                radio = self.session.widget_dictionary['show boxes']
-            else:
-                radio = self.session.widget_dictionary['hide boxes']
-            self.toggle_cell_labels(radio, True, 
+            self.toggle_cell_labels(self.session.widget_dictionary["cell mask"],
                 [target_cell_info["center_x"],target_cell_info["center_y"]])
 
             print(f"target mode is {target_mode} but actual mode is {self.session.mode}")
@@ -1107,7 +1111,6 @@ class GView:
         
         elif target_mode == "Multichannel" or target_mode =="Gallery":
             
-            self.session.widget_dictionary['mouse boxes'].setVisible(False) # Disable these widget
             self.session.widget_dictionary["marker combo"].setVisible(False)
             self.session.widget_dictionary["marker button"].setVisible(False)
             self.session.widget_dictionary['show status layer radio'].setVisible(True) # Enable these widget
@@ -1323,10 +1326,10 @@ class GView:
             self.session.widget_dictionary['notes label'].setVisible(False)
             self.viewer.window._qt_viewer.setFocus()
             return True
-        
+
         if ID is None: return True # No cell under mouse most likely
         try:
-            cell = self.session.current_cells.loc[str(ID)]
+            cell = self.session.session_cells.loc[str(ID)]
         except KeyError: # in case the name was off or some other issue
             return False
         
@@ -1345,7 +1348,7 @@ class GView:
         note = cell['Notes']
         status = cell['Validation']
         try:
-            if self.data.statuses_hex[status] != "#ffffff":
+            if self.data.statuses_hex[status] != "#ffffff": # What is this supposed to do?
                 prefix = f'Page {cell["Page"]}<br><font color="{self.data.statuses_hex[status]}">{cell_name}</font>'
             else:
                 prefix = f'Page {cell[ID]["Page"]}<br>{cell_name}' 
@@ -1758,39 +1761,40 @@ class GView:
 
         @self.catch_exceptions_to_log_file("runtime_box-cell-near-mouse")
         def box_closest_slide_mode_cell(cell: pd.Series):
-            if not self.session.cell_under_mouse_changed:  # Save computation and don't do this unless needed
-                return False 
-            elif self.session.cell_labels_vis["Slide"] != "Mouse": # Don't run the regular routine unless the "Show under mouse only" radio is toggled on
-                try:
-                    self.viewer.layers["Slide Closest Cell Label"].visible = False
-                except KeyError:
-                    pass
-                return False
-            try:
-                self.viewer.layers["Slide Closest Cell Label"].visible = True
-                layer_present = True
-            except KeyError:
-                layer_present = False
+            pass
+            # if not self.session.cell_under_mouse_changed:  # Save computation and don't do this unless needed
+            #     return False 
+            # elif self.session.cell_labels_vis["Slide"] != "Mouse": # Don't run the regular routine unless the "Show under mouse only" radio is toggled on
+            #     try:
+            #         self.viewer.layers["Slide Closest Cell Label"].visible = False
+            #     except KeyError:
+            #         pass
+            #     return False
+            # try:
+            #     self.viewer.layers["Slide Closest Cell Label"].visible = True
+            #     layer_present = True
+            # except KeyError:
+            #     layer_present = False
             
 
-            cid = cell.name
-            features = {'cid_feat': [cid]}
-            cell_bbox = [[cell["YMin"],cell["XMin"]] , [cell["YMax"],cell["XMax"]] ]
+            # cid = cell.name
+            # features = {'cid_feat': [cid]}
+            # cell_bbox = [[cell["YMin"],cell["XMin"]] , [cell["YMax"],cell["XMax"]] ]
 
-            sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
+            # sc = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None
             
-            nb_color_hex = self.data.statuses_hex[cell['Validation']] #'#000000' if self.session.absorption_mode else '#ffffff'
-            nb_text = {'string':'{cid_feat}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_hex}
-            self.session.slide_closest_cell_text_object = nb_text
-            if layer_present:
-                self.viewer.layers["Slide Closest Cell Label"].data = [cell_bbox]   
-                self.viewer.layers["Slide Closest Cell Label"].edge_color = nb_color_hex  
-                self.viewer.layers["Slide Closest Cell Label"].features = features   
-                self.viewer.layers["Slide Closest Cell Label"].text = nb_text   
-            else:
-                self.viewer.add_shapes([cell_bbox], name="Slide Closest Cell Label", shape_type="rectangle", edge_width=2, edge_color=nb_color_hex, 
-                                opacity=0.9, face_color='#00000000', scale=sc, text = nb_text, features=features)
-            self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"] 
+            # nb_color_hex = self.data.statuses_hex[cell['Validation']] #'#000000' if self.session.absorption_mode else '#ffffff'
+            # nb_text = {'string':'{cid_feat}', 'anchor':'upper_left', 'size' : 8, 'color':nb_color_hex}
+            # self.session.slide_closest_cell_text_object = nb_text
+            # if layer_present:
+            #     self.viewer.layers["Slide Closest Cell Label"].data = [cell_bbox]   
+            #     self.viewer.layers["Slide Closest Cell Label"].edge_color = nb_color_hex  
+            #     self.viewer.layers["Slide Closest Cell Label"].features = features   
+            #     self.viewer.layers["Slide Closest Cell Label"].text = nb_text   
+            # else:
+            #     self.viewer.add_shapes([cell_bbox], name="Slide Closest Cell Label", shape_type="rectangle", edge_width=2, edge_color=nb_color_hex, 
+            #                     opacity=0.9, face_color='#00000000', scale=sc, text = nb_text, features=features)
+            # self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"] 
 
         ''' You need to disable napari's native mouse callback that displays the status first.
                 This function is in napari.components.viewer_model.py ViewerModel._update_status_bar_from_cursor''' 
@@ -1844,7 +1848,7 @@ class GView:
                         if cid != self.session.cell_under_mouse.name: 
                             self.session.cell_under_mouse_changed = True
                 
-                    
+                    # Dangerous? If cell is already there, could lose info.
                     self.session.current_cells.loc[cid] = cell
                     # Now that we have the cell dict, proceed to display
                     self.session.cell_under_mouse =  cell # save info
@@ -2112,20 +2116,12 @@ class GView:
         @viewer.bind_key('Shift-h')
         @self.catch_exceptions_to_log_file("runtime_toggle-cell-boxes")
         def toggle_boxes(viewer):
-            if self.session.mode != "Slide":
-                if self.session.cell_labels_vis["Gallery/Multichannel"]:
-                    self.session.widget_dictionary['hide boxes'].setChecked(True)
-                else:
-                    self.session.widget_dictionary['show boxes'].setChecked(True)
-            else: # Slide Mode
-                cur = ["Show","Hide","Mouse"].index(self.session.cell_labels_vis["Slide"])
-                new = ["Show","Hide","Mouse"][(cur+1)%3]
-                self.session.widget_dictionary[f"{new.lower()} boxes"].setChecked(True)
+            vis = self.session.cell_labels_vis[self.session.mode]
+            btn = self.session.widget_dictionary['cell mask']
+            btn.setChecked(not vis)
+            self.toggle_cell_labels(btn)
         
         @viewer.bind_key('Control-k')
-        def restore_canvas(viewer):
-            self.set_viewer_to_neutral_zoom(viewer)
-
         @viewer.bind_key('k')
         def recenter_canvas(viewer):
             self.set_viewer_to_neutral_zoom(viewer)
@@ -3076,7 +3072,7 @@ class GView:
         cellID = cell_widget.get_global()
 
         try:
-            self.session.current_cells.loc[str(cellID), "Notes"] = note
+            self.session.session_cells.loc[str(cellID), "Notes"] = note
             cell_widget.clear(); note_widget.clear()
             self.viewer.status = "Note recorded! Press 's' to save to file."
         except KeyError as e:
@@ -3182,34 +3178,23 @@ class HaloView(GView):
     ''' In HaloView, this means a Labels layer of rectangles around each cell.'''
     def toggle_cell_labels(self,*args, **kwargs):
         # Retrieve arguments dynamically
-        btn, checked = args[:2] 
-        distanceSearchCenter = None if len(args) <3 else args[2]
+        btn  = args[0] 
+        distanceSearchCenter = None if len(args) <2 else args[1]
+
+        # Reset style
+        btn.setStyleSheet(make_fluor_toggleButton_stylesheet("None", toggled= not btn.isChecked()))
 
         # Always reset the user's input selection
         self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]  
-        if not checked:
-            # This function gets called twice, since when one radio button in the group is toggle on, the other is toggled off. 
-            #   We only want to run this function once so the other call can be discarded
-            return False
-        if self.session.mode in ["Gallery","Multichannel"]:
-            self.session.cell_labels_vis["Gallery/Multichannel"] = not self.session.cell_labels_vis["Gallery/Multichannel"]
-            self.session.cell_labels_vis["Slide"] = "Show" if self.session.cell_labels_vis["Gallery/Multichannel"] else "Hide"
-            try:
-                self.viewer.layers[f'{self.session.mode} Labels'].visible = self.session.cell_labels_vis["Gallery/Multichannel"]
-            except KeyError:
-                pass
+
+        self.session.cell_labels_vis["Gallery/Multichannel"] = not btn.isChecked()
+        self.session.cell_labels_vis["Slide"] = not btn.isChecked()
+        try:
+            self.viewer.layers[f'{self.session.mode} Labels'].visible = self.session.cell_labels_vis["Gallery/Multichannel"]
+        except KeyError:
+            pass
 
         if self.session.mode == "Slide":
-            match btn.text():
-                case str(x) if 'mouse' in x.lower():
-                    selected_mode = "Mouse"
-                case str(x) if 'hide' in x.lower():
-                    selected_mode = "Hide"
-                case _:
-                    selected_mode = "Show"
-            self.session.cell_labels_vis["Slide"] = selected_mode
-            self.session.cell_labels_vis["Gallery/Multichannel"] = True if selected_mode == "Show" else False
-
             # try to remove any previous box layers if there are any
             try:
                 self.viewer.layers.selection.active = self.viewer.layers["Slide Labels"]
@@ -3357,7 +3342,9 @@ class CosMxView(GView):
         # Have to get these colors in the list for _change_cell_score_slide_mode to work properly
         self.cell_validation_colors.update({fake_cid+1 : transform_color(fake_status)[0] for fake_cid, fake_status in enumerate(list(gvdata.statuses_hex.values())) })
         super().__init__(gvdata, gvui)
-        
+        self._construct_description_template()
+        self.add_fov_labels(cm = "gray")
+        self.session.fov_labels_vis = False
 
     def get_valid_tx_names(self):
         remove = ["System", "NegPrb", "False", "Negative"]
@@ -3463,8 +3450,42 @@ class CosMxView(GView):
         cosmx_dock_layout.addWidget(fov_label_group)
         cosmx_dock_layout.addWidget(navigation_group)
 
+
+
     ''' Overridden GView initializations'''
-    
+
+
+    def _add_bottom_bar_widgets(self):
+        open_vs = QPushButton("Modify view settings")
+        open_vs.pressed.connect(lambda: self.open_vs_popup(self.gvui))
+        open_vs.setFont(QFont("Calibri", 6, weight=QFont.Normal))
+        self.session.widget_dictionary["open_vs_button"] = open_vs
+
+
+        absorption_widget = QPushButton("Absorption off")
+        absorption_widget.pressed.connect(self.toggle_absorption)
+        self.session.widget_dictionary["absorption_widget"] = absorption_widget
+
+        # Create bottom bar widgets
+        # Use active_channels if you want active_channels
+        for box in self.channel_button_factory(self.data.channels + ["Cell Mask"]):
+            self.channel_buttons.append(box)
+
+        # Add extra FOV labels button
+        fovb = QPushButton("Fov Labels"); fovb.setObjectName("Fov Labels")
+        fovb.setCheckable(True)
+        fovb.setChecked(True)
+        fovb.setVisible(False)
+        fovb.setStyleSheet(make_fluor_toggleButton_stylesheet("None", toggled= True))
+        self.channel_buttons.append(fovb)
+        self.session.widget_dictionary["fov labels"] = fovb
+        fovb.clicked.connect(lambda: self.fov_labels_button_toggled(fovb))
+
+        
+        self.viewer.window.add_dock_widget(self.channel_buttons + [absorption_widget, open_vs],area='bottom')
+        # right_dock.adjustSize()
+
+
     def _construct_right_dock(self):
 
         # Create add-on cosmx docks
@@ -3562,40 +3583,18 @@ class CosMxView(GView):
 
     def toggle_cell_labels(self,*args, **kwargs):
         # Retrieve arguments dynamically
-        btn, checked = args[:2] 
+        btn = args[0] 
+        btn.setStyleSheet(make_fluor_toggleButton_stylesheet("None", toggled= not btn.isChecked()))
 
-        if not checked:
-            # This function gets called twice, since when one radio button in the group is toggle on, the other is toggled off. 
-            #   We only want to run this function once so the other call can be discarded
-            return False
-        if self.session.mode in ["Gallery","Multichannel"]:
-            # Set button states
-            self.session.cell_labels_vis["Gallery/Multichannel"] = not self.session.cell_labels_vis["Gallery/Multichannel"]
-            self.session.cell_labels_vis["Slide"] = "Show" if self.session.cell_labels_vis["Gallery/Multichannel"] else "Hide"
-            # Toggle labels visibility
-            try:
-                self.viewer.layers[f'{self.session.mode} Labels'].visible = self.session.cell_labels_vis["Gallery/Multichannel"]
-            except KeyError:
-                pass
-        if self.session.mode == "Slide":
-            # set button states
-            match btn.text():
-                case str(x) if 'mouse' in x.lower():
-                    selected_mode = "Mouse"
-                case str(x) if 'hide' in x.lower():
-                    selected_mode = "Hide"
-                case _:
-                    selected_mode = "Show"
-            self.session.cell_labels_vis["Slide"] = selected_mode
-            self.session.cell_labels_vis["Gallery/Multichannel"] = True if selected_mode == "Show" else False
-
-            # Toggle labels visibility
-            try:
-                self.viewer.layers[f'{self.session.mode} Labels'].visible = self.session.cell_labels_vis["Gallery/Multichannel"]
-            except KeyError:
-                pass
-
-            self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]
+        # Set button states
+        self.session.cell_labels_vis["Gallery/Multichannel"] = not btn.isChecked()
+        self.session.cell_labels_vis["Slide"] = not btn.isChecked()
+        # Toggle labels visibility
+        try:
+            self.viewer.layers[f'{self.session.mode} Labels'].visible = not btn.isChecked()
+        except KeyError:
+            pass
+        self.viewer.layers.selection.active = self.viewer.layers[f"Gallery {self.data.channels[0]}"]
 
     def _change_cell_score_slide_mode(self, *args, **kwargs):
         new_color = transform_color(self.data.statuses_hex[kwargs['next_status']])[0]
@@ -3669,10 +3668,9 @@ class CosMxView(GView):
             pass
         return True
 
-    def _construct_description_string(self, present_intensities:list, intensity_series : pd.Series):
-        intensity_str = ''
+    def _construct_description_template(self):
+        template = ''
         contrast_color = 'black' if self.session.absorption_mode else 'white'
-
         def _convert_to_color(fl):
             try:
                 return self.data.channelColors[fl]
@@ -3684,37 +3682,38 @@ class CosMxView(GView):
                     return contrast_color
             return '' #unreachable
 
-        l = [item for pair in self.data.channelFolders.items() for item in pair]
         for datacol in self.data.pinned_columns:
-            if isinstance(datacol, tuple):
-                try:
-                    data0 = intensity_series[datacol[0]]
-                    data1 = intensity_series[datacol[1]]
-                except KeyError:
-                    # Col not in data. mistakes were made earlier.
-                    continue
-                
-                if any([x == y.replace("Mean.",'').replace("Max.",'') for y in datacol for x in l]):
-                    fluor = [x for x in l if x in datacol[0]][0]
-                    
-                    intensity_str += f'<br><font color="{_convert_to_color(fluor).replace("blue","lightblue")}">{datacol[0]}: {data0}'
-                    intensity_str += f'  ,  {datacol[1]}: {data1}</font>'
-                else:
-                    intensity_str += f'<br><font color="{contrast_color}">{datacol[0]} : {data0}  ,  {datacol[1]}: {data1}</font>'
+            if isinstance(datacol, Collection):
+                for pos, col in enumerate(datacol):
+                    if pos ==0:
+                        fluor = col.replace("Mean.",'').replace("Max.",'')
+                        template += f'<br><font color="{_convert_to_color(fluor).replace("blue","lightblue")}">{col}: {{}}'
+                    elif pos <len(datacol) -1:
+                        template += f'  ,  {col}: {{}}'
+                    else:
+                        template += f'  ,  {col}: {{}}</font>'
             else: # Just one thing. Give it it's own row.
-                try:
-                    data = intensity_series[datacol]
-                except KeyError:
-                    continue
-                if any([x in datacol for x in l]):
-                    fluor = [x for x in l if x in datacol][0]
-                    intensity_str += f'<br><font color="{_convert_to_color(fluor).replace("blue","lightblue")}">{datacol} : {data}</font>'
-                else:
-                    intensity_str += f'<br><font color="{contrast_color}">{datacol} : {data}</font>'
+                fluor = datacol.replace("Mean.",'').replace("Max.",'')
+                template += f'<br><font color="{_convert_to_color(fluor).replace("blue","lightblue")}">{datacol} : {{}}</font>'
+        self.session.description_template = template
 
-        return intensity_str
+    def _construct_description_string(self, present_intensities:list, intensity_series : pd.Series):
+        cols = list(chain.from_iterable(self.data.pinned_columns))
+        vals = intensity_series[cols].values.tolist()
+        
+        return self.session.description_template.format(*vals)
 
-            # Should have something from the fluorescence column if it's there
+    def _toggle_session_mode_extras(self, *args, **kwargs):
+        target_mode = kwargs['target_mode']
+        widget = self.session.widget_dictionary["fov labels"]
+        match target_mode:
+            case "Slide" | "Fov":
+                widget.setVisible(True)
+                self.viewer.layers["FOV Labels"].visible = not widget.isChecked()
+            case "Gallery" | "Multichannel":
+                widget.setVisible(False)
+            case _:
+                raise ValueError(f"Unexpected mode {target_mode} given")        
 
     ''' FOV and navigation '''
     def get_offsets(self, fov):
@@ -3779,7 +3778,7 @@ class CosMxView(GView):
                 edge_width=0.02,
                 properties=shape_properties,
                 text = text_parameters,
-                name = 'FOV labels',
+                name = 'FOV Labels',
                 scale = sc
             )
             # shapes_layer.colormap
@@ -3795,7 +3794,7 @@ class CosMxView(GView):
                 edge_width=0.02,
                 properties= shape_properties,
                 text = text_parameters,
-                name = 'FOV labels',
+                name = 'FOV Labels',
                 scale = sc
             )
         shapes_layer.opacity = 0.5
@@ -3817,16 +3816,32 @@ class CosMxView(GView):
         self.viewer.camera.zoom = np.min(np.array(self.viewer._canvas_size) / size) * buffer
 
     def on_fov_label_event(self, *args, **kwargs):
-        print(f"Current mode is {self.session.mode}")
+        
         if self.session.mode == "Slide":
             try:
-                self.viewer.layers.remove["FOV Labels"]
+                self.viewer.layers.remove(self.viewer.layers["FOV Labels"])
             except :
-                pass # Wasn't there, we don't need to remove anythin
+                pass # Wasn't there, we don't need to remove anything
             self.add_fov_labels(**kwargs)
+            self.session.fov_labels_vis = True
+            widget = self.session.widget_dictionary["fov labels"]
+            widget.setChecked(False)
+            widget.setStyleSheet(make_fluor_toggleButton_stylesheet("None", toggled= not self.session.fov_labels_vis))
 
         else:
             self.viewer.status = "Change to Slide Mode before modifying FOV labels"
+
+    def fov_labels_button_toggled(self, *args):
+        print("FOV button clicked")
+        self.session.fov_labels_vis = not self.session.fov_labels_vis 
+        btn = args[0]
+        btn.setChecked(not self.session.fov_labels_vis)
+        btn.setStyleSheet(make_fluor_toggleButton_stylesheet("None", toggled= not self.session.fov_labels_vis))
+        if self.session.mode == "Slide":
+            try:
+                self.viewer.layers["FOV Labels"].visible = self.session.fov_labels_vis
+            except :
+                pass # Wasn't there, we don't need to remove anything
 
     ''' Image functions '''
 

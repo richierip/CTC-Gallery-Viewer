@@ -1494,7 +1494,7 @@ class GVUI_CosMx(GVUI):
                         unchecked_columns.remove(other)
                         self.gvdata.pinned_columns.append( tuple([new, other]) )
                     else:
-                        self.gvdata.pinned_columns.append(new)
+                        self.gvdata.pinned_columns.append([new])
                 else:
                     match new:
                         case 'nCount_RNA':
@@ -1502,15 +1502,16 @@ class GVUI_CosMx(GVUI):
                                 unchecked_columns.remove('nFeature_RNA')
                                 self.gvdata.pinned_columns.append( tuple(['nCount_RNA', 'nFeature_RNA']) )
                             except ValueError:
-                                self.gvdata.pinned_columns.append('nCount_RNA')
+                                self.gvdata.pinned_columns.append(['nCount_RNA'])
                         case 'nFeature_RNA':
                             try:
                                 unchecked_columns.remove('nCount_RNA')
                                 self.gvdata.pinned_columns.append( tuple(['nCount_RNA', 'nFeature_RNA']) )
                             except ValueError:
-                                self.gvdata.pinned_columns.append('nFeature_RNA')
+                                self.gvdata.pinned_columns.append(['nFeature_RNA'])
                         case _:
-                            self.gvdata.pinned_columns.append(new)
+                            print("leiden??")
+                            self.gvdata.pinned_columns.append([new])
 
     def _prefillObjectData(self):
         self.status_label.setText("Checking compatibility...")
