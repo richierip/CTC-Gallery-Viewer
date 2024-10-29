@@ -1199,15 +1199,12 @@ class FovLabelInput(QGroupBox):
         ''')
 
     def toggle_widgets(self,wl, action = 'on'):
-        print("TW")
         match action:
             case 'on':
-                print('on')
                 for w in wl:
                     w.setDisabled(False)
                     w.setVisible(True)
             case 'off':
-                print('off')
                 for w in wl:
                     w.setDisabled(True)
                     w.setVisible(False)  
@@ -1218,7 +1215,6 @@ class FovLabelInput(QGroupBox):
             self.toggle_widgets(wl, action)
     
     def on_mode_change(self):
-        print("Mode change")
         a = [self.fov_label_cm]
         b = [self.fov_label_transcripts, self.transcript_cm, self.fov_limits_combo]
         match self.fov_label_combo.currentText():

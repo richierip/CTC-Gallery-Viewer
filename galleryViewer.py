@@ -1967,6 +1967,7 @@ class GView:
                 return None # Nothing to do if no cell under mouse
             
             cid = str(self.session.cell_under_mouse.name)
+            fov = str(self.session.cell_under_mouse['fov'])
 
             self.session.widget_dictionary["image_save_target_entry"].set_global(cid)
             self.session.widget_dictionary['notes cell entry'].set_global(cid)
@@ -1975,6 +1976,7 @@ class GView:
             self.session.widget_dictionary['switch mode cell'].set_global(cid)
             self.session.widget_dictionary["hist_target_entry"].set_global(cid)
             self.session.widget_dictionary["violin_target_entry"].set_global(cid)
+            self.session.widget_dictionary["center_fov"].setCurrentText(fov)
             
         ''' Dynamically make new functions that can change scoring decisions with a custom keypress. This
             will allow the user to choose their own scoring decisions, colors, and keybinds'''
@@ -2693,7 +2695,7 @@ class GView:
             p.set_title(f"{self.session.image_display_name} | {cname} pixel intensities", fontsize='20')
             p.set_xlabel("Pixel intensity")
             plt.legend(handles=new_legend, fontsize='14')
-        plt.show()
+        plt.show(block = False)
 
     @catch_exceptions_to_log_file("runtime_plot-violins")
     def generate_intensity_violins(self, viewer:napari.Viewer, cell_id : str|None, layer_name : str|None, refdataset:str="Full dataset",
@@ -2841,7 +2843,7 @@ class GView:
                         #     ax.text(tick+0.15, y, f"<",color='white',fontsize=16,horizontalalignment='center',verticalalignment='center',
                         #             bbox=dict(facecolor=c , alpha=1, edgecolor=None, boxstyle='round,pad=0.08'))
         plt.tight_layout()
-        plt.show()
+        plt.show(block = False)
 
     #TODO make a button to do this as well?
     def set_viewer_to_neutral_zoom(self, viewer, reset_session = False):
@@ -3386,7 +3388,7 @@ class CosMxView(GView):
 
     def makeCosMxDock(self):
 
-        # Add transcript widget
+        # Add transcript widget #TODO make class
         transcript_group = QGroupBox("Display transcripts")
         transcript_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
         transcript_layout = QGridLayout(transcript_group)
@@ -3413,7 +3415,19 @@ class CosMxView(GView):
         transcript_layout.addWidget(transcript_color_combo,0,1)
         transcript_layout.addWidget(transcript_add_button,0,2)
         transcript_layout.addWidget(transcript_remove_button,1,0,1,3)
-                    
+        
+        # Cell mask settins
+        cell_mask_group = QGroupBox("Cell label preferences")
+        cell_mask_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+        cell_mask_layout = QVBoxLayout(cell_mask_group)
+        cell_mask_fill = QComboBox()
+        cell_mask_fill.addItems("Fill cells","Borders only")
+        mask_color_type = QComboBox()
+        mask_color_type.addItems(["Solid color", "by cell feature", "by cell RNA"])
+        mask_flat_color = ColorfulComboBox(None, rgbcd, "cyan", 8 )
+        
+        cell_mask_layout.addWidget()
+
         # FOV labels widget
         fov_label_group = QGroupBox("Label FOVs")
         fov_label_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
@@ -3430,6 +3444,7 @@ class CosMxView(GView):
         center_fov_combo.setStyleSheet("combobox-popup: 0;")
         center_fov_combo.setMaxVisibleItems(10)
         center_fov_button = QPushButton("Go to FOV")
+        self.session.widget_dictionary["center_fov"] = center_fov_button
         center_fov_button.released.connect(lambda: self.center_fov(int(center_fov_combo.currentText())))
         center_slide_button = QPushButton("Show full slide")
         center_slide_button.released.connect(self.center_slide)
@@ -3451,9 +3466,7 @@ class CosMxView(GView):
         cosmx_dock_layout.addWidget(navigation_group)
 
 
-
     ''' Overridden GView initializations'''
-
 
     def _add_bottom_bar_widgets(self):
         open_vs = QPushButton("Modify view settings")
@@ -3485,11 +3498,76 @@ class CosMxView(GView):
         self.viewer.window.add_dock_widget(self.channel_buttons + [absorption_widget, open_vs],area='bottom')
         # right_dock.adjustSize()
 
+    def make_selection_dock(self):
+        
+        filter_group = QGroupBox("Filter cells")
+        filter_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+        filter_layout = QGridLayout(filter_group)
+
+        plot_group = QGroupBox("Select from plot")
+        plot_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+        plot_umap_button = QPushButton("Plot UMAP")
+        plot_umap_button.released.connect(lambda: self.on_umap_plot())
+        plot_layout = QGridLayout(plot_group)
+        plot_layout.addWidget(plot_umap_button, 0,0)
+
+        load_group = QGroupBox("Load to gallery")
+        load_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+        load_layout = QGridLayout(load_group)
+
+        mask_group = QGroupBox("Add cell mask")
+        mask_group.setStyleSheet(open("data/docked_group_box_border_light.css").read())
+        mask_layout = QHBoxLayout(mask_group)
+        mask_combo = QComboBox()
+        mask_combo.addItems(['On button click', 'Auto'])
+        mask_button = QPushButton("Add to viewer")
+        mask_combo.currentIndexChanged.connect(lambda: mask_button.setEnabled(not mask_button.isEnabled()))
+
+        mask_button.released.connect(lambda: self.on_selection_add_mask())
+        mask_layout.addWidget(mask_combo, 0)
+        mask_layout.addWidget(mask_button, 1)
+        # load to gallery, highlight cells on mask
+        
+
+        # Construct dock group that holds everything and add specific buttons
+        self.selection_dock_group = QGroupBox()
+        self.selection_dock_group.setStyleSheet(open("data/docked_group_box_noborder.css").read())
+        selection_dock_layout = QVBoxLayout(self.selection_dock_group)
+        self.session.side_dock_groupboxes['filter_group'] = filter_group
+        self.session.side_dock_groupboxes['plot_group'] = plot_group
+        self.session.side_dock_groupboxes['load_group'] = load_group
+        self.session.side_dock_groupboxes['mask_group'] = mask_group
+        selection_dock_layout.addWidget(filter_group)
+        selection_dock_layout.addWidget(plot_group)
+        selection_dock_layout.addWidget(load_group)
+        selection_dock_layout.addWidget(mask_group)
+
+    def on_umap_plot(self):
+        self.interactive_umap()
+        # Anything else?
+
+    ''' Process show mask request '''
+    def on_selection_add_mask(self):
+        if self.session.mode not in ("Slide","Fov"):
+            self.viewer.status = "Must be in Slide or Fov mode to add mask to viewer"
+            return False
+        
+        try:
+            self.viewer.layers.remove(self.viewer.layers["Selected"])
+        except KeyError:
+            print("No Selected layer to remove")
+            pass
+
+        print("entering add_selection_labels")
+        self.add_selection_labels(layername = f"Selected", cm = "cyan", filled = False)
+        # toggle button
+        pass
 
     def _construct_right_dock(self):
 
         # Create add-on cosmx docks
         self.makeCosMxDock()
+        self.make_selection_dock()
 
 
         # Make sure user can scroll through tools if there are too many
@@ -3503,6 +3581,7 @@ class CosMxView(GView):
         # self.side_dock_group.layout().setSizeConstraint(QLayout.SetFixedSize)
         scroll_area.resize(self.side_dock_group.sizeHint())
         right_dock = self.viewer.window.add_dock_widget(scroll_area, name ="User tools",area="right", tabify = True)
+        self.viewer.window.add_dock_widget(self.selection_dock_group, name ="Selection",area="right", tabify = True)
         self.viewer.window.add_dock_widget(self.cosmx_dock_group, name ="CosMx",area="right", tabify = True)
         self.viewer.window.add_dock_widget(self.export_dock_group, name ="Export data",area="right", tabify = True)
         self.viewer.window.add_dock_widget(self.plots_dock_group, name ="Plotting",area="right", tabify = True)
@@ -3746,7 +3825,6 @@ class CosMxView(GView):
         x_offset = topleft[1]
         return [[(i[0] - y_offset) * self.px_per_mm, (i[1] - x_offset) * self.px_per_mm] for i in rect]
         
-
     def add_fov_labels(self,  tx_names = [], limits:tuple | None = None, cm = "inferno"):
         # topleft = (min(self.fov_offsets['Y_mm']), -max(self.fov_offsets['X_mm']))
         rects = [self.rect_for_fov(i) for i in self.fov_offsets['FOV']]
@@ -3856,13 +3934,13 @@ class CosMxView(GView):
     def add_cell_leiden(self, view:napari.Viewer, layername = "leiden",colname = "Selected",colvalues = [True], filled = True, fov = None):
         adata = self.adata
         leiden_color = {k:transform_color(v).ravel().tolist() for k,v in enumerate(adata.uns['leiden_colors'])}
-        cell_colors = {cid: leiden_color[l] for cid, l in zip(adata.obs.global_ID.tolist(), adata.obs.leiden.astype(int).tolist())}
+        cell_colors = {cid: leiden_color[l] for cid, l in zip(adata.obs.mask_id.tolist(), adata.obs.leiden.astype(int).tolist())}
         background =  {0:[0,0,0,0]}
         background.update(cell_colors)
         cell_colors = background
         if colname is not None:
             assert(colname in adata.obs.columns)
-            exclude = {cid: [0,0,0,0] for cid in adata.obs.loc[~adata.obs["Selected"].isin(colvalues), "global_ID"].tolist()}
+            exclude = {cid: [0,0,0,0] for cid in adata.obs.loc[~adata.obs["Selected"].isin(colvalues), "mask_id"].tolist()}
             cell_colors.update(exclude)
 
         metadata = zarr.open(self.data.imagepath, mode = 'r+',)["labels"].attrs
@@ -3881,14 +3959,14 @@ class CosMxView(GView):
     def add_cell_leiden2(self, view:napari.Viewer, layername = "leiden",colname = "Selected",colvalues = [True], filled = True, fov = None):
         adata = self.adata
         leiden_color = {k:transform_color(v).ravel().tolist() for k,v in enumerate(adata.uns['leiden_colors'])}
-        cell_colors = {cid: leiden_color[l] for cid, l in zip(adata.obs.global_ID.tolist(), adata.obs.leiden.astype(int).tolist())}
-        # cell_leiden = cell_colors = {cid: l for cid, l in zip(adata.obs.global_ID.tolist(), adata.obs.leiden.astype(int).tolist())}
+        cell_colors = {cid: leiden_color[l] for cid, l in zip(adata.obs.mask_id.tolist(), adata.obs.leiden.astype(int).tolist())}
+        # cell_leiden = cell_colors = {cid: l for cid, l in zip(adata.obs.mask_id.tolist(), adata.obs.leiden.astype(int).tolist())}
         background =  {0:[0,0,0,0]}
         background.update(cell_colors)
         cell_colors = background
         if colname is not None:
             assert(colname in adata.obs.columns)
-            exclude = {cid: [0,0,0,0] for cid in adata.obs.loc[~adata.obs["Selected"].isin(colvalues), "global_ID"].tolist()}
+            exclude = {cid: [0,0,0,0] for cid in adata.obs.loc[~adata.obs["Selected"].isin(colvalues), "mask_id"].tolist()}
             cell_colors.update(exclude)
 
         metadata = zarr.open(self.data.image_path, mode = 'r+',)["labels"].attrs
@@ -3941,14 +4019,14 @@ class CosMxView(GView):
 
         if fov is not None:
             im = self.slice_fov_dask(im, fov)
-            population = adata.obs.loc[(adata.obs[colname].isin(colvalues)) & (adata.obs['fov'] == str(fov)), "global_ID"].to_numpy() 
+            population = adata.obs.loc[(adata.obs[colname].isin(colvalues)) & (adata.obs['fov'] == str(fov)), "mask_id"].to_numpy() 
         else:
-            population = adata.obs.loc[adata.obs[colname].isin(colvalues), "global_ID"].to_numpy() 
+            population = adata.obs.loc[adata.obs[colname].isin(colvalues), "mask_id"].to_numpy() 
 
             leiden_color = {k:transform_color(v).ravel().tolist() for k,v in enumerate(adata.uns['leiden_colors'])}
         if colname is not None:
             assert colname in adata.obs.columns, f"Column {colname} not in adata"
-            cell_colors = {cid: leiden_color[l] for cid, l in zip(adata.obs.loc[adata.obs[colname].isin(colvalues), "global_ID"].tolist(), adata.obs.leiden.astype(int).tolist())}
+            cell_colors = {cid: leiden_color[l] for cid, l in zip(adata.obs.loc[adata.obs[colname].isin(colvalues), "mask_id"].tolist(), adata.obs.leiden.astype(int).tolist())}
         else:
             pass
         cell_colors = {cid: leiden_color[l] for cid, l in zip(population, adata.obs.leiden.astype(int).tolist())}
@@ -3961,36 +4039,32 @@ class CosMxView(GView):
         im = [x.map_blocks(lambda: _remove_bg_cells_and_fill(x, population, filled)) for x in im]
         return view.add_labels(im,name=layername, color = cell_colors, scale = (self.mm_per_px, self.mm_per_px), metadata=metadata)
 
-    def add_cell_metadata_labels(self, view:napari.Viewer,meta: pd.DataFrame,colname = "Selected",colvalues = [True], layername = "Custom", cm = "gray", filled = True, fov = None):
+    ''' Updated for viewer'''
+    def add_selection_labels(self, colname = "Selected", colvalues = [True], layername = "Selected", cm = "gray", filled = True, fov = None):
         metadata = zarr.open(self.data.image_path, mode = 'r+',)["labels"].attrs
         datasets = metadata["multiscales"][0]["datasets"]
-
-        def _filter_labels(labels, _population, _filled):
+    
+        if fov is not None:
+            im = self.slice_fov_dask(im, fov)
+            population = self.adata.obs.loc[(self.adata.obs[colname].isin(colvalues)) & (self.adata.obs['fov'] == str(fov)), "mask_id"].to_numpy() 
+        else:
+            population = self.adata.obs.loc[self.adata.obs[colname].isin(colvalues), "mask_id"].astype(np.uint32).to_numpy() 
+        
+        def _filter_labels(labels, _population = population, _filled = filled):
             labels[~np.isin(labels, _population)] = 0
             if _filled:
-                return rescale_intensity(labels, out_range = (0,(2**8)-1)).astype(np.uint8)
+                # return rescale_intensity(labels, out_range = (0,(2**8)-1)).astype(np.uint8)
+                return labels.astype(bool)
             else:
                 return find_boundaries(labels)
             
         im = [da.from_zarr(os.path.join(self.data.image_path,"labels"), component=d["path"]) for d in datasets]
-        # im = da.from_zarr(os.path.join(self.data.image_path,"labels"), 
-        #     component=datasets[0]["path"])
-        
-        # fov_im = slice_fov_dask(im,fov)
-        if fov is not None:
-            im = self.slice_fov_dask(im, fov)
-            population = meta.loc[(meta[colname].isin(colvalues)) & (meta['fov'] == str(fov)), "global_ID"].to_numpy() 
-        else:
-            population = meta.loc[meta[colname].isin(colvalues), "global_ID"].to_numpy() 
-        
-        im = [x.map_blocks(lambda x: _filter_labels(x, population, filled)) for x in im]
-        # cm = Colormap(['transparent', cm], controls = [0.0, 1.0])
-        # scaled = rescale_intensity(im, out_range = (0,(2**8)-1)).astype(np.uint8)
-        layer = view.add_image(im, name=layername, multiscale=True,
+        im = [x.map_blocks(_filter_labels) for x in im]
+        layer = self.viewer.add_image(im, name=layername,
             colormap=cm, 
             blending="additive",
             opacity = 0.5,
-            scale = (self.mm_per_px,self.mm_per_px),
+            scale = (self.session.image_scale, self.session.image_scale) if self.session.image_scale is not None else None,
             metadata=metadata)
         return layer
 
@@ -4037,34 +4111,6 @@ class CosMxView(GView):
 
         return layer
 
-    # def add_zarr_layer(self, view: napari.Viewer,name = 'U', layername = "DAPI", cm = "blue", fov = None):
-    #     if(name == "labels"):
-    #         return self.add_cell_labels(view,layername, cm,fov)
-    #     metadata = zarr.open(self.data.image_path, mode = 'r+',)[name].attrs
-    #     # track updates to contrast limits and colormap
-        
-
-    #     datasets = metadata["multiscales"][0]["datasets"]
-    #     im = [da.from_zarr(os.path.join(self.data.image_path,name), component=d["path"]) for d in datasets]
-        
-    #     if fov is not None:
-    #         im = self.slice_fov_dask(im, fov)
-
-    #     window = metadata['omero']['channels'][0]['window']
-    #     layer = view.add_image(im, name=layername, multiscale=True,
-    #         colormap=cm, blending="additive",
-    #         contrast_limits = (window['start'],window['end']),
-    #         scale = (self.mm_per_px,self.mm_per_px),
-    #         # translate=self._top_left_mm(), 
-    #         # rotate=self.rotate,
-    #         rgb=False,
-    #         metadata=metadata)
-    #     layer.contrast_limits_range = window['min'],window['max']
-    #     return layer
-
-    # def update_viewer(self, view, lparams, fov = None):
-        # layers = [self.add_zarr_layer(view, *args, fov = fov) for args in lparams]
-        # return layers
     
     ''' Transcript functions '''
 
@@ -4078,6 +4124,11 @@ class CosMxView(GView):
             cx = cell['fovX']
             cy = cell['fovY']
             cfov = cell['fov']
+            try:
+                int(cfov)
+            except ValueError:
+                import IPython
+                IPython.embed()
             cpts = allpts.loc[(allpts['fov'] == int(cfov)) &
                                 (allpts['x'] < cx+offset) & (allpts['x'] > cx-offset) &
                                 (allpts['y'] < cy+offset) & (allpts['y'] > cy-offset)
@@ -4232,8 +4283,9 @@ class CosMxView(GView):
         else:
             return return_layers
 
-    def interactive_umap(self, adata, figure_color = "leiden", alpha_for_nonselected = 0.3):
-        fig = sc.pl.umap(adata,color=figure_color,wspace=0.4,legend_loc = 'on data',legend_fontoutline = 2, size = 15,return_fig = True )
+    ''' Plot an interactive UMAP and save selected cells as boolean column in data '''
+    def interactive_umap(self, figure_color = "leiden", alpha_for_nonselected = 0.08):
+        fig = sc.pl.umap(self.adata,color=figure_color,wspace=0.4,legend_loc = 'on data',legend_fontoutline = 2, size = 15,return_fig = True )
         ax = fig.get_axes()[0]
 
         selector = SelectFromCollection(ax, ax.collections[0], alpha_other = alpha_for_nonselected)
@@ -4241,15 +4293,16 @@ class CosMxView(GView):
         def accept(event):
             if event.key == "enter":
                 print("Selection made.")
-                adata.obs["Selected"] =  False
-                adata.obs.iloc[selector.ind, adata.obs.columns.get_loc("Selected")] = True
+                self.adata.obs["Selected"] =  False
+                self.adata.obs.iloc[selector.ind, self.adata.obs.columns.get_loc("Selected")] = True
                 # selector.disconnect() # Not doing this allows for re-selection
                 ax.set_title(f"Selected {len(selector.ind)} cells.")
                 fig.canvas.draw()
         fig.canvas.mpl_connect("key_press_event", accept)
         ax.set_title("Press enter to accept selected points.")
-        plt.show()
+        plt.show(block = False)
 
+    ''' Plot an interactive UMAP and add cell masks to viewer'''
     def auto_interactive_umap(self, view: napari.Viewer, adata: ad.AnnData, fov = 1, figure_color = "leiden", labels_color = 'cyan', alpha_for_nonselected = 0.1, borders_only = False,psize = 15, method = 1):
         if isinstance(adata.obs.dtypes.loc[figure_color] , pd.CategoricalDtype):
             fig = sc.pl.umap(adata,color=figure_color,wspace=0.4,legend_loc = 'on data',legend_fontoutline = 2, size = psize,return_fig = True )
@@ -4281,14 +4334,13 @@ class CosMxView(GView):
                         view.layers.remove(view.layers["Custom"])
                     except KeyError:
                         pass
-                    self.add_cell_metadata_labels(view, adata.obs, cm = labels_color, fov = fov, filled = not borders_only)
+                    self.add_selection_labels(view, adata.obs, cm = labels_color, fov = fov, filled = not borders_only)
                 
                 ax.set_title(f"Selected {len(selector.ind)} cells.")
                 fig.canvas.draw()
         fig.canvas.mpl_connect("key_press_event", accept)
         ax.set_title("Press enter to accept selected points.")
-        plt.show()
-
+        plt.show(block = False)
 
 
 class XeniumView(GView):
